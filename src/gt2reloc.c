@@ -132,6 +132,15 @@ int main(int argc, char **argv)
   STDERR = fopen("CON", "w");
 #endif
 
+  // Default settings, as in the tracker (main() in goattrk2.c)
+  editorInfo.adparam = 0x0f00;
+  editorInfo.ntsc = 0;
+  editorInfo.multiplier = 1;
+  editorInfo.sidmodel = 1;
+  editorInfo.finevibrato = 1;
+  editorInfo.optimizepulse = 1;
+  editorInfo.optimizerealtime = 1;
+
   programname += sizeof "$VER:";
   // Open datafile
   io_openlinkeddatafile(datafile);
@@ -205,7 +214,7 @@ int main(int argc, char **argv)
         return 0;
 
         case 'A':
-        sscanf(&argv[c][2], "%x", &adparam);
+        sscanf(&argv[c][2], "%x", &editorInfo.adparam);
         break;
 
         case 'G':
@@ -217,29 +226,29 @@ int main(int argc, char **argv)
         break;
 
         case 'O':
-        sscanf(&argv[c][2], "%u", &optimizepulse);
+        sscanf(&argv[c][2], "%u", &editorInfo.optimizepulse);
         break;
 
         case 'R':
-        sscanf(&argv[c][2], "%u", &optimizerealtime);
+        sscanf(&argv[c][2], "%u", &editorInfo.optimizerealtime);
         break;
 
         case 'V':
-        sscanf(&argv[c][2], "%u", &finevibrato);
+        sscanf(&argv[c][2], "%u", &editorInfo.finevibrato);
         break;
 
         case 'S':
-        sscanf(&argv[c][2], "%u", &multiplier);
+        sscanf(&argv[c][2], "%u", &editorInfo.multiplier);
         break;
 
         // NTSC timing
         case 'N':
-        ntsc = 1;
+        editorInfo.ntsc = 1;
         customclockrate = 0;
         break;
         // PAL timing
         case 'P':
-        ntsc = 0;
+        editorInfo.ntsc = 0;
         customclockrate = 0;
         break;
         // custom clock rate
@@ -295,6 +304,7 @@ int main(int argc, char **argv)
             } else {
                 playerversion |= PLAYER_NOOPTIMIZATION;
             }
+        break;
         // 6: Full buffering
         case 'J':
             if (argv[c][2] == '1') {
@@ -325,17 +335,17 @@ int main(int argc, char **argv)
   }
 
   // Validate parameters
-  sidmodel &= 1;
-  adparam &= 0xffff;
+  editorInfo.sidmodel &= 1;
+  editorInfo.adparam &= 0xffff;
   zeropageadr &= 0xff;
   playeradr &= 0xff00;
   sidaddress &= 0xffff;
 
-  if (multiplier > 16) multiplier = 16;
-  // if ((finevibrato == 1) && (multiplier < 2)) usefinevib = 1;
-  // if (finevibrato > 1) usefinevib = 1;
-  if (optimizepulse > 1) optimizepulse = 1;
-  if (optimizerealtime > 1) optimizerealtime = 1;
+  if (editorInfo.multiplier > 16) editorInfo.multiplier = 16;
+  // if ((editorInfo.finevibrato == 1) && (editorInfo.multiplier < 2)) usefinevib = 1;
+  // if (editorInfo.finevibrato > 1) usefinevib = 1;
+  if (editorInfo.optimizepulse > 1) editorInfo.optimizepulse = 1;
+  if (editorInfo.optimizerealtime > 1) editorInfo.optimizerealtime = 1;
   if (customclockrate < 100) customclockrate = 0;
 
   // Calculate frequencytable if necessary

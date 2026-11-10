@@ -22,7 +22,8 @@
 #
 # Output:
 #   GoatTracker2.app next to this script. The command line tools (gt2reloc,
-#   ins2snd2, sngspli2, mod2sng, midi2sng) are inside GoatTracker2.app/Contents/MacOS.
+#   ins2snd2, sngspli2, mod2sng, midi2sng, sid2sng) are inside
+#   GoatTracker2.app/Contents/MacOS.
 #
 
 set -euo pipefail
@@ -40,7 +41,7 @@ BUILD="$ROOT/build-macos"
 DL="$BUILD/downloads"
 DEPS="$BUILD/deps"
 APP="$ROOT/GoatTracker2.app"
-TOOLS="goattrk2 gt2reloc ins2snd2 sngspli2 mod2sng midi2sng"
+TOOLS="goattrk2 gt2reloc ins2snd2 sngspli2 mod2sng midi2sng sid2sng"
 
 die()  { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -392,6 +393,16 @@ if [ "$can_run" = 1 ]; then
             "$APP/Contents/MacOS/gt2reloc" selftest.sng selftest.prg >selftest.log 2>&1) \
             && [ -s "$BUILD/selftest.prg" ]; then
         echo "Self-test passed (gt2reloc converted examples/everlasting.sng)."
+        # SID round trip: pack to .sid, then turn it back into a song
+        rm -f "$BUILD/selftest.sid" "$BUILD/selftest-back.sng"
+        if (cd "$BUILD" && "$APP/Contents/MacOS/gt2reloc" selftest.sng selftest.sid >>selftest.log 2>&1 \
+                && "$APP/Contents/MacOS/sid2sng" selftest.sid selftest-back.sng -exact >>selftest.log 2>&1) \
+                && [ -s "$BUILD/selftest-back.sng" ]; then
+            echo "Self-test passed (sid2sng converted the exported SID back into a song)."
+        else
+            cat "$BUILD/selftest.log" >&2 || true
+            die "self-test failed: sid2sng could not convert the exported SID back."
+        fi
     else
         cat "$BUILD/selftest.log" >&2 || true
         die "self-test failed: the bundled SDL libraries did not load or gt2reloc failed."

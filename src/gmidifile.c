@@ -10,6 +10,7 @@
 #include <string.h>
 #include "gcommon.h"
 #include "gmidifile.h"
+#include "gsngwrite.h"
 
 #define MIDI_MAXSIZE (16*1024*1024)
 #define DEFAULT_USPQN 500000      // Microseconds per quarter note (120 BPM)
@@ -275,11 +276,6 @@ static unsigned tickstorows(unsigned tick, unsigned ppq, int rowsperbeat)
   return (unsigned)(((unsigned long long)tick * rowsperbeat + ppq / 2) / ppq);
 }
 
-static void fwrite8(FILE *f, int value)
-{
-  fputc(value & 0xff, f);
-}
-
 int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *opt, char *report, int reportsize)
 {
   FILE *f;
@@ -301,6 +297,7 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
   int instrchn[16];
   unsigned char *grid[MAX_CHN] = {NULL, NULL, NULL};
   unsigned char *patterns = NULL;
+  SNGDATA *sng = NULL;
   int numpatterns = 0;
   unsigned char orderlist[MAX_CHN][MAX_SONGLEN];
   int songlen = 0;
@@ -719,28 +716,17 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
   }
 
   // Write the song
-  f = fopen(sngname, "wb");
-  if (!f)
+  sng = sngdata_alloc();
+  if (!sng)
   {
-    setreport(report, reportsize, "Could not write the song file");
+    setreport(report, reportsize, "Out of memory");
     goto done;
   }
   {
-    char name[MAX_STR];
-    unsigned char ltable[MAX_TABLES][MAX_TABLELEN];
-    unsigned char rtable[MAX_TABLES][MAX_TABLELEN];
-    int tablelen[MAX_TABLES];
     int others = 0;
 
-    memset(ltable, 0, sizeof ltable);
-    memset(rtable, 0, sizeof rtable);
-    memset(tablelen, 0, sizeof tablelen);
-
-    fwrite("GTS5", 4, 1, f);
-
     // Song name: the MIDI sequence name, or else the file name
-    memset(name, 0, sizeof name);
-    if (trackname[0]) strcpy(name, trackname);
+    if (trackname[0]) sngdata_settext(sng->songname, trackname);
     else
     {
       const char *base = midiname;
@@ -749,31 +735,28 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
       {
         if ((*s == '/') || (*s == '\\') || (*s == ':')) base = s + 1;
       }
-      for (c = 0; (base[c]) && (base[c] != '.') && (c < MAX_STR - 1); c++) name[c] = base[c];
+      for (c = 0; (base[c]) && (base[c] != '.') && (c < MAX_STR - 1); c++) sng->songname[c] = base[c];
     }
-    fwrite(name, MAX_STR, 1, f);
-    memset(name, 0, sizeof name);
-    fwrite(name, MAX_STR, 1, f);            // Author
-    memset(name, 0, sizeof name);
-    strcpy(name, copyright);
-    fwrite(name, MAX_STR, 1, f);
+    sngdata_settext(sng->copyrightname, copyright);
 
     // One subtune: the orderlists loop back to the start
-    fwrite8(f, 1);
+    sng->numsongs = 1;
     for (c = 0; c < MAX_CHN; c++)
     {
-      fwrite8(f, songlen + 1);
-      fwrite(orderlist[c], songlen, 1, f);
-      fwrite8(f, LOOPSONG);
-      fwrite8(f, 0);
+      sng->songlen[0][c] = songlen;
+      memcpy(sng->songorder[0][c], orderlist[c], songlen);
+      sng->songorder[0][c][songlen] = LOOPSONG;
+      sng->songorder[0][c][songlen + 1] = 0;
     }
 
     // Instruments
-    fwrite8(f, numinstr);
+    sng->numinstr = numinstr;
     for (c = 0; c < numinstr; c++)
     {
       int chn = instrchn[c];
       const PRESET *pr;
+      INSTR *in = &sng->instr[c + 1];
+      int *tablelen = sng->tablelen;
       int wptr, pptr = 0;
       char iname[MAX_INSTRNAMELEN + 1];
 
@@ -783,56 +766,48 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
 
       // Wavetable: the waveform (and a fixed note for drums), then stop
       wptr = tablelen[WTBL] + 1;
-      ltable[WTBL][tablelen[WTBL]] = pr->wave;
-      rtable[WTBL][tablelen[WTBL]] = pr->absnote ? pr->absnote : 0x00;
+      sng->ltable[WTBL][tablelen[WTBL]] = pr->wave;
+      sng->rtable[WTBL][tablelen[WTBL]] = pr->absnote ? pr->absnote : 0x00;
       tablelen[WTBL]++;
-      ltable[WTBL][tablelen[WTBL]] = 0xff;
-      rtable[WTBL][tablelen[WTBL]] = 0x00;
+      sng->ltable[WTBL][tablelen[WTBL]] = 0xff;
+      sng->rtable[WTBL][tablelen[WTBL]] = 0x00;
       tablelen[WTBL]++;
 
       // Pulsetable: set the pulse width, then stop
       if (pr->pulse)
       {
         pptr = tablelen[PTBL] + 1;
-        ltable[PTBL][tablelen[PTBL]] = 0x80 | ((pr->pulse >> 8) & 0x0f);
-        rtable[PTBL][tablelen[PTBL]] = pr->pulse & 0xff;
+        sng->ltable[PTBL][tablelen[PTBL]] = 0x80 | ((pr->pulse >> 8) & 0x0f);
+        sng->rtable[PTBL][tablelen[PTBL]] = pr->pulse & 0xff;
         tablelen[PTBL]++;
-        ltable[PTBL][tablelen[PTBL]] = 0xff;
-        rtable[PTBL][tablelen[PTBL]] = 0x00;
+        sng->ltable[PTBL][tablelen[PTBL]] = 0xff;
+        sng->rtable[PTBL][tablelen[PTBL]] = 0x00;
         tablelen[PTBL]++;
       }
 
-      fwrite8(f, pr->ad);
-      fwrite8(f, pr->sr);
-      fwrite8(f, wptr);
-      fwrite8(f, pptr);
-      fwrite8(f, 0);              // Filtertable
-      fwrite8(f, 0);              // Speedtable
-      fwrite8(f, 0);              // Vibrato delay
-      fwrite8(f, 2);              // Gateoff timer (hard restart)
-      fwrite8(f, 0x09);           // First frame waveform
+      in->ad = pr->ad;
+      in->sr = pr->sr;
+      in->ptr[WTBL] = wptr;
+      in->ptr[PTBL] = pptr;
+      in->ptr[FTBL] = 0;          // Filtertable
+      in->ptr[STBL] = 0;          // Speedtable
+      in->vibdelay = 0;           // Vibrato delay
+      in->gatetimer = 2;          // Gateoff timer (hard restart)
+      in->firstwave = 0x09;       // First frame waveform
       memset(iname, 0, sizeof iname);
       snprintf(iname, sizeof iname, "Ch%d %s", chn + 1, pr->name);
-      fwrite(iname, MAX_INSTRNAMELEN, 1, f);
-    }
-
-    // Tables
-    for (c = 0; c < MAX_TABLES; c++)
-    {
-      fwrite8(f, tablelen[c]);
-      fwrite(ltable[c], tablelen[c], 1, f);
-      fwrite(rtable[c], tablelen[c], 1, f);
+      memcpy(in->name, iname, MAX_INSTRNAMELEN);
     }
 
     // Patterns
-    fwrite8(f, numpatterns);
+    sng->numpatterns = numpatterns;
     for (c = 0; c < numpatterns; c++)
     {
-      fwrite8(f, patternlength + 1);
-      fwrite(&patterns[c*(patternlength+1)*4], (patternlength + 1) * 4, 1, f);
+      sng->pattlen[c] = patternlength;
+      memcpy(sng->pattern[c], &patterns[c*(patternlength+1)*4], patternlength * 4);
     }
   }
-  if (fclose(f))
+  if (!sngwrite(sngname, sng))
   {
     setreport(report, reportsize, "Could not write the song file");
     goto done;
@@ -846,6 +821,7 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
 
 done:
   for (c = 0; c < MAX_CHN; c++) free(grid[c]);
+  free(sng);
   free(patterns);
   free(placed);
   free(notes);

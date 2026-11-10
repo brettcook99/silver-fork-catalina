@@ -3,3 +3,4 @@ linux/
 *.o
 build-macos/
 GoatTracker2.app/
+src/tests/sid2sng/build/

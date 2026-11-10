@@ -5,6 +5,8 @@
 // drag & drop onto the window, files opened from the Finder and the command
 // line.
 
+#include "gsidimport.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,6 +16,8 @@ extern "C" {
 extern char currentsongpath[];
 // Name suggested when saving a song that has no file yet
 extern char suggestedsongname[];
+// Options of the SID import dialog
+extern SID2SNG_OPTIONS sidimportoptions;
 
 // Kind of file by its extension
 #define GTFILE_UNKNOWN 0
@@ -31,7 +35,10 @@ int gt_savesong(const char *path);
 int gt_loadinstrument(const char *path, int slot);
 int gt_saveinstrument(const char *path, int slot);
 int gt_importmidi(const char *path);
+// Shows the SID import dialog for the file
 int gt_importsid(const char *path);
+// Converts and loads a SID with the dialog's options
+int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt);
 int gt_importpatch(const char *path);
 // Opens any supported file by its type (a song replaces the current song)
 int gt_openfile(const char *path);

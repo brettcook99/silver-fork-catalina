@@ -19,6 +19,7 @@ enum
   GTCMD_MERGE,
   GTCMD_IMPORTMIDI,
   GTCMD_IMPORTSID,
+  GTCMD_IMPORTSIDNOW,     // Convert the SID file given as path (from the import dialog)
   GTCMD_IMPORTPATCH,      // chipsynth C64 .fermatax
   GTCMD_LOADINSTR,
   GTCMD_SAVEINSTR,

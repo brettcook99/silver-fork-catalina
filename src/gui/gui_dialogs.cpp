@@ -423,9 +423,113 @@ static void exportdialog(void)
   ImGui::EndPopup();
 }
 
+/*
+ * SID import
+ */
+
+static bool wantsidimport = false;
+static char sidimportpath[MAX_PATHNAME] = "";
+static SIDINFO sidimportinfo;
+static bool sidimportinfook = false;
+
+extern "C" void gui_opensidimport(const char *path)
+{
+  snprintf(sidimportpath, sizeof sidimportpath, "%s", path ? path : "");
+  sidimportinfook = sidinfo_read(sidimportpath, &sidimportinfo) != 0;
+  wantsidimport = true;
+}
+
+static void sidimportdialog(void)
+{
+  SID2SNG_OPTIONS *o = &sidimportoptions;
+  float labelw;
+
+  if (wantsidimport)
+  {
+    ImGui::OpenPopup("##sidimport");
+    wantsidimport = false;
+  }
+  if (!beginmodal("##sidimport", ImGui::GetFontSize() * 30.0f)) return;
+  labelw = ImGui::GetFontSize() * 8.5f;
+
+  title("Import SID file");
+  if (sidimportinfook)
+  {
+    const char *clocks[] = { "unknown", "PAL", "NTSC", "PAL / NTSC" };
+    const char *models[] = { "unknown", "6581", "8580", "6581 / 8580" };
+    ImGui::PushFont(fontbold, 0.0f);
+    ImGui::TextWrapped("%s", sidimportinfo.title[0] ? sidimportinfo.title : gt_basename(sidimportpath));
+    ImGui::PopFont();
+    body(sidimportinfo.author);
+    if (sidimportinfo.released[0]) body(sidimportinfo.released);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
+    ImGui::Text("%s v%d  |  %d subtune%s  |  %s  |  %s  |  $%04X-$%04X",
+      sidimportinfo.rsid ? "RSID" : "PSID", sidimportinfo.version, sidimportinfo.songs,
+      sidimportinfo.songs == 1 ? "" : "s", clocks[sidimportinfo.clock & 3], models[sidimportinfo.model & 3],
+      sidimportinfo.loadaddress, sidimportinfo.loadaddress + sidimportinfo.datasize - 1);
+    ImGui::PopStyleColor();
+  }
+  else body(gt_basename(sidimportpath));
+
+  sectiontitle("CONVERSION");
+  ImGui::RadioButton("Automatic", &o->mode, SID2SNG_AUTO);
+  if (ImGui::IsItemHovered()) tooltip("Exact for SIDs made with GoatTracker, otherwise approximate");
+  ImGui::SameLine();
+  ImGui::RadioButton("Exact (GoatTracker SIDs)", &o->mode, SID2SNG_EXACT);
+  if (ImGui::IsItemHovered()) tooltip("Turns a SID exported by GoatTracker back into its song: all subtunes, patterns, instruments and tables");
+  ImGui::SameLine();
+  ImGui::RadioButton("Approximate", &o->mode, SID2SNG_APPROX);
+  if (ImGui::IsItemHovered()) tooltip("Plays any SID on an emulated C64 and writes down its notes and sounds. A starting point for editing, not an exact copy");
+
+  if (o->mode != SID2SNG_EXACT)
+  {
+    int songs = sidimportinfook ? sidimportinfo.songs : 1;
+    body("For other SIDs (approximate):");
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Subtune");
+    ImGui::SameLine(labelw);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+    if (songs < 1) songs = 1;
+    if (o->subtune > songs) o->subtune = 0;
+    ImGui::SliderInt("##subtune", &o->subtune, 0, songs, o->subtune ? "%d" : "default");
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Length");
+    ImGui::SameLine(labelw);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+    ImGui::SliderInt("##seconds", &o->seconds, 10, 600, "%d seconds");
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Rhythm grid");
+    ImGui::SameLine(labelw);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+    ImGui::SliderInt("##rows", &o->rowsperbeat, 0, 8, o->rowsperbeat ? "%d rows per note" : "automatic");
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Pattern length");
+    ImGui::SameLine(labelw);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+    ImGui::SliderInt("##plen", &o->patternlength, 16, MAX_PATTROWS, "%d rows");
+  }
+
+  {
+    const char *labels[] = { "Import", "Cancel" };
+    int r = buttons(labels, 2, 1);
+    if (r == 0)
+    {
+      cmd_postfile(GTCMD_IMPORTSIDNOW, sidimportpath);
+      ImGui::CloseCurrentPopup();
+    }
+    if (r == 1) ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 void gui::drawdialogs(void)
 {
   exportdialog();
+  sidimportdialog();
   // One at a time: the first one wanted opens
   savedialog();
   quitdialog();

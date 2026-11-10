@@ -1265,6 +1265,10 @@ void runcommand(int cmd, const char *path)
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
+	case GTCMD_IMPORTSIDNOW:
+		if ((path) && (path[0])) gt_importsid_run(path, &sidimportoptions);
+		break;
+
 	case GTCMD_IMPORTPATCH:
 		if (filedialog_open("Import a chipsynth C64 patch into the current instrument", "fermatax", newpath, MAX_PATHNAME))
 			gt_importpatch(newpath);

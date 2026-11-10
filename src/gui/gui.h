@@ -47,6 +47,9 @@ int gui_asksavechanges(int cmd, const char *path);
 void gui_savefinished(int ok);
 // Export (pack, relocate & save SID/PRG/BIN) dialog
 void gui_openexport(void);
+// SID import dialog: shows the file's info and the conversion options
+void gui_opensidimport(const char *path);
+
 // Information / error box
 void gui_alert(const char *title, const char *text);
 

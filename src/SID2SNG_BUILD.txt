@@ -1,0 +1,131 @@
+SID import (.sid -> .sng): files, build, tests
+=============================================
+
+Files (all plain C, no UI, depend only on gcommon.h + each other)
+-----------------------------------------------------------------
+
+gsngwrite.c/.h   GTS5 .sng writer (SNGDATA struct + sngwrite()). Used by the
+                 MIDI import (gmidifile.c) and the SID import.
+cpu6502.c/.h     6502 emulation, ported from SIDDump by Lasse Oorni et al.
+                 (BSD license, kept in cpu6502.c). Reentrant (CPU6502 struct).
+gsidimport.c/.h  The SID import: sidinfo_read(), sid2sng(), sid2sng_defaults().
+sid2sng.c        Command line tool (like midi2sng).
+tests/sid2sng/   Round trip test: packer harness built from the unmodified
+                 greloc.c (no SDL), scripts, .sng dump/compare tools.
+
+gmidifile.c now writes through gsngwrite.c (same output byte for byte), so
+everything that links gmidifile.o also needs gsngwrite.o.
+
+
+API (gsidimport.h)
+------------------
+
+  void sid2sng_defaults(SID2SNG_OPTIONS *opt);
+  int sidinfo_read(const char *sidpath, SIDINFO *info);
+  int sid2sng(const char *sidpath, const char *sngpath,
+              const SID2SNG_OPTIONS *opt, char *report, int reportsize);
+
+SID2SNG_OPTIONS: mode (SID2SNG_AUTO/EXACT/APPROX), subtune (0 = start song),
+seconds (180), rowsperbeat (0 = auto), tempo (0 = auto), patternlength (64).
+SIDINFO: title, author, released, rsid, version, songs, startsong, clock
+(0 unknown/1 PAL/2 NTSC/3 both), model (0/1 6581/2 8580/3 both), load/init/
+play address, data size, speed flags.
+
+sid2sng() returns 1/0; report gets e.g. "Exact: GoatTracker 2 song, 4
+subtunes, 41 patterns, 13 instruments" or "Approximate: subtune 1, 2088
+notes, 40 instruments, tempo 6, 35 patterns, ..." or the error. Things the
+user has to set in the editor are in the report: speed multiplier ("2x
+speed (set the speed multiplier)"), NTSC, a non-default hardrestart ADSR.
+After a successful sid2sng() load the .sng with loadsong().
+
+The importer allocates its big buffers (SNGDATA ~140K, CPU6502 64K, the
+register recording up to a few MB) on the heap and frees them; it keeps no
+state between calls except one static double (the clock for pitch math), so
+don't call it from two threads at once.
+
+
+Building
+--------
+
+gcc / clang (Linux, macOS, MinGW), in src/src:
+
+  cc -O2 -o sid2sng sid2sng.c gsidimport.c gsngwrite.c cpu6502.c -lm
+  cc -O2 -o midi2sng midi2sng.c gmidifile.c gsngwrite.c
+
+MSVC (Developer Command Prompt), in src/src:
+
+  cl /nologo /O2 /D_CRT_SECURE_NO_WARNINGS /Fesid2sng.exe sid2sng.c gsidimport.c gsngwrite.c cpu6502.c
+  cl /nologo /O2 /D_CRT_SECURE_NO_WARNINGS /Femidi2sng.exe midi2sng.c gmidifile.c gsngwrite.c
+
+(gsidimport.c uses <math.h>: link with -lm where that is separate.)
+
+Lines for makefile.common:
+
+  - add to EXE:
+        $(PREFIX)sid2sng$(SUFFIX)
+  - goattrk2 target: add  gsidimport.o gsngwrite.o cpu6502.o  (next to
+    gmidifile.o; gsngwrite.o is needed by gmidifile.o now)
+  - midi2sng target becomes:
+        $(PREFIX)midi2sng$(SUFFIX): midi2sng.o gmidifile.o gsngwrite.o
+        	$(CC) -o $@ $^
+        	strip $@
+  - new target:
+        $(PREFIX)sid2sng$(SUFFIX): sid2sng.o gsidimport.o gsngwrite.o cpu6502.o
+        	$(CC) -o $@ $^ -lm
+        	strip $@
+
+(goattrk2 links with $(CXX) and libm already comes with it; add -lm to
+LIBS if a platform needs it.)
+
+
+Tests
+-----
+
+  sh tests/sid2sng/build.sh            # relocharness + sid2sng into tests/sid2sng/build
+  sh tests/sid2sng/roundtrip.sh        # needs python3 (PY=python to change)
+
+roundtrip.sh packs every examples/*.sng with 33 sets of packer options
+(buffered, ZP ghostregs, sound FX, volume, author info, no optimization, full
+buffering, multispeed 0/2/3/4x, NTSC, alternative player (-AF000), pulse/
+realtime optimization off, other player/zeropage/SID addresses...), imports
+each SID with sid2sng -exact, packs the result again with the same options
+and compares the two SIDs byte for byte. For 5 option sets it also compares
+the imported .sng with the original structurally (tests/sid2sng/sngcmp.py:
+orderlists, every pattern row, instruments, wave/pulse/filter/speed table
+programs, with the packer's renumbering mapped out).
+
+Why a harness and not gt2reloc: gt2reloc links bme/resid (SDL). Also, in
+this tree gt2reloc.c parses its options into globals (multiplier, adparam,
+ntsc, optimizepulse...) that greloc.c doesn't read any more (it reads
+editorInfo), so the real gt2reloc packs with those at 0 (25Hz speed code,
+hardrestart ADSR $0000); and its -I option falls through into -J. The
+harness (tests/sid2sng/harness.c) sets editorInfo from the options.
+
+Results on Windows with MSVC 19.44 (VS 2022 Build Tools), 2026-11-10:
+  - roundtrip: 14 examples x 30+ option sets, all byte-identical repacks;
+    all structural compares the same
+  - midi2sng before/after the writer move: same .sng bytes and report for
+    7 generated MIDI files x 4 option sets
+  - clang (clang-tidy front end) -std=gnu99 -Wall -Wextra: no warnings in
+    gsidimport.c gsngwrite.c cpu6502.c sid2sng.c gmidifile.c midi2sng.c
+  - gcc wasn't available here: build.sh (cc) isn't run yet on this machine
+
+What EXACT can't give back (the packer drops it): instrument names, unused
+patterns/instruments/table rows, instrument/pattern/table numbering
+(instruments come hardrestart / no-hardrestart / legato ordered), repeated
+instrument numbers in a pattern, R0 (repeat 16) orderlist commands, set-
+mastervolume timing marks (without author info), the low nybble of filter
+"set" rows, wavetable silent waveform $E0 without wave delays (becomes $00:
+the same in the player). The editor-only settings (speed multiplier, NTSC,
+hardrestart ADSR) come in the report. A tempo other than the default comes
+back as instrument $3F's AD (the tracker's "tempo instrument" convention).
+
+APPROX smoke test (sid2sng -approx on the 14 packed examples and
+examples/sid/*.sid): all convert in ~0.1-0.2 s, all results pack without
+errors. Quality, measured as notes (voice, pitch, onset within half a row)
+of the original that the approx song played back has: 95-100% for
+dojo, transylvanian, tempo2test, wavecmdtest, consultant, everlasting;
+~80-90% for cabrinigreen, ghosttrackers, unleash, Rambo, Ultima IV;
+50-75% for sixpack, Beyond, hyperspace, funktest, sanction (funk tempo,
+channel tempos and lots of slides, which a fixed tempo grid & instrument
+programs only approximate).

@@ -10,7 +10,8 @@ EXE=	$(PREFIX)goattrk2$(SUFFIX) \
 	$(PREFIX)ins2snd2$(SUFFIX) \
 	$(PREFIX)sngspli2$(SUFFIX) \
 	$(PREFIX)mod2sng$(SUFFIX) \
-	$(PREFIX)midi2sng$(SUFFIX)
+	$(PREFIX)midi2sng$(SUFFIX) \
+	$(PREFIX)sid2sng$(SUFFIX)
 
 all: $(EXE)
 
@@ -38,7 +39,7 @@ asm/pc.o asm/vec.o
 
 BMEOBJ= bme/bme_snd.o bme/bme_win.o bme/bme_io.o bme/bme_end.o bme/bme.o
 
-GOATTRK2OBJ= goattrk2.o greloc.o gfileio.o gmidifile.o $(COREOBJ) $(MACOBJ) $(GUIOBJ) $(IMGUIOBJ) \
+GOATTRK2OBJ= goattrk2.o greloc.o gfileio.o gmidifile.o gsngwrite.o gsidimport.o cpu6502.o $(COREOBJ) $(MACOBJ) $(GUIOBJ) $(IMGUIOBJ) \
 $(RESIDOBJ) $(ASMOBJ) $(BMEOBJ)
 
 GT2RELOCOBJ= gt2reloc.o gt2stubs.o ghelp.o $(COREOBJ) $(RESIDOBJ) $(ASMOBJ) $(BMEOBJ)
@@ -57,8 +58,12 @@ $(PREFIX)mod2sng$(SUFFIX): mod2sng.o bme/bme_end.o
 	$(CC) -o $@ $^
 	strip $@
 
-$(PREFIX)midi2sng$(SUFFIX): midi2sng.o gmidifile.o
+$(PREFIX)midi2sng$(SUFFIX): midi2sng.o gmidifile.o gsngwrite.o
 	$(CC) -o $@ $^
+	strip $@
+
+$(PREFIX)sid2sng$(SUFFIX): sid2sng.o gsidimport.o gsngwrite.o cpu6502.o
+	$(CC) -o $@ $^ -lm
 	strip $@
 
 $(PREFIX)ins2snd2$(SUFFIX): ins2snd2.o bme/bme_end.o

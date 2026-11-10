@@ -8,15 +8,14 @@
 #include "goattrk2.h"
 #include "gui/gui.h"
 #include "gmacfile.h"
-#ifdef HAVE_SIDIMPORT
-#include "gsidimport.h"
-#endif
 #ifdef HAVE_FERMATAX
 #include "gfermatax.h"
 #endif
 
 char currentsongpath[MAX_PATHNAME] = "";
 char suggestedsongname[MAX_PATHNAME] = "";
+SID2SNG_OPTIONS sidimportoptions;
+static int sidimportoptionsset = 0;
 
 /*
  * Path helpers
@@ -339,18 +338,34 @@ int gt_importmidi(const char *path)
   return 1;
 }
 
+// Opens the SID import dialog (the conversion runs when it is confirmed)
 int gt_importsid(const char *path)
 {
-#ifdef HAVE_SIDIMPORT
+  SIDINFO info;
+
+  if (!sidinfo_read(path, &info))
+  {
+    gui_alert("Not a SID file", path);
+    return 0;
+  }
+  if (!sidimportoptionsset)
+  {
+    sid2sng_defaults(&sidimportoptions);
+    sidimportoptionsset = 1;
+  }
+  gui_opensidimport(path);
+  return 1;
+}
+
+int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt)
+{
   char temppath[MAX_PATHNAME];
-  char report[256];
-  SID2SNG_OPTIONS opt;
+  char report[1024];
 
   stopsong();
   tempfilename("goattrk2-sid.sng", temppath, MAX_PATHNAME);
-  sid2sng_defaults(&opt);
   report[0] = 0;
-  if (!sid2sng(path, temppath, &opt, report, sizeof report))
+  if (!sid2sng(path, temppath, opt, report, sizeof report))
   {
     gui_alert("SID import failed", report);
     return 0;
@@ -360,13 +375,9 @@ int gt_importsid(const char *path)
     gui_alert("SID import failed", "Could not load the converted song");
     return 0;
   }
-  gui_message("SID file imported: %s", report);
+  gui_alert("SID file imported", report);
+  gui_message("Imported %s", gt_basename(path));
   return 1;
-#else
-  gui_alert("SID import is not available", "This build of GoatTracker does not include the SID importer.");
-  (void)path;
-  return 0;
-#endif
 }
 
 int gt_importpatch(const char *path)
