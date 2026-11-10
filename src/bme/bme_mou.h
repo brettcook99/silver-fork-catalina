@@ -5,3 +5,4 @@ void mou_uninit(void);
 void mou_getpos(unsigned *x, unsigned *y);
 void mou_getmove(int *dx, int *dy);
 unsigned mou_getbuttons(void);
+int mou_getwheel(void);

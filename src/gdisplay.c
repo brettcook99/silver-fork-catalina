@@ -71,7 +71,7 @@ void printstatus(void)
   if (!menu)
   {
     if (!strlen(loadedsongfilename))
-      sprintf(textbuffer, "%s - %s", programname, patchname);
+      sprintf(textbuffer, "%s", programname);
     else
       sprintf(textbuffer, "%s - %s", programname, loadedsongfilename);
     textbuffer[49] = 0;

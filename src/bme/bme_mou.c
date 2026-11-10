@@ -19,10 +19,12 @@ void mou_uninit(void);
 void mou_getpos(unsigned *x, unsigned *y);
 void mou_getmove(int *dx, int *dy);
 unsigned mou_getbuttons(void);
+int mou_getwheel(void);
 
 void mou_init(void)
 {
     win_mousebuttons = 0;
+    win_mousewheel = 0;
 }
 
 void mou_uninit(void)
@@ -57,3 +59,11 @@ unsigned mou_getbuttons(void)
     return win_mousebuttons;
 }
 
+// Returns the mouse wheel steps since the last call (negative = up,
+// positive = down) and clears them
+int mou_getwheel(void)
+{
+    int steps = win_mousewheel;
+    win_mousewheel = 0;
+    return steps;
+}

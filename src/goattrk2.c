@@ -1,5 +1,5 @@
 //
-// GOATTRACKER v2.76
+// GOATTRACKER v2.82
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -83,7 +83,6 @@ char packedpath[MAX_PATHNAME];
 
 extern char *notename[];
 char *programname = PROGRAMNAME;
-char *patchname = PATCHNAME;
 char specialnotenames[186];
 char scalatuningfilepath[MAX_PATHNAME];
 char tuningname[64];
@@ -695,6 +694,9 @@ void docommand(void)
 	// Menu bar & CMD key commands
 	if (menucommands()) return;
 
+	// Numpad play/stop & pattern row jumps
+	if (numpadcommands()) return;
+
 	// "GUI" operation :)
 	mousecommands();
 
@@ -794,6 +796,34 @@ int menucommands(void)
 	return 0;
 }
 
+// Numpad 0 = play from the start of the pattern / stop (SHIFT: play the
+// other follow way, like SHIFT+F1-F3). Numpad 1-7 = go to pattern row 8, 16,
+// 24, 32, 40, 48 or 56 in the pattern editor. Not in the songname editor, and
+// not with CTRL/CMD (CTRL/CMD + numpad 0 is the default text size).
+// Returns nonzero if nothing else is to be done for this keypress
+int numpadcommands(void)
+{
+	if ((editorInfo.editmode == EDIT_NAMES) || (ctrlpressed) || (metapressed) || (altpressed))
+		return 0;
+
+	if (rawkey == KEY_KP0)
+	{
+		playstoppattern(followmode ^ shiftonlypressed);
+		key = 0;
+		rawkey = 0;
+		return 1;
+	}
+
+	if ((rawkey >= KEY_KP1) && (rawkey <= KEY_KP7) && (editorInfo.editmode == EDIT_PATTERN))
+	{
+		patternjump((rawkey - KEY_KP0) * 8);
+		key = 0;
+		rawkey = 0;
+		return 1;
+	}
+	return 0;
+}
+
 void midicommands(void)
 {
 	// Last note played from the MIDI keyboard, and the channel it plays on
@@ -822,6 +852,10 @@ void midicommands(void)
 void mousecommands(void)
 {
 	int c;
+
+	// Mouse wheel over the patterns scrolls the pattern editor
+	if ((mousewheel) && (mousey >= 2) && (mousey <= 2 + VISIBLEPATTROWS + 1) && (mousex < MAX_CHN * 15))
+		patternscroll(mousewheel);
 
 	if (!mouseb) return;
 

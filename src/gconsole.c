@@ -34,6 +34,7 @@ int midinoteoff = 0;
 int menucommand = 0;
 int mouseb = 0;
 int prevmouseb = 0;
+int mousewheel = 0;
 unsigned mousex = 0;
 unsigned mousey = 0;
 unsigned mousepixelx = 0;
@@ -732,6 +733,7 @@ void getkey(void)
   // margins around the grid go to the nearest edge character
   mou_getpos(&mousepixelx, &mousepixely);
   mouseb = mou_getbuttons();
+  mousewheel = mou_getwheel();
   mx = (int)mousepixelx - gridx;
   my = (int)mousepixely - gridy;
   mx = (mx < 0) ? 0 : mx / cellw;

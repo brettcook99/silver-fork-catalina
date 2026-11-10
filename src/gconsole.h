@@ -36,6 +36,7 @@ extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shif
 extern int midinoteon, midinoteoff;
 extern int menucommand;
 extern int mouseb, prevmouseb;
+extern int mousewheel;
 extern int mouseheld;
 extern int mousex, mousey;
 extern unsigned bigwindow;

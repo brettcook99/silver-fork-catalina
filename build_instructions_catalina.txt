@@ -1,5 +1,5 @@
-Building GoatTracker 2 (Silver Fork) on macOS 10.15 Catalina
-============================================================
+Building GoatTracker 2 on macOS 10.15 Catalina
+==============================================
 
 Why the regular instructions don't work on Catalina
 ---------------------------------------------------

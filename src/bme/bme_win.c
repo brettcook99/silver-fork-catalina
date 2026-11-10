@@ -45,6 +45,7 @@ unsigned win_mouseypos = 0;
 unsigned win_mousexrel = 0;
 unsigned win_mouseyrel = 0;
 unsigned win_mousebuttons = 0;
+int win_mousewheel = 0;
 int win_mousemode = MOUSE_FULLSCREEN_HIDDEN;
 unsigned char win_keystate[MAX_KEYS] = {0};
 
@@ -170,6 +171,15 @@ void win_checkmessages(void)
 
                 case SDL_BUTTON_RIGHT:
                 win_mousebuttons |= MOUSEB_RIGHT;
+                break;
+
+                // Wheel steps: negative = up, positive = down
+                case SDL_BUTTON_WHEELUP:
+                win_mousewheel--;
+                break;
+
+                case SDL_BUTTON_WHEELDOWN:
+                win_mousewheel++;
                 break;
             }
             break;

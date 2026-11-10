@@ -79,7 +79,6 @@ char packedpath[MAX_PATHNAME];
 char packedsongname[MAX_PATHNAME];
 
 char *programname = PROGRAMNAME;
-char *patchname = PATCHNAME;
 
 char textbuffer[MAX_PATHNAME];
 

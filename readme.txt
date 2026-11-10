@@ -1,4 +1,4 @@
-GoatTracker v2.76
+GoatTracker v2.82
 -----------------
 
 Editor by Lasse Öörni (loorni@gmail.com)

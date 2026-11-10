@@ -2,7 +2,7 @@
 #
 # build_catalina.sh
 #
-# Builds GoatTracker 2 (Silver Fork) as a self-contained GoatTracker2.app that
+# Builds GoatTracker 2 as a self-contained GoatTracker2.app that
 # runs on macOS 10.15 Catalina and later. Homebrew and MacPorts are NOT needed:
 # the script downloads the official SDL2 framework and the sdl12-compat source,
 # builds sdl12-compat, compiles GoatTracker and puts everything into the app.
@@ -262,9 +262,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.76 Silver Fork 1.1</string>
+    <string>2.82</string>
     <key>CFBundleVersion</key>
-    <string>2.76</string>
+    <string>2.82</string>
     <key>LSMinimumSystemVersion</key>
     <string>$MACOS_MIN</string>
     <key>NSHighResolutionCapable</key>

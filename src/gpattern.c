@@ -1318,6 +1318,12 @@ void joinpattern(void)
 // editor follows the playback
 void playfromcursor(int follow)
 {
+  playfromrow(editorInfo.eppos, follow);
+}
+
+// Starts playing from a row of the patterns in the pattern editor
+void playfromrow(int row, int follow)
+{
   if (lastsonginit != PLAY_PATTERN)
   {
     if (editorInfo.eseditpos != editorUndoInfo.editorInfo[editorInfo.eschn].espos)
@@ -1330,9 +1336,9 @@ void playfromcursor(int follow)
         if (editorUndoInfo.editorInfo[c].esend <= editorUndoInfo.editorInfo[c].espos) editorUndoInfo.editorInfo[c].esend = 0;
       }
     }
-    initsongpos(editorInfo.esnum, PLAY_POS, editorInfo.eppos);
+    initsongpos(editorInfo.esnum, PLAY_POS, row);
   }
-  else initsongpos(editorInfo.esnum, PLAY_PATTERN, editorInfo.eppos);
+  else initsongpos(editorInfo.esnum, PLAY_PATTERN, row);
   followplay = follow;
 }
 
@@ -1343,4 +1349,42 @@ void playstop(void)
     stopsong();
   else
     playfromcursor(followmode);
+}
+
+// Starts playing from the start of the patterns in the pattern editor, or
+// stops if playing
+void playstoppattern(int follow)
+{
+  if (isplaying())
+    stopsong();
+  else
+    playfromrow(0, follow);
+}
+
+// Moves the pattern editor cursor to a row (limited to the pattern length).
+// While playing with follow on, the playback jumps to the row as well
+void patternjump(int row)
+{
+  int len = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+
+  if (row > len) row = len;
+  if (row < 0) row = 0;
+  editorInfo.eppos = row;
+  editorInfo.epview = editorInfo.eppos-VISIBLEPATTROWS/2;
+
+  if ((isplaying()) && (followplay))
+    playfromrow(row, 1);
+}
+
+// Scrolls the pattern editor by mouse wheel steps (negative = up). Stops at
+// the first and last row instead of wrapping around
+void patternscroll(int steps)
+{
+  int len = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+  int row = editorInfo.eppos + steps * WHEELSCROLLROWS;
+
+  if (row > len) row = len;
+  if (row < 0) row = 0;
+  editorInfo.eppos = row;
+  editorInfo.epview = editorInfo.eppos-VISIBLEPATTROWS/2;
 }
