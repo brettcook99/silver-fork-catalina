@@ -53,6 +53,7 @@ The 100x37 text screen has been replaced by a modern interface in the style of a
 - Text size: CMD + = / - / 0. Full screen: CTRL+CMD+F or ALT+ENTER.
 - Help (F12, CMD+?) is a searchable window.
 - **SID import**: File > Import > SID File (CMD+SHIFT+I), or drop / double-click a .sid file. A dialog shows the tune's title, author, subtunes and chip. SIDs exported by GoatTracker are turned back into their song exactly (all subtunes, patterns, instruments and tables; only instrument names and unused data are lost). Any other SID is played on an emulated C64 and its notes and sounds are written into a new song: a starting point for editing, not an exact copy. The command line tool `sid2sng` does the same (`sid2sng tune.sid tune.sng [-exact|-approx] [-sN subtune] [-tSECONDS]`).
+- **chipsynth C64 presets**: File > Import > chipsynth C64 Patch, or drop / double-click a .fermatax file. Each oscillator that makes a sound becomes an instrument (the first in the current slot, the others in the next empty ones): ADSR, waveform with sync and ring, coarse tune (wavetable), pulse width (pulsetable) and the filter type, resonance and cutoff when the oscillator goes through the filter (filtertable). Step sequencers, modulators, effects and fine tune have no GoatTracker equivalent and are left out; a report says what was skipped. CMD+Z undoes the import.
 
 Earlier changes in this fork:
 

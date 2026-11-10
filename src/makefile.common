@@ -39,7 +39,7 @@ asm/pc.o asm/vec.o
 
 BMEOBJ= bme/bme_snd.o bme/bme_win.o bme/bme_io.o bme/bme_end.o bme/bme.o
 
-GOATTRK2OBJ= goattrk2.o greloc.o gfileio.o gmidifile.o gsngwrite.o gsidimport.o cpu6502.o $(COREOBJ) $(MACOBJ) $(GUIOBJ) $(IMGUIOBJ) \
+GOATTRK2OBJ= goattrk2.o greloc.o gfileio.o gmidifile.o gsngwrite.o gsidimport.o cpu6502.o gfermatax.o $(COREOBJ) $(MACOBJ) $(GUIOBJ) $(IMGUIOBJ) \
 $(RESIDOBJ) $(ASMOBJ) $(BMEOBJ)
 
 GT2RELOCOBJ= gt2reloc.o gt2stubs.o ghelp.o $(COREOBJ) $(RESIDOBJ) $(ASMOBJ) $(BMEOBJ)

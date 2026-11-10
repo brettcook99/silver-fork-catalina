@@ -8,9 +8,7 @@
 #include "goattrk2.h"
 #include "gui/gui.h"
 #include "gmacfile.h"
-#ifdef HAVE_FERMATAX
 #include "gfermatax.h"
-#endif
 
 char currentsongpath[MAX_PATHNAME] = "";
 char suggestedsongname[MAX_PATHNAME] = "";
@@ -382,27 +380,37 @@ int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt)
 
 int gt_importpatch(const char *path)
 {
-#ifdef HAVE_FERMATAX
-  char report[256];
+  char report[600];
   int slot = editorInfo.einum;
+  int made;
+  int t;
+  GTUNDO_OBJECT *undo;
 
   if ((slot < 1) || (slot >= MAX_INSTR)) slot = 1;
   report[0] = 0;
-  if (!fermatax_import(path, slot, report, sizeof report))
+
+  // Undoable: the instruments and the tables may change
+  undo = undoCreateEditorInfo();
+  for (t = 1; t < MAX_INSTR; t++)
+    undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, t, UNDO_AREA_DIRTY_CHECK);
+  for (t = 0; t < MAX_TABLES; t++)
+  {
+    undoAreaSetCheckForChange(UNDO_AREA_TABLES + t, 0, UNDO_AREA_DIRTY_CHECK);
+    undoAreaSetCheckForChange(UNDO_AREA_TABLES + t, 1, UNDO_AREA_DIRTY_CHECK);
+  }
+  made = fermatax_import(path, slot, report, sizeof report);
+  if (undoValidateUndoAreas(undo) == 0) undoFreeUndoObject(undo);
+
+  if (!made)
   {
     gui_alert("chipsynth patch import failed", report);
     return 0;
   }
   editorInfo.einum = slot;
   gui_addrecentfile(path);
-  gui_message("Imported %s into instrument %02X. %s", gt_basename(path), slot, report);
+  gui_alert("chipsynth patch imported", report);
+  gui_message("Imported %s", gt_basename(path));
   return 1;
-#else
-  gui_alert("chipsynth patch import is not available yet",
-    "Importing chipsynth C64 .fermatax presets will be added once sample files are available.");
-  (void)path;
-  return 0;
-#endif
 }
 
 int gt_openfile(const char *path)
