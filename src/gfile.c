@@ -408,14 +408,13 @@ int fileselector(char *name, char *path, char *filter, char *title, int filemode
     if (filepos - fileview >= VISIBLEFILES) fileview = filepos - VISIBLEFILES + 1;
 
     // Refresh fileselector display
-    if (isplaying()) printstatus();
     for (c = 0; c < VISIBLEFILES+7; c++)
     {
-      printblank(50-(MAX_FILENAME+10)/2, 3+c, MAX_FILENAME+10);
+      printblank(50-(FS_BOXWIDTH+10)/2, 3+c, FS_BOXWIDTH+10);
     }
-    drawbox(50-(MAX_FILENAME+10)/2, 3, 15, MAX_FILENAME+10, VISIBLEFILES+7);
-    printblankc(50-(MAX_FILENAME+10)/2+1, 4, 15+16,MAX_FILENAME+8);
-    printtext(50-(MAX_FILENAME+10)/2+1, 4, 15+16, title);
+    drawbox(50-(FS_BOXWIDTH+10)/2, 3, 15, FS_BOXWIDTH+10, VISIBLEFILES+7);
+    printblankc(50-(FS_BOXWIDTH+10)/2+1, 4, 15+16,FS_BOXWIDTH+8);
+    printtext(50-(FS_BOXWIDTH+10)/2+1, 4, 15+16, title);
 
     for (c = 0; c < VISIBLEFILES; c++)
     {
@@ -424,11 +423,11 @@ int fileselector(char *name, char *path, char *filter, char *title, int filemode
         switch (direntry[fileview+c].attribute)
         {
           case 0:
-          sprintf(textbuffer, "%-60s        ", direntry[fileview+c].name);
+          snprintf(textbuffer, MAX_PATHNAME, "%-60s        ", direntry[fileview+c].name);
           break;
 
           case 1:
-          sprintf(textbuffer, "%-60s   <DIR>", direntry[fileview+c].name);
+          snprintf(textbuffer, MAX_PATHNAME, "%-60s   <DIR>", direntry[fileview+c].name);
           break;
 
           case 2:
@@ -443,33 +442,33 @@ int fileselector(char *name, char *path, char *filter, char *title, int filemode
       color = CNORMAL;
       if ((fileview+c) == filepos) color = CEDIT;
       textbuffer[68] = 0;
-      printtext(50-(MAX_FILENAME+10)/2+1, 5+c, color, textbuffer);
-      if ((!filemode) && ((fileview+c) == filepos)) printbg(50-(MAX_FILENAME+10)/2+1, 5+c, cc, 68);
+      printtext(50-(FS_BOXWIDTH+10)/2+1, 5+c, color, textbuffer);
+      if ((!filemode) && ((fileview+c) == filepos)) printbg(50-(FS_BOXWIDTH+10)/2+1, 5+c, cc, 68);
     }
 
-    printtext(50-(MAX_FILENAME+10)/2+1, 6+VISIBLEFILES, 15, "PATH:   ");
+    printtext(50-(FS_BOXWIDTH+10)/2+1, 6+VISIBLEFILES, 15, "PATH:   ");
     sprintf(textbuffer, "%-60s", path);
-    textbuffer[MAX_FILENAME] = 0;
+    textbuffer[FS_BOXWIDTH] = 0;
     color = CNORMAL;
     if (filemode == 1) color = CEDIT;
-    printtext(50-(MAX_FILENAME+10)/2+9, 6+VISIBLEFILES, color, textbuffer);
-    if ((filemode == 1) && (strlen(path) < MAX_FILENAME)) printbg(50-(MAX_FILENAME+10)/2+9+strlen(path), 6+VISIBLEFILES, cc, 1);
+    printtext(50-(FS_BOXWIDTH+10)/2+9, 6+VISIBLEFILES, color, textbuffer);
+    if ((filemode == 1) && (strlen(path) < FS_BOXWIDTH)) printbg(50-(FS_BOXWIDTH+10)/2+9+strlen(path), 6+VISIBLEFILES, cc, 1);
 
-    printtext(50-(MAX_FILENAME+10)/2+1, 7+VISIBLEFILES, 15, "FILTER: ");
+    printtext(50-(FS_BOXWIDTH+10)/2+1, 7+VISIBLEFILES, 15, "FILTER: ");
     sprintf(textbuffer, "%-60s", filter);
-    textbuffer[MAX_FILENAME] = 0;
+    textbuffer[FS_BOXWIDTH] = 0;
     color = CNORMAL;
     if (filemode == 2) color = CEDIT;
-    printtext(50-(MAX_FILENAME+10)/2+9, 7+VISIBLEFILES, color, textbuffer);
-    if (filemode == 2) printbg(50-(MAX_FILENAME+10)/2+9+strlen(filter), 7+VISIBLEFILES, cc, 1);
+    printtext(50-(FS_BOXWIDTH+10)/2+9, 7+VISIBLEFILES, color, textbuffer);
+    if (filemode == 2) printbg(50-(FS_BOXWIDTH+10)/2+9+strlen(filter), 7+VISIBLEFILES, cc, 1);
 
-    printtext(50-(MAX_FILENAME+10)/2+1, 8+VISIBLEFILES, 15, "NAME:   ");
+    printtext(50-(FS_BOXWIDTH+10)/2+1, 8+VISIBLEFILES, 15, "NAME:   ");
     sprintf(textbuffer, "%-60s", name);
-    textbuffer[MAX_FILENAME] = 0;
+    textbuffer[FS_BOXWIDTH] = 0;
     color = CNORMAL;
     if (filemode == 3) color = CEDIT;
-    printtext(50-(MAX_FILENAME+10)/2+9, 8+VISIBLEFILES, color, textbuffer);
-    if (filemode == 3) printbg(50-(MAX_FILENAME+10)/2+9+strlen(name), 8+VISIBLEFILES, cc, 1);
+    printtext(50-(FS_BOXWIDTH+10)/2+9, 8+VISIBLEFILES, color, textbuffer);
+    if (filemode == 3) printbg(50-(FS_BOXWIDTH+10)/2+9+strlen(name), 8+VISIBLEFILES, cc, 1);
 
     if (win_quitted) exitfilesel = 0;
 

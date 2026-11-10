@@ -14,34 +14,45 @@ EXE=	$(PREFIX)goattrk2$(SUFFIX) \
 
 all: $(EXE)
 
-$(PREFIX)goattrk2$(SUFFIX): goatdata.o goattrk2.o gsong.o gorder.o gpattern.o ginstr.o gtable.o gplay.o gdisplay.o \
-gfile.o greloc.o ghelp.o gsound.o gconsole.o gsid.o gundo.o gmidi.o gmidifile.o $(MACOBJ) \
-resid/envelope.o resid/extfilt.o resid/filter.o resid/pot.o resid/sid.o resid/wave.o resid/wave6581__ST.o \
+# The user interface (Dear ImGui on SDL2)
+IMGUIOBJ= imgui/imgui.o imgui/imgui_draw.o imgui/imgui_tables.o imgui/imgui_widgets.o \
+imgui/imgui_impl_sdl2.o imgui/imgui_impl_sdlrenderer2.o
+
+GUIOBJ= gui/gui_main.o gui/gui_widgets.o gui/gui_transport.o gui/gui_pattern.o gui/gui_tracks.o \
+gui/gui_instr.o gui/gui_tables.o gui/gui_song.o gui/gui_dialogs.o gui/gui_help.o
+
+$(IMGUIOBJ) $(GUIOBJ): CXXFLAGS += -std=c++11
+
+# The tracker's modules shared with gt2reloc
+COREOBJ= goatdata.o gsong.o gorder.o gpattern.o ginstr.o gtable.o gplay.o gdisplay.o \
+gfile.o gsound.o gconsole.o gsid.o gundo.o gmidi.o gcommand.o
+
+RESIDOBJ= resid/envelope.o resid/extfilt.o resid/filter.o resid/pot.o resid/sid.o resid/wave.o resid/wave6581__ST.o \
 resid/wave6581_P_T.o resid/wave6581_PS_.o resid/wave6581_PST.o resid/wave8580__ST.o resid/wave8580_P_T.o \
 resid/wave8580_PS_.o resid/wave8580_PST.o resid/voice.o \
 resid-fp/envelopefp.o resid-fp/extfiltfp.o resid-fp/filterfp.o resid-fp/potfp.o resid-fp/sidfp.o \
-resid-fp/wavefp.o resid-fp/voicefp.o \
-asm/asmtab.o asm/chnkpool.o asm/expr.o asm/lexyy.o asm/log.o asm/membuf.o asm/membufio.o asm/namedbuf.o asm/parse.o \
-asm/pc.o asm/vec.o \
-bme/bme_gfx.o bme/bme_snd.o bme/bme_win.o bme/bme_mou.o bme/bme_kbd.o bme/bme_io.o bme/bme_end.o bme/bme.o
+resid-fp/wavefp.o resid-fp/voicefp.o
+
+ASMOBJ= asm/asmtab.o asm/chnkpool.o asm/expr.o asm/lexyy.o asm/log.o asm/membuf.o asm/membufio.o asm/namedbuf.o asm/parse.o \
+asm/pc.o asm/vec.o
+
+BMEOBJ= bme/bme_snd.o bme/bme_win.o bme/bme_io.o bme/bme_end.o bme/bme.o
+
+GOATTRK2OBJ= goattrk2.o greloc.o gfileio.o gmidifile.o $(COREOBJ) $(MACOBJ) $(GUIOBJ) $(IMGUIOBJ) \
+$(RESIDOBJ) $(ASMOBJ) $(BMEOBJ)
+
+GT2RELOCOBJ= gt2reloc.o gt2stubs.o ghelp.o $(COREOBJ) $(RESIDOBJ) $(ASMOBJ) $(BMEOBJ)
+
+$(PREFIX)goattrk2$(SUFFIX): $(GOATTRK2OBJ)
 	$(CXX) -o $@ $^ $(LIBS)
 	strip $@
 
 # it would be nice not having to link things like resid, however the source is
 # not ready for that
-$(PREFIX)gt2reloc$(SUFFIX): goatdata.o gt2reloc.o gsong.o gorder.o gpattern.o ginstr.o gtable.o gplay.o gdisplay.o \
-gfile.o ghelp.o gsound.o gconsole.o gsid.o gundo.o gmidi.o $(MACOBJ) \
-resid/envelope.o resid/extfilt.o resid/filter.o resid/pot.o resid/sid.o resid/wave.o resid/wave6581__ST.o \
-resid/wave6581_P_T.o resid/wave6581_PS_.o resid/wave6581_PST.o resid/wave8580__ST.o resid/wave8580_P_T.o \
-resid/wave8580_PS_.o resid/wave8580_PST.o resid/voice.o \
-resid-fp/envelopefp.o resid-fp/extfiltfp.o resid-fp/filterfp.o resid-fp/potfp.o resid-fp/sidfp.o \
-resid-fp/wavefp.o resid-fp/voicefp.o \
-asm/asmtab.o asm/chnkpool.o asm/expr.o asm/lexyy.o asm/log.o asm/membuf.o asm/membufio.o asm/namedbuf.o asm/parse.o \
-asm/pc.o asm/vec.o \
-bme/bme_gfx.o bme/bme_snd.o bme/bme_win.o bme/bme_mou.o bme/bme_kbd.o bme/bme_io.o bme/bme_end.o bme/bme.o
-	$(CXX) -DGT2RELOC -o $@ $^ $(LIBS)
+$(PREFIX)gt2reloc$(SUFFIX): $(GT2RELOCOBJ)
+	$(CXX) -o $@ $^ $(LIBS)
 	strip $@
-	
+
 $(PREFIX)mod2sng$(SUFFIX): mod2sng.o bme/bme_end.o
 	$(CC) -o $@ $^
 	strip $@
@@ -68,6 +79,8 @@ clean:
 	$(RM) *.o *~
 	$(RM) asm/*.o
 	$(RM) bme/*.o
+	$(RM) gui/*.o
+	$(RM) imgui/*.o
 	$(RM) resid/*.o
 	$(RM) resid-fp/*.o
 	$(RM) $(EXE)

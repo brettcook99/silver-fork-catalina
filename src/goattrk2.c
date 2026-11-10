@@ -24,6 +24,10 @@
 
 #include "goattrk2.h"
 #include "bme.h"
+#include "gui/gui.h"
+
+static void mainloopframe(void);
+static void presskey(int newrawkey, int newkey, int shift);
 
 int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
@@ -135,8 +139,12 @@ int usagelen = (sizeof usage / sizeof usage[0]);
 int main(int argc, char **argv)
 {
 	char filename[MAX_PATHNAME];
+	char startfile[MAX_PATHNAME];
 	FILE *configfile;
-	int c, d;
+	int c;
+	int showhelpatstart = 0;
+
+	startfile[0] = 0;
 
 	// DEFAULT SETTINGS
 	editorInfo.adparam = 0x0f00;
@@ -218,6 +226,7 @@ int main(int argc, char **argv)
 		getparam(configfile, &windowedysize);
 		getparam(configfile, &midiinput);
 		getparam(configfile, (unsigned *)&followmode);
+		getparam(configfile, &textsizepercent);
 		fclose(configfile);
 	}
 
@@ -227,6 +236,11 @@ int main(int argc, char **argv)
 	// Scan command line
 	for (c = 1; c < argc; c++)
 	{
+		// Old macOS versions pass a process serial number when started from
+		// the Finder
+		if (!strncmp(argv[c], "-psn_", 5))
+			continue;
+
 #ifdef __WIN32__
 		if ((argv[c][0] == '-') || (argv[c][0] == '/'))
 #else
@@ -242,21 +256,12 @@ int main(int argc, char **argv)
 			case '?':
 				if (argv[c][2] == '?')
 				{
-					if (!initscreen())
-						return EXIT_FAILURE;
-					onlinehelp(1, 0);
-					return EXIT_SUCCESS;
+					// Open with the help window shown
+					showhelpatstart = 1;
+					break;
 				}
-#ifdef __WIN32__
-				if (!initscreen())
-					return EXIT_FAILURE;
-				for (y = 0; y < usagelen; ++y)
-					printtext(0, y, 15, usage[y]);
-				waitkeynoupdate();
-#else
 				for (y = 0; y < usagelen; ++y)
 					printf("%s\n", usage[y]);
-#endif
 				return EXIT_SUCCESS;
 
 			case 'Z':
@@ -381,21 +386,23 @@ int main(int argc, char **argv)
 		}
 		else
 		{
-			char startpath[MAX_PATHNAME];
-
-			strcpy(songfilename, argv[c]);
-			for (d = strlen(argv[c]) - 1; d >= 0; d--)
+			// A file to open (song, instrument, SID, MIDI...), made into a
+			// full path name
+			int isabsolute = (argv[c][0] == '/') || (argv[c][0] == '\\');
+#ifdef __WIN32__
+			if ((argv[c][0]) && (argv[c][1] == ':')) isabsolute = 1;
+#endif
+			if ((!isabsolute) && (getcwd(startfile, MAX_PATHNAME)))
 			{
-				if ((argv[c][d] == '/') || (argv[c][d] == '\\'))
+				if (strlen(startfile) + strlen(argv[c]) + 2 < MAX_PATHNAME)
 				{
-					strcpy(startpath, argv[c]);
-					startpath[d + 1] = 0;
-					chdir(startpath);
-					initpaths();
-					strcpy(songfilename, &argv[c][d + 1]);
-					break;
+					strcat(startfile, "/");
+					strcat(startfile, argv[c]);
 				}
+				else startfile[0] = 0;
 			}
+			else if (strlen(argv[c]) < MAX_PATHNAME)
+				strcpy(startfile, argv[c]);
 		}
 	}
 
@@ -452,30 +459,30 @@ int main(int argc, char **argv)
 
 	undoInitAllAreas();	// Must be called after clearSong. Creates undo buffers, containing duplicates of each GT area.
 
+	gui_marksongsaved();
+
 	// Init sound
 	if (!sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate))
 	{
-		printtextc(MAX_ROWS / 2 - 1, 15, "Sound init failed. Press any key to run without sound (notice that song timer won't start)");
-		waitkeynoupdate();
+		gui_alert("Sound init failed", "GoatTracker runs without sound. Notice that the song timer won't start.");
 	}
 
 	// Open MIDI input devices
 	if (midiinput)
 		midi_init();
 
-	// Load song if applicable
-	if (strlen(songfilename))
-	{
-		loadsong();
-		undoInitAllAreas();	// recreate undo buffers, using the loaded song as the original info
-	}
+	// Open the file given on the command line, if any. Files opened from the
+	// Finder arrive as drop events instead
+	if (startfile[0])
+		gt_openfile(startfile);
+
+	if (showhelpatstart)
+		gui_command(GTCMD_HELP);
 
 	// Start editor mainloop
-	printmainscreen();
 	while (!exitprogram)
 	{
-		waitkeymouse();
-		docommand();
+		mainloopframe();
 	}
 
 	// Shutdown sound output & MIDI input now
@@ -544,7 +551,8 @@ int main(int argc, char **argv)
 			";Window width in windowed mode (0 = automatic)\n%d\n\n"
 			";Window height in windowed mode (0 = automatic)\n%d\n\n"
 			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n"
-			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n",
+			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n"
+			";Text size in percent (100 = default)\n%d\n\n",
 			b,
 			mr,
 			hardsid,
@@ -590,7 +598,8 @@ int main(int argc, char **argv)
 			windowedxsize,
 			windowedysize,
 			midiinput,
-			followmode);
+			followmode,
+			textsizepercent);
 		fclose(configfile);
 	}
 
@@ -598,6 +607,59 @@ int main(int argc, char **argv)
 	return EXIT_SUCCESS;
 }
 
+// One pass of the main loop: draw the user interface, then run the
+// commands, key presses and MIDI notes it received
+static void mainloopframe(void)
+{
+	int cmd;
+	char path[MAX_PATHNAME];
+
+	// A classic dialog that has finished leaves its text behind
+	if (textscreenactive)
+	{
+		clearscreen();
+		textscreenactive = 0;
+	}
+	cursorflashdelay += win_getspeed(50);
+	displayupdate();
+	followplayback();
+	gui_frame(0);
+	macmenu_setstate(recordmode, followmode);
+
+	// Menus, toolbar, drag & drop
+	while (cmd_poll(&cmd, path, MAX_PATHNAME))
+	{
+		runcommand(cmd, path);
+		if (exitprogram) return;
+	}
+
+	// Keys for the editors
+	while (input_nextkey())
+	{
+		converthex();
+		docommand();
+		if (exitprogram) return;
+	}
+
+	// MIDI keyboard notes
+	while (input_nextmidi())
+	{
+		key = 0;
+		rawkey = 0;
+		hexnybble = -1;
+		docommand();
+	}
+
+	// Window closed / CMD+Q
+	if (win_quitted)
+	{
+		win_quitted = 0;
+		runcommand(GTCMD_QUIT, NULL);
+	}
+}
+
+// The classic dialogs wait for keys with these. Each call of getkey() runs
+// one frame of the user interface with the classic text screen shown
 void waitkey(void)
 {
 	for (;;)
@@ -622,8 +684,6 @@ void waitkeymouse(void)
 		if (mouseb) break;
 		if ((midinoteon) || (midinoteoff)) break;
 		if (menucommand) break;
-		// Check marks in the macOS menu bar
-		macmenu_setstate(recordmode, followmode);
 	}
 
 	converthex();
@@ -633,7 +693,6 @@ void waitkeymousenoupdate(void)
 {
 	for (;;)
 	{
-		fliptoscreen();
 		getkey();
 		if ((rawkey) || (key)) break;
 		if (win_quitted) break;
@@ -647,7 +706,6 @@ void waitkeynoupdate(void)
 {
 	for (;;)
 	{
-		fliptoscreen();
 		getkey();
 		if ((rawkey) || (key)) break;
 		if ((mouseb) && (!prevmouseb)) break;
@@ -697,8 +755,7 @@ void docommand(void)
 	// Numpad play/stop & pattern row jumps
 	if (numpadcommands()) return;
 
-	// "GUI" operation :)
-	mousecommands();
+	// Mouse operation is handled by the GUI panels (gui/)
 
 	GTUNDO_OBJECT *ed = undoCreateEditorInfo();
 
@@ -780,7 +837,7 @@ int menucommands(void)
 		return 1;
 
 	case MENUCMD_IMPORTMIDI:
-		importmidi();
+		runcommand(GTCMD_IMPORTMIDI, NULL);
 		return 1;
 
 	case MENUCMD_SELECTALL:
@@ -816,7 +873,8 @@ int numpadcommands(void)
 
 	if ((rawkey >= KEY_KP1) && (rawkey <= KEY_KP7) && (editorInfo.editmode == EDIT_PATTERN))
 	{
-		patternjump((rawkey - KEY_KP0) * 8);
+		// SDL2: KP_1-KP_9 are consecutive, but KP_0 comes after KP_9
+		patternjump((rawkey - KEY_KP1 + 1) * 8);
 		key = 0;
 		rawkey = 0;
 		return 1;
@@ -846,325 +904,6 @@ void midicommands(void)
 	{
 		releasenote(lastchn);
 		lastnote = 0;
-	}
-}
-
-void mousecommands(void)
-{
-	int c;
-
-	// Mouse wheel over the patterns scrolls the pattern editor
-	if ((mousewheel) && (mousey >= 2) && (mousey <= 2 + VISIBLEPATTROWS + 1) && (mousex < MAX_CHN * 15))
-		patternscroll(mousewheel);
-
-	if (!mouseb) return;
-
-	// Pattern editpos & pattern number selection
-	for (c = 0; c < MAX_CHN; c++)
-	{
-		if ((mousey == 2) && (mousex >= 13 + c * 15) && (mousex <= 14 + c * 15))
-		{
-			if ((!prevmouseb) || (mouseheld > HOLDDELAY))
-			{
-				if (mouseb & MOUSEB_LEFT)
-				{
-					editorInfo.epchn = c;
-					nextpattern();
-				}
-				if (mouseb & MOUSEB_RIGHT)
-				{
-					editorInfo.epchn = c;
-					prevpattern();
-				}
-			}
-		}
-		else
-		{
-			if ((mousey >= 2) && (mousey <= 34) && (mousex >= 6 + c * 15) && (mousex <= 14 + c * 15))
-			{
-				int x = mousex - 6 - c * 15;
-				int newpos = mousey - 3 + editorInfo.epview;
-				if (newpos < 0) newpos = 0;
-				if (newpos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) newpos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
-
-				editorInfo.editmode = EDIT_PATTERN;
-
-				if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb))
-				{
-					if ((editorInfo.epmarkchn != c) || (newpos != editorInfo.epmarkend))
-					{
-						editorInfo.epmarkchn = c;
-						editorInfo.epmarkstart = editorInfo.epmarkend = newpos;
-					}
-				}
-
-				if (mouseb & MOUSEB_LEFT)
-				{
-					editorInfo.epchn = c;
-					if (x < 4) editorInfo.epcolumn = 0;
-					if (x >= 4) editorInfo.epcolumn = x - 3;
-				}
-
-				if (!prevmouseb)
-				{
-					if (mouseb & MOUSEB_LEFT)
-						editorInfo.eppos = newpos;
-				}
-				else
-				{
-					if (mouseb & MOUSEB_LEFT)
-					{
-						if (mousey == 2) editorInfo.eppos--;
-						if (mousey == 34) editorInfo.eppos++;
-					}
-				}
-				if (editorInfo.eppos < 0) editorInfo.eppos = 0;
-				if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
-
-				if (mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) editorInfo.epmarkend = newpos;
-			}
-		}
-	}
-
-	// Song editpos & songnumber selection
-	if ((mousey >= 3) && (mousey <= 8) && (mousex >= 40 + 10))
-	{
-		int newpos = editorInfo.esview + (mousex - 44 - 10) / 3;
-		int newcolumn = (mousex - 44 - 10) % 3;
-		int newchn = mousey - 3;
-		if (newcolumn < 0) newcolumn = 0;
-		if (newcolumn > 1) newcolumn = 1;
-		if (newpos < 0)
-		{
-			newpos = 0;
-			newcolumn = 0;
-		}
-		if (newpos == songlen[editorInfo.esnum][editorInfo.eschn])
-		{
-			newpos++;
-			newcolumn = 0;
-		}
-		if (newpos > songlen[editorInfo.esnum][editorInfo.eschn] + 1)
-		{
-			newpos = songlen[editorInfo.esnum][editorInfo.eschn] + 1;
-			newcolumn = 1;
-		}
-
-		editorInfo.editmode = EDIT_ORDERLIST;
-
-		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn]))
-		{
-			if ((editorInfo.esmarkchn != newchn) || (newpos != editorInfo.esmarkend))
-			{
-				editorInfo.esmarkchn = newchn;
-				editorInfo.esmarkstart = editorInfo.esmarkend = newpos;
-			}
-		}
-
-		if (mouseb & MOUSEB_LEFT)
-		{
-			editorInfo.eschn = newchn;
-			editorInfo.eseditpos = newpos;
-			editorInfo.escolumn = newcolumn;
-		}
-
-		if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn])) editorInfo.esmarkend = newpos;
-	}
-	if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 2) && (mousex >= 63 + 10) && (mousex <= 64 + 10))
-	{
-		if (mouseb & MOUSEB_LEFT) nextsong();
-		if (mouseb & MOUSEB_RIGHT) prevsong();
-	}
-
-	// Instrument editpos & instrument number selection
-	if ((mousey >= 8) && (mousey <= 12) && (mousex >= 56 + 10) && (mousex <= 57 + 10))
-	{
-		editorInfo.editmode = EDIT_INSTRUMENT;
-		editorInfo.eipos = mousey - 8;
-		editorInfo.eicolumn = mousex - 56 - 10;
-	}
-	if ((mousey >= 8) && (mousey <= 11) && (mousex >= 76 + 10) && (mousex <= 77 + 10))
-	{
-		editorInfo.editmode = EDIT_INSTRUMENT;
-		editorInfo.eipos = mousey - 8 + 5;
-		editorInfo.eicolumn = mousex - 76 - 10;
-	}
-	if ((mousey == 7) && (mousex >= 60 + 10))
-	{
-		editorInfo.editmode = EDIT_INSTRUMENT;
-		editorInfo.eipos = 9;
-	}
-	if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 7) && (mousex >= 56 + 10) && (mousex <= 57 + 10))
-	{
-		if (mouseb & MOUSEB_LEFT) nextinstr();
-		if (mouseb & MOUSEB_RIGHT) previnstr();
-	}
-
-
-	// Table editpos
-	for (c = 0; c < MAX_TABLES; c++)
-	{
-		if ((mousey >= 14) && (mousey <= 30) && (mousex >= 43 + 10 + c * 10) && (mousex <= 47 + 10 + c * 10))
-		{
-			int newpos = mousey - 15 + editorInfo.etview[editorInfo.etnum];
-			if (newpos < 0) newpos = 0;
-			if (newpos >= MAX_TABLELEN) newpos = MAX_TABLELEN - 1;
-
-			editorInfo.editmode = EDIT_TABLES;
-
-			if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb))
-			{
-				if ((editorInfo.etmarknum != editorInfo.etnum) || (newpos != editorInfo.etmarkend))
-				{
-					editorInfo.etmarknum = c;
-					editorInfo.etmarkstart = editorInfo.etmarkend = newpos;
-				}
-			}
-			if (mouseb & MOUSEB_LEFT)
-			{
-				editorInfo.etnum = c;
-				editorInfo.etpos = mousey - 15 + editorInfo.etview[editorInfo.etnum];
-				editorInfo.etcolumn = mousex - 43 - 10 - c * 10;
-			}
-			if (editorInfo.etcolumn >= 2) editorInfo.etcolumn--;
-			if (editorInfo.etpos < 0) editorInfo.etpos = 0;
-			if (editorInfo.etpos > MAX_TABLELEN - 1) editorInfo.etpos = MAX_TABLELEN - 1;
-
-			if (mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) editorInfo.etmarkend = newpos;
-		}
-	}
-
-	// Name editpos
-	if ((mousey >= 31) && (mousey <= 33) && (mousex >= 47 + 10))
-	{
-		editorInfo.editmode = EDIT_NAMES;
-		editorInfo.enpos = mousey - 31;
-	}
-
-	// Status panel
-	if ((!prevmouseb) && (mousex == 7) && (mousey == 23 + 3 + 9))
-	{
-		if (mouseb & (MOUSEB_LEFT))
-			if (editorInfo.epoctave < 7) editorInfo.epoctave++;
-		if (mouseb & (MOUSEB_RIGHT))
-			if (editorInfo.epoctave > 0) editorInfo.epoctave--;
-	}
-	if ((!prevmouseb) && (mousex <= 7) && (mousey == 24 + 3 + 9))
-	{
-		recordmode ^= 1;
-	}
-	for (c = 0; c < MAX_CHN; c++)
-	{
-		if ((!prevmouseb) && (mousey >= 23 + 3 + 9) && (mousex >= 80 + 7 * c) && (mousex <= 85 + 7 * c))
-			mutechannel(c);
-	}
-
-	// Titlebar actions
-	if (!menu)
-	{
-		if ((mousey == 0) && (!prevmouseb) && (mouseb == MOUSEB_LEFT))
-		{
-			if ((mousex >= 40 + 10) && (mousex <= 41 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				editorInfo.finevibrato ^= 1;
-				undoAddEditorSettingsToList();
-			}
-			if ((mousex >= 43 + 10) && (mousex <= 44 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				editorInfo.optimizepulse ^= 1;
-				undoAddEditorSettingsToList();
-			}
-			if ((mousex >= 46 + 10) && (mousex <= 47 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				editorInfo.optimizerealtime ^= 1;
-				undoAddEditorSettingsToList();
-			}
-			if ((mousex >= 49 + 10) && (mousex <= 52 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				editorInfo.ntsc ^= 1;
-				undoAddEditorSettingsToList();
-				do_sound_init();
-			}
-			if ((mousex >= 54 + 10) && (mousex <= 57 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				editorInfo.sidmodel ^= 1;
-				undoAddEditorSettingsToList();
-				do_sound_init();
-			}
-			if ((mousex >= 62 + 10) && (mousex <= 65 + 10)) editadsr();
-			if ((mousex >= 67 + 10) && (mousex <= 68 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				prevmultiplier();
-				undoAddEditorSettingsToList();
-			}
-			if ((mousex >= 69 + 10) && (mousex <= 70 + 10))
-			{
-				undoCreateEditorInfoBackup();
-				nextmultiplier();
-				undoAddEditorSettingsToList();
-			}
-			if ((mousex >= 72 + 10) && (mousex <= 74 + 10))
-			{
-				interpolate ^= 1;
-				interpolate &= 1 + (interpolate << 1);  // turn off FP if INT is 0
-				stopsong();
-				do_sound_init();
-		}
-			if ((mousex >= 76 + 10) && (mousex <= 77 + 10))
-			{
-				interpolate ^= 2;
-				interpolate |= interpolate >> 1;  // turn on INT if FP is 1
-				stopsong();
-				do_sound_init();
-			}
-		}
-	}
-	else
-	{
-		if ((!mousey) && (mouseb & MOUSEB_LEFT) && (!(prevmouseb & MOUSEB_LEFT)))
-		{
-			if ((mousex >= 0) && (mousex <= 5))
-			{
-				initsong(editorInfo.esnum, PLAY_BEGINNING);
-				followplay = followmode ^ shiftpressed;
-			}
-			if ((mousex >= 7) && (mousex <= 15))
-			{
-				initsong(editorInfo.esnum, PLAY_POS);
-				followplay = followmode ^ shiftpressed;
-			}
-			if ((mousex >= 17) && (mousex <= 26))
-			{
-				initsong(editorInfo.esnum, PLAY_PATTERN);
-				followplay = followmode ^ shiftpressed;
-			}
-			if ((mousex >= 28) && (mousex <= 33))
-				stopsong();
-			if ((mousex >= 35) && (mousex <= 40))
-				load();
-			if ((mousex >= 42) && (mousex <= 47))
-				save();
-			if ((mousex >= 49) && (mousex <= 57))
-				relocator();
-			if ((mousex >= 59) && (mousex <= 64))
-				onlinehelp(0, 0);
-			if ((mousex >= 66) && (mousex <= 72))
-				clear();
-			if ((mousex >= 74) && (mousex <= 79))
-				quit();
-			if ((mousex >= 81) && (mousex <= 84))
-				changetextsize(-1);
-			if ((mousex >= 86) && (mousex <= 89))
-				changetextsize(1);
-			if ((mousex >= 91) && (mousex <= 96))
-				togglefullscreen();
-		}
 	}
 }
 
@@ -1252,14 +991,13 @@ void generalcommands(void)
 		break;
 
 	}
-	if (win_quitted) exitprogram = 1;
 	switch (rawkey)
 	{
 	case KEY_ESC:
 		if (!shiftpressed)
-			quit();
+			gui_askquit();
 		else
-			clear();
+			gui_askclear();
 		break;
 
 	case KEY_KPMULTIPLY:
@@ -1288,7 +1026,7 @@ void generalcommands(void)
 		break;
 
 	case KEY_F12:
-		onlinehelp(0, shiftpressed);
+		gui_command(GTCMD_HELP);
 		break;
 
 	case KEY_TAB:
@@ -1340,7 +1078,7 @@ void generalcommands(void)
 			else
 				editorInfo.editmode = EDIT_INSTRUMENT;
 		}
-		else editadsr();
+		else gui_edithradsr();
 		break;
 
 	case KEY_F8:
@@ -1355,7 +1093,7 @@ void generalcommands(void)
 
 	case KEY_F9:
 		if (!shiftpressed) {
-		relocator();
+		runcommand(GTCMD_EXPORT, NULL);
 		}
 		else
 		{
@@ -1373,358 +1111,407 @@ void generalcommands(void)
 	}
 }
 
+// F10 = open (with SHIFT: merge), in the instrument/table editor load an
+// instrument
 void load(void)
 {
-	if ((editorInfo.editmode != EDIT_INSTRUMENT) && (editorInfo.editmode != EDIT_TABLES))
-	{
-		if (!shiftpressed)
-		{
-			if (fileselector(songfilename, songpath, songfilter, "LOAD SONG", 0))
-			{
-				loadsong();
-				undoInitAllAreas();
-			}
-		}
-		else
-		{
-			if (fileselector(songfilename, songpath, songfilter, "MERGE SONG", 0))
-			{
-				mergesong();
-				undoInitAllAreas();
-			}
-		}
-	}
+	if ((editorInfo.editmode == EDIT_INSTRUMENT) || (editorInfo.editmode == EDIT_TABLES))
+		runcommand(GTCMD_LOADINSTR, NULL);
 	else
-	{
-		if (editorInfo.einum)
-		{
-			if (fileselector(instrfilename, instrpath, instrfilter, "LOAD INSTRUMENT", 0))
-				loadinstrument();
-		}
-	}
+		runcommand(shiftpressed ? GTCMD_MERGE : GTCMD_OPEN, NULL);
 	key = 0;
 	rawkey = 0;
 }
 
+// F11 = save, in the instrument/table editor save the instrument
 void save(void)
 {
-	if ((editorInfo.editmode != EDIT_INSTRUMENT) && (editorInfo.editmode != EDIT_TABLES))
-	{
-		int done = 0;
-
-		// Repeat until quit or save successful
-		while (!done)
-		{
-			if (strlen(loadedsongfilename)) strcpy(songfilename, loadedsongfilename);
-			if (fileselector(songfilename, songpath, songfilter, "SAVE SONG", 3))
-				done = savesong();
-			else done = 1;
-		}
-	}
+	if ((editorInfo.editmode == EDIT_INSTRUMENT) || (editorInfo.editmode == EDIT_TABLES))
+		runcommand(GTCMD_SAVEINSTR, NULL);
 	else
-	{
-		if (editorInfo.einum)
-		{
-			int done = 0;
-			int useinstrname = 0;
-			char tempfilename[MAX_FILENAME];
-
-			// Repeat until quit or save successful
-			while (!done)
-			{
-				if ((!strlen(instrfilename)) && (strlen(instr[editorInfo.einum].name)))
-				{
-					useinstrname = 1;
-					strcpy(instrfilename, instr[editorInfo.einum].name);
-					strcat(instrfilename, ".ins");
-					strcpy(tempfilename, instrfilename);
-				}
-
-				if (fileselector(instrfilename, instrpath, instrfilter, "SAVE INSTRUMENT", 3))
-					done = saveinstrument();
-				else done = 1;
-
-				if (useinstrname)
-				{
-					if (!strcmp(tempfilename, instrfilename))
-						memset(instrfilename, 0, sizeof instrfilename);
-				}
-			}
-		}
-	}
+		runcommand(GTCMD_SAVE, NULL);
 	key = 0;
 	rawkey = 0;
 }
 
-// File > Import MIDI (CMD+I): converts a MIDI file to a song and loads it.
-// The song gets the MIDI file's name, so saving it suggests name.sng
-void importmidi(void)
+// Works like pressing a key (with SHIFT if shift is nonzero) in the current
+// editor
+static void presskey(int newrawkey, int newkey, int shift)
 {
-	static char midifilename[MAX_FILENAME] = "";
-	static char midifilter[MAX_FILENAME] = "*.mid";
-	char olddir[MAX_PATHNAME];
-	char temppath[MAX_PATHNAME];
-	char report[256];
-	char *tempdir;
-	MIDI2SNG_OPTIONS opt;
-	int ok;
+	rawkey = newrawkey;
+	key = newkey;
+	if ((shift) && (key >= 'a') && (key <= 'z')) key = toupper(key);
+	shiftpressed = shift;
+	shiftonlypressed = shift;
+	ctrlpressed = 0;
+	altpressed = 0;
+	metapressed = 0;
+	menucommand = 0;
+	midinoteon = 0;
+	midinoteoff = 0;
+	converthex();
+	docommand();
+	key = 0;
+	rawkey = 0;
+	shiftpressed = 0;
+	shiftonlypressed = 0;
+}
+
+// Pattern editor commands from the menus work in the pattern editor
+static void patternkey(int newrawkey, int newkey, int shift)
+{
+	editorInfo.editmode = EDIT_PATTERN;
+	presskey(newrawkey, newkey, shift);
+}
+
+static void startplay(int mode)
+{
+	initsong(editorInfo.esnum, mode);
+	followplay = followmode;
+	followsuspended = 0;
+}
+
+// Clears everything for a new song
+static void newsong(void)
+{
+	int c;
 
 	stopsong();
-	if (!fileselector(midifilename, songpath, midifilter, "IMPORT MIDI FILE", 0))
+	clearsong(1, 1, 1, 1, 1);
+	for (c = 0; c < MAX_CHN; c++)
 	{
-		key = 0;
-		rawkey = 0;
-		return;
+		editorUndoInfo.editorInfo[c].epnum = c;
+		editorUndoInfo.editorInfo[c].espos = 0;
+		editorUndoInfo.editorInfo[c].esend = 0;
 	}
-
-	// The song is written to a temporary file and loaded from there
-	if (!getcwd(olddir, MAX_PATHNAME)) olddir[0] = 0;
-	tempdir = getenv("TMPDIR");
-	if ((!tempdir) || (!tempdir[0])) tempdir = getenv("TEMP");
-	if ((!tempdir) || (!tempdir[0])) tempdir = getenv("TMP");
-#ifdef __WIN32__
-	if ((!tempdir) || (!tempdir[0])) tempdir = ".";
-#else
-	if ((!tempdir) || (!tempdir[0])) tempdir = "/tmp";
-#endif
-	snprintf(temppath, MAX_PATHNAME, "%s/goattrk2-midi.sng", tempdir);
-
-	midi2sng_defaults(&opt);
-	opt.ntsc = editorInfo.ntsc;
-	ok = midi2sng(midifilename, temppath, &opt, report, sizeof report);
-	if (ok)
-	{
-		char savedname[MAX_FILENAME];
-		int c;
-
-		strcpy(savedname, midifilename);
-		ok = 0;
-		if (!chdir(tempdir))
-		{
-			strcpy(songfilename, "goattrk2-midi.sng");
-			loadsong();
-			remove(songfilename);
-			ok = 1;
-		}
-		if (olddir[0]) chdir(olddir);
-
-		if (ok)
-		{
-			// name.mid -> name.sng
-			for (c = strlen(savedname) - 1; c >= 0; c--)
-			{
-				if (savedname[c] == '.')
-				{
-					savedname[c] = 0;
-					break;
-				}
-			}
-			if (strlen(savedname) > MAX_FILENAME - 5) savedname[MAX_FILENAME - 5] = 0;
-			strcat(savedname, ".sng");
-			strcpy(songfilename, savedname);
-			strcpy(loadedsongfilename, savedname);
-			undoInitAllAreas();
-		}
-		else strcpy(report, "Could not load the converted song");
-	}
-
-	// Show the result until a key is pressed
-	report[56] = 0;
-	printblank(20, 35, 58);
-	printblank(20, 36, 58);
-	printtextcp(49, 35, 15, ok ? "MIDI file imported:" : "MIDI import failed:");
-	printtextcp(49, 36, 15, report);
-	waitkey();
-	printblank(20, 35, 58);
-	printblank(20, 36, 58);
-	key = 0;
-	rawkey = 0;
+	editorInfo.eppos = 0;
+	editorInfo.epview = -VISIBLEPATTROWS / 2;
+	editorInfo.eseditpos = 0;
+	editorInfo.esview = 0;
+	editorInfo.esnum = 0;
+	editorInfo.epmarkchn = -1;
+	editorInfo.esmarkchn = -1;
+	editorInfo.etmarknum = -1;
+	undoInitAllAreas();
+	currentsongpath[0] = 0;
+	suggestedsongname[0] = 0;
+	loadedsongfilename[0] = 0;
+	songfilename[0] = 0;
+	gui_marksongsaved();
+	gui_message("New song");
 }
 
-void quit(void)
+// Runs a command from the menus, the toolbar, drag & drop or a shortcut key.
+// path is the file of GTCMD_OPENFILE
+void runcommand(int cmd, const char *path)
 {
-	if ((!shiftpressed) || (mouseb))
+	char newpath[MAX_PATHNAME];
+	int filetype;
+
+	switch (cmd)
 	{
-		printblank(20, 35, 58);
-		printtextcp(49, 36, 15, "Really Quit (y/n)?");
-		waitkey();
-		printblank(20, 36, 58);
-		if ((key == 'y') || (key == 'Y')) exitprogram = 1;
+	case GTCMD_NEW:
+		if (gui_asksavechanges(cmd, NULL)) break;
+		newsong();
+		break;
+
+	case GTCMD_OPEN:
+		if (filedialog_open("Open a song, or import a SID, MIDI or chipsynth file", "sng;sid;mid;midi;ins;fermatax", newpath, MAX_PATHNAME))
+			runcommand(GTCMD_OPENFILE, newpath);
+		break;
+
+	case GTCMD_OPENFILE:
+		if ((!path) || (!path[0])) break;
+		filetype = gt_filetype(path);
+		// Instruments and patches go into the current song
+		if ((filetype != GTFILE_INSTRUMENT) && (filetype != GTFILE_PATCH))
+		{
+			if (gui_asksavechanges(cmd, path)) break;
+		}
+		gt_openfile(path);
+		break;
+
+	case GTCMD_SAVE:
+		if (currentsongpath[0])
+		{
+			gui_savefinished(gt_savesong(currentsongpath));
+			break;
+		}
+		// Not saved before: ask for the name
+	case GTCMD_SAVEAS:
+		{
+			const char *suggest = "Untitled.sng";
+			if (currentsongpath[0]) suggest = currentsongpath;
+			else if (suggestedsongname[0]) suggest = suggestedsongname;
+			if (filedialog_save("Save the song", "sng", suggest, newpath, MAX_PATHNAME))
+				gui_savefinished(gt_savesong(newpath));
+			else
+				gui_savefinished(0);
+		}
+		break;
+
+	case GTCMD_MERGE:
+		if (filedialog_open("Merge a song into this one", "sng", newpath, MAX_PATHNAME))
+			gt_mergesong(newpath);
+		break;
+
+	case GTCMD_IMPORTMIDI:
+		if (filedialog_open("Import a MIDI file", "mid;midi", newpath, MAX_PATHNAME))
+			runcommand(GTCMD_OPENFILE, newpath);
+		break;
+
+	case GTCMD_IMPORTSID:
+		if (filedialog_open("Import a SID file", "sid", newpath, MAX_PATHNAME))
+			runcommand(GTCMD_OPENFILE, newpath);
+		break;
+
+	case GTCMD_IMPORTPATCH:
+		if (filedialog_open("Import a chipsynth C64 patch into the current instrument", "fermatax", newpath, MAX_PATHNAME))
+			gt_importpatch(newpath);
+		break;
+
+	case GTCMD_LOADINSTR:
+		if (filedialog_open("Load an instrument into the current slot", "ins", newpath, MAX_PATHNAME))
+			gt_loadinstrument(newpath, editorInfo.einum ? editorInfo.einum : 1);
+		break;
+
+	case GTCMD_SAVEINSTR:
+		if (!editorInfo.einum)
+		{
+			gui_alert("Select an instrument first", "Instrument 00 is the empty instrument and can't be saved.");
+			break;
+		}
+		{
+			char suggest[MAX_PATHNAME];
+			if (instr[editorInfo.einum].name[0])
+				snprintf(suggest, MAX_PATHNAME, "%s.ins", instr[editorInfo.einum].name);
+			else
+				snprintf(suggest, MAX_PATHNAME, "Instrument %02X.ins", editorInfo.einum);
+			if (filedialog_save("Save the instrument", "ins", suggest, newpath, MAX_PATHNAME))
+				gt_saveinstrument(newpath, editorInfo.einum);
+		}
+		break;
+
+	case GTCMD_EXPORT:
+		stopsong();
+		gui_openexport();
+		break;
+
+	case GTCMD_EXPORTNOW:
+		{
+			const char *ext = (fileformat == FORMAT_PRG) ? "prg" : (fileformat == FORMAT_BIN) ? "bin" : "sid";
+			char dotext[8];
+			char suggest[MAX_PATHNAME];
+			const char *base = "Untitled";
+
+			if (loadedsongfilename[0]) base = gt_basename(loadedsongfilename);
+			else if (suggestedsongname[0]) base = suggestedsongname;
+			snprintf(dotext, sizeof dotext, ".%s", ext);
+			gt_replaceext(base, dotext, suggest, MAX_PATHNAME);
+			if (!filedialog_save("Export the song with its player", ext, suggest, newpath, MAX_PATHNAME))
+				break;
+			stopsong();
+			strcpy(reloctarget, newpath);
+			relocquiet = 1;
+			relocator();
+			relocquiet = 0;
+			if (relocresult)
+				gui_message("Exported %s. %s", gt_basename(newpath), relocreport);
+			else if (relocreport[0])
+				gui_alert("Export failed", relocreport);
+		}
+		break;
+
+	case GTCMD_QUIT:
+		if (gui_asksavechanges(cmd, NULL)) break;
+		exitprogram = 1;
+		break;
+
+	case GTCMD_UNDO:
+		undoPerform();
+		break;
+
+	case GTCMD_CUT:
+		presskey(KEY_X, 'x', 1);
+		break;
+
+	case GTCMD_COPY:
+		presskey(KEY_C, 'c', 1);
+		break;
+
+	case GTCMD_PASTE:
+		presskey(KEY_V, 'v', 1);
+		break;
+
+	case GTCMD_DELETE:
+		presskey(KEY_DEL, 0, 0);
+		break;
+
+	case GTCMD_SELECTALL:
+		if ((editorInfo.editmode == EDIT_PATTERN) || (editorInfo.editmode == EDIT_ORDERLIST))
+			presskey(KEY_L, 'l', 1);
+		break;
+
+	case GTCMD_CLEARSONG:
+		gui_askclear();
+		break;
+
+	case GTCMD_HRADSR:
+		gui_edithradsr();
+		break;
+
+	case GTCMD_PLAYSONG:
+		startplay(PLAY_BEGINNING);
+		break;
+
+	case GTCMD_PLAYPOS:
+		startplay(PLAY_POS);
+		break;
+
+	case GTCMD_PLAYPATTERN:
+		startplay(PLAY_PATTERN);
+		break;
+
+	case GTCMD_PLAYCURSOR:
+		playfromcursor(followmode);
+		followsuspended = 0;
+		break;
+
+	case GTCMD_STOP:
+		stopsong();
+		break;
+
+	case GTCMD_PLAYSTOP:
+		playstop();
+		followsuspended = 0;
+		break;
+
+	case GTCMD_RECORD:
+		recordmode ^= 1;
+		break;
+
+	case GTCMD_FOLLOW:
+		followmode ^= 1;
+		if (isplaying()) followplay = followmode;
+		followsuspended = 0;
+		break;
+
+	case GTCMD_OCTAVEUP:
+		if (editorInfo.epoctave < 7) editorInfo.epoctave++;
+		break;
+
+	case GTCMD_OCTAVEDOWN:
+		if (editorInfo.epoctave > 0) editorInfo.epoctave--;
+		break;
+
+	case GTCMD_NEXTSUBTUNE:
+		nextsong();
+		break;
+
+	case GTCMD_PREVSUBTUNE:
+		prevsong();
+		break;
+
+	case GTCMD_EDITPATTERN:
+		editorInfo.editmode = EDIT_PATTERN;
+		break;
+
+	case GTCMD_EDITORDER:
+		editorInfo.editmode = EDIT_ORDERLIST;
+		break;
+
+	case GTCMD_EDITINSTR:
+		editorInfo.editmode = (editorInfo.editmode == EDIT_INSTRUMENT) ? EDIT_TABLES : EDIT_INSTRUMENT;
+		break;
+
+	case GTCMD_EDITTABLES:
+		editorInfo.editmode = EDIT_TABLES;
+		break;
+
+	case GTCMD_EDITNAMES:
+		editorInfo.editmode = EDIT_NAMES;
+		break;
+
+	case GTCMD_TRANSPOSEUP:
+		patternkey(KEY_Q, 'q', 1);
+		break;
+
+	case GTCMD_TRANSPOSEDOWN:
+		patternkey(KEY_A, 'a', 1);
+		break;
+
+	case GTCMD_TRANSPOSEOCTUP:
+		patternkey(KEY_W, 'w', 1);
+		break;
+
+	case GTCMD_TRANSPOSEOCTDOWN:
+		patternkey(KEY_S, 's', 1);
+		break;
+
+	case GTCMD_INSERTROW:
+		patternkey(KEY_INS, 0, 0);
+		break;
+
+	case GTCMD_DELETEROW:
+		patternkey(KEY_DEL, 0, 0);
+		break;
+
+	case GTCMD_SHRINKPATTERN:
+		patternkey(KEY_O, 'o', 1);
+		break;
+
+	case GTCMD_EXPANDPATTERN:
+		patternkey(KEY_P, 'p', 1);
+		break;
+
+	case GTCMD_SPLITPATTERN:
+		patternkey(KEY_K, 'k', 1);
+		break;
+
+	case GTCMD_JOINPATTERN:
+		patternkey(KEY_J, 'j', 1);
+		break;
+
+	case GTCMD_INVERTSEL:
+		patternkey(KEY_I, 'i', 1);
+		break;
+
+	default:
+		gui_command(cmd);
+		break;
 	}
-	key = 0;
-	rawkey = 0;
 }
 
-void clear(void)
+// Clear dialog result: what to clear, or optimize everything
+void clearsongparts(int optimize, int cs, int cp, int ci, int ct, int cn, int patternlength)
 {
-	int cs = 0;
-	int cp = 0;
-	int ci = 0;
-	int ct = 0;
-	int cn = 0;
-
-	printblank(20, 35, 58);
-	printtextcp(49, 36, 15, "Optimize everything (y/n)?");
-	waitkey();
-	printblank(20, 36, 58);
-	if ((key == 'y') || (key == 'Y'))
+	stopsong();
+	if (optimize)
 	{
 		optimizeeverything(1, 1);
-		key = 0;
-		rawkey = 0;
+		gui_message("Song optimized: unused patterns, instruments and table entries removed");
 		return;
 	}
-
-	printtextcp(49, 36, 15, "Clear orderlists (y/n)?");
-	waitkey();
-	printblank(20, 36, 58);
-	if ((key == 'y') || (key == 'Y')) cs = 1;
-
-	printtextcp(49, 36, 15, "Clear patterns (y/n)?");
-	waitkey();
-	printblank(20, 36, 58);
-	if ((key == 'y') || (key == 'Y')) cp = 1;
-
-	printtextcp(49, 36, 15, "Clear instruments (y/n)?");
-	waitkey();
-	printblank(20, 36, 58);
-	if ((key == 'y') || (key == 'Y')) ci = 1;
-
-	printtextcp(49, 36, 15, "Clear tables (y/n)?");
-	waitkey();
-	printblank(20, 36, 58);
-	if ((key == 'y') || (key == 'Y')) ct = 1;
-
-	printtextcp(49, 36, 15, "Clear songname (y/n)?");
-	waitkey();
-	printblank(20, 36, 58);
-	if ((key == 'y') || (key == 'Y')) cn = 1;
-
-	if (cp == 1)
+	if (cp)
 	{
-		int selectdone = 0;
-		int olddpl = defaultpatternlength;
-
-		printtext(40, 36, 15, "Pattern length:");
-		while (!selectdone)
-		{
-			sprintf(textbuffer, "%02d ", defaultpatternlength);
-			printtext(55, 36, 15, textbuffer);
-			waitkey();
-			switch (rawkey)
-			{
-			case KEY_LEFT:
-				defaultpatternlength -= 7;
-			case KEY_DOWN:
-				defaultpatternlength--;
-				if (defaultpatternlength < 1) defaultpatternlength = 1;
-				break;
-
-			case KEY_RIGHT:
-				defaultpatternlength += 7;
-			case KEY_UP:
-				defaultpatternlength++;
-				if (defaultpatternlength > MAX_PATTROWS) defaultpatternlength = MAX_PATTROWS;
-				break;
-
-			case KEY_ESC:
-				defaultpatternlength = olddpl;
-				selectdone = 1;
-				break;
-
-			case KEY_ENTER:
-				selectdone = 1;
-				break;
-			}
-		}
-		printblank(20, 36, 58);
+		if (patternlength < 1) patternlength = 1;
+		if (patternlength > MAX_PATTROWS) patternlength = MAX_PATTROWS;
+		defaultpatternlength = patternlength;
 	}
-
 	if (cs | cp | ci | ct | cn)
-		memset(songfilename, 0, sizeof songfilename);
-	clearsong(cs, cp, ci, ct, cn);
-
-	key = 0;
-	rawkey = 0;
+	{
+		clearsong(cs, cp, ci, ct, cn);
+		undoInitAllAreas();
+		gui_message("Song cleared");
+	}
 }
 
-void editadsr(void)
+// Hard restart ADSR dialog result
+void sethradsr(unsigned value)
 {
-	eamode = 1;
-	editorInfo.eacolumn = 0;
-
-	for (;;)
-	{
-		waitkeymouse();
-
-		if (win_quitted)
-		{
-			exitprogram = 1;
-			key = 0;
-			rawkey = 0;
-			return;
-		}
-
-		if (hexnybble >= 0)
-		{
-			undoCreateEditorInfoBackup();
-
-			switch (editorInfo.eacolumn)
-			{
-			case 0:
-				editorInfo.adparam &= 0x0fff;
-				editorInfo.adparam |= hexnybble << 12;
-				break;
-
-			case 1:
-				editorInfo.adparam &= 0xf0ff;
-				editorInfo.adparam |= hexnybble << 8;
-				break;
-
-			case 2:
-				editorInfo.adparam &= 0xff0f;
-				editorInfo.adparam |= hexnybble << 4;
-				break;
-
-			case 3:
-				editorInfo.adparam &= 0xfff0;
-				editorInfo.adparam |= hexnybble;
-				break;
-			}
-			editorInfo.eacolumn++;
-			undoAddEditorSettingsToList();
-		}
-
-		switch (rawkey)
-		{
-		case KEY_F7:
-			if (!shiftpressed) break;
-
-		case KEY_ESC:
-		case KEY_ENTER:
-		case KEY_TAB:
-			eamode = 0;
-			key = 0;
-			rawkey = 0;
-			return;
-
-		case KEY_BACKSPACE:
-			if (!editorInfo.eacolumn) break;
-		case KEY_LEFT:
-			editorInfo.eacolumn--;
-			break;
-
-		case KEY_RIGHT:
-			editorInfo.eacolumn++;
-		}
-		editorInfo.eacolumn &= 3;
-
-		if ((mouseb) && (!prevmouseb))
-		{
-			eamode = 0;
-			return;
-		}
-	}
+	undoCreateEditorInfoBackup();
+	editorInfo.adparam = value & 0xffff;
+	undoAddEditorSettingsToList();
 }
 
 void getparam(FILE *handle, unsigned *value)

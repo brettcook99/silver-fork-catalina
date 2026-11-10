@@ -30,6 +30,8 @@
 #include "gmidi.h"
 #include "gmidifile.h"
 #include "gmacmenu.h"
+#include "gcommand.h"
+#include "gfileio.h"
 
 #define EDIT_PATTERN 0
 #define EDIT_ORDERLIST 1
@@ -113,20 +115,19 @@ void waitkeynoupdate(void);
 void waitkeymousenoupdate(void);
 void converthex(void);
 void docommand(void);
-void onlinehelp(int standalone, int context);
-void mousecommands(void);
 void generalcommands(void);
 void midicommands(void);
 int menucommands(void);
 int numpadcommands(void);
-void importmidi(void);
 void load(void);
 void save(void);
-void quit(void);
-void clear(void);
+void runcommand(int cmd, const char *path);
+void clearsongparts(int optimize, int cs, int cp, int ci, int ct, int cn, int patternlength);
+void sethradsr(unsigned value);
+void do_sound_init(void);
+void toggle_interpolation_mode(void);
 void prevmultiplier(void);
 void nextmultiplier(void);
-void editadsr(void);
 void calculatefreqtable(void);
 void setspecialnotenames(void);
 void readscalatuningfile(void);

@@ -1744,7 +1744,7 @@ void mergesong(void)
   }
 
   ABORT:
-  fclose(handle);
+  if (handle) fclose(handle);
   countpatternlengths();
   songchange();
 }

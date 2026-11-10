@@ -1,0 +1,233 @@
+// GoatTracker GUI: the help window
+
+#include "gui_internal.h"
+
+using namespace gui;
+
+struct HelpLine
+{
+  const char *key;
+  const char *text;
+};
+
+struct HelpSection
+{
+  const char *title;
+  const HelpLine *lines;
+};
+
+#ifdef __APPLE__
+#define CMD "CMD"
+#define FINDERTEXT ", or double-click them in the Finder"
+#else
+#define CMD "CTRL"
+#define FINDERTEXT ""
+#endif
+
+static const HelpLine interfacelines[] = {
+  { "Panels", "Arrangement (top), Pattern Editor (middle), Library and Inspector (left), Tables and Song (right). Drag a panel's tab to move or dock it elsewhere; View > Reset Layout restores the default." },
+  { "Keyboard focus", "The panel with the blue frame gets the keys. Click a panel, or use F5-F8 / TAB, to move the focus." },
+  { "Mouse wheel", "Scrolls the panel under the pointer without moving the edit cursor. Scrolling the pattern editor while the song plays stops following the playback until you click the Follow button or stop." },
+  { "Arrangement", "Patterns are regions as long as they play. Click to select, double-click to edit the pattern, SHIFT+click to mark, right-click for more. " CMD "+wheel zooms." },
+  { "Pattern editor", "Click a cell to move the cursor, drag to select rows, SHIFT+click to extend, right-click for editing commands. M / S mute and solo a voice." },
+  { "Instruments", "Pick an instrument in the Library (double-click to rename). The Inspector has knobs for the envelope, waveform buttons, and the arrows jump to the instrument's tables. Hold the speaker / Hold to Play to hear it." },
+  { "Tables", "Hover a row to see what it does. Click to edit, drag to mark, right-click for table commands." },
+  { "Files", "File > Open (F10) opens songs and imports SID, MIDI and chipsynth files. You can also drop files onto the window" FINDERTEXT "." },
+  { "Text size", CMD " + = bigger, " CMD " + - smaller, " CMD " + 0 default. ALT/OPTION+ENTER toggles full screen." },
+  { NULL, NULL }
+};
+
+static const HelpLine generallines[] = {
+  { "F1", "Play from the beginning" },
+  { "F2", "Play from the current position" },
+  { "F3", "Play the current pattern" },
+  { "F4", "Stop (SHIFT+F4 mutes the current channel)" },
+  { "SHIFT+F1-F3", "Play with the opposite follow mode" },
+  { "F5 / F6 / F7 / F8", "Pattern editor / Arrangement / Instrument & tables / Song info" },
+  { "TAB", "Next editor (SHIFT+TAB previous)" },
+  { "F9", "Export (pack, relocate & save SID, PRG or BIN)" },
+  { "F10 / F11", "Open / save (in the instrument editor: the instrument)" },
+  { "F12", "This help" },
+  { "SHIFT+F5 / F6", "Speed multiplier down / up" },
+  { "SHIFT+F7", "Hard restart ADSR" },
+  { "SHIFT+F8", "Switch between 6581 and 8580" },
+  { "SHIFT+F9", "Toggle reSID interpolation" },
+  { "NUMPAD 0", "Play from the start of the pattern / stop" },
+  { "SHIFT+, .", "Move the song start position & restart" },
+  { "- +", "Select instrument" },
+  { "/ *", "Select octave" },
+  { CMD "+Z", "Undo" },
+  { CMD "+1-9", "Same as F1-F9" },
+  { CMD "+R", "Edit mode / jam mode" },
+  { CMD "+F", "Follow playback" },
+  { "SHIFT+ESC", "Clear / optimize the song" },
+  { "ESC", "Quit" },
+  { NULL, NULL }
+};
+
+static const HelpLine patternlines[] = {
+  { "Note keys", "Enter notes like on a piano (MIDI keyboard too)" },
+  { "0-9, A-F", "Instrument number, command and its data" },
+  { "SPACE", "Play from the cursor / stop (SHIFT+SPACE: without follow)" },
+  { "BACKSPACE", "Insert a rest" },
+  { "RETURN", "Keyoff (SHIFT+RETURN: keyon)" },
+  { "INS / DEL", "Insert / delete a row (on the end mark: change the length)" },
+  { "< >", "Select pattern" },
+  { "BACKQUOTE", "Select channel" },
+  { "NUMPAD 1-7", "Go to row 8, 16, 24 ... 56" },
+  { "SHIFT+CURSOR", "Mark" },
+  { "SHIFT+Q / A", "Transpose half step up / down" },
+  { "SHIFT+W / S", "Transpose octave up / down" },
+  { "SHIFT+E / R", "Copy / paste commands" },
+  { "SHIFT+H", "Make hifi vibrato / portamento speed" },
+  { "SHIFT+I", "Invert selection / pattern" },
+  { "SHIFT+J / K", "Join / split pattern" },
+  { "SHIFT+L", "Mark / unmark the whole pattern" },
+  { "SHIFT+M / N", "Highlighting step" },
+  { "SHIFT+O / P", "Shrink / expand pattern" },
+  { "SHIFT+X / C / V", "Cut / copy / paste" },
+  { "SHIFT+Z", "Cycle auto-advance mode" },
+  { "SHIFT+1 / 2 / 3", "Mute channel" },
+  { NULL, NULL }
+};
+
+static const HelpLine orderlines[] = {
+  { "0-9, A-F", "Enter pattern numbers" },
+  { "SPACE", "Set the start position for F2" },
+  { "BACKSPACE", "Set the end position for F2" },
+  { "RETURN", "Edit the pattern (SHIFT: all channels)" },
+  { "< >", "Select subtune" },
+  { "- +", "Insert transpose down / up" },
+  { "SHIFT+R", "Insert repeat" },
+  { "SHIFT+CURSOR", "Mark" },
+  { "SHIFT+L", "Mark / unmark the whole orderlist" },
+  { "SHIFT+X / C / V", "Cut / copy / paste" },
+  { "SHIFT+1 / 2 / 3", "Swap the orderlist with channel 1 / 2 / 3" },
+  { NULL, NULL }
+};
+
+static const HelpLine instrumentlines[] = {
+  { "0-9, A-F", "Enter values" },
+  { "SPACE", "Play a test note (SHIFT+SPACE: silence)" },
+  { "RETURN", "Go to the table" },
+  { "BACKQUOTE", "Select table" },
+  { "SHIFT+CURSOR", "Mark table rows" },
+  { "SHIFT+Q / W", "Transpose speedtable speed half step / octave up" },
+  { "SHIFT+A / S", "Transpose speedtable speed half step / octave down" },
+  { "SHIFT+L", "Convert pulse/filter limit to time" },
+  { "SHIFT+N", "Edit name / negate value or note" },
+  { "SHIFT+O", "Optimize table (remove unused rows)" },
+  { "SHIFT+R", "Absolute / relative note" },
+  { "SHIFT+S", "Smart instrument paste" },
+  { "SHIFT+U", "Unlock / lock table scrolling" },
+  { "SHIFT+X / C / V", "Cut / copy / paste instrument or table" },
+  { "SHIFT+DEL", "Delete instrument and its tables" },
+  { "SHIFT+RETURN", "Convert vibrato parameter" },
+  { NULL, NULL }
+};
+
+static const HelpLine commandlines[] = {
+  { "0XY", "Do nothing" },
+  { "1XY", "Portamento up. XY = speedtable position of the speed" },
+  { "2XY", "Portamento down. XY = speedtable position" },
+  { "3XY", "Toneportamento to the note. XY = speedtable position, 00 = tie note" },
+  { "4XY", "Vibrato. XY = speedtable position (left: speed, right: depth)" },
+  { "5XY", "Set attack / decay to XY" },
+  { "6XY", "Set sustain / release to XY" },
+  { "7XY", "Set waveform to XY" },
+  { "8XY", "Set wavetable position (00 stops it)" },
+  { "9XY", "Set pulsetable position (00 stops it)" },
+  { "AXY", "Set filtertable position (00 stops it)" },
+  { "BXY", "Filter control: X = resonance, Y = channel bits. 00 = filter off" },
+  { "CXY", "Set filter cutoff" },
+  { "DXY", "Master volume Y (if X = 0), else written to the timing mark" },
+  { "EXY", "Funktempo: XY = speedtable position of the two tempos" },
+  { "FXY", "Set tempo: 03-7F all channels, 83-FF this channel. 00/01 = funktempo" },
+  { NULL, NULL }
+};
+
+static const HelpLine tablelines[] = {
+  { "Wave left", "00 = no change, 01-0F = wait, 10-DF = waveform, E0-EF = silent waveform, F0-FE = pattern command, FF = jump" },
+  { "Wave right", "00-5F relative note up, 60-7F down, 80 = unchanged, 81-DF absolute note" },
+  { "Pulse left", "01-7F = modulate for N frames (right: speed), 8X-FX = set width (X = high bits, right = low bits), FF = jump" },
+  { "Filter left", "00 = set cutoff (right), 01-7F = modulate (right: speed), 80-F0 = filter type & resonance / channels (right), FF = jump" },
+  { "Speedtable", "Vibrato: left speed, right depth. Portamento: 16-bit speed. Funktempo: two tempos. High bit in left = note-independent" },
+  { "Jump", "FF with right side 00 stops the table, otherwise jumps to that row" },
+  { NULL, NULL }
+};
+
+static const HelpSection sections[] = {
+  { "Using the interface", interfacelines },
+  { "General keys", generallines },
+  { "Pattern editor", patternlines },
+  { "Arrangement (orderlist)", orderlines },
+  { "Instrument & tables", instrumentlines },
+  { "Pattern commands", commandlines },
+  { "Tables", tablelines },
+  { NULL, NULL }
+};
+
+static bool linematches(const HelpLine &l, const char *filter)
+{
+  ImGuiTextFilter f;
+  if (!filter[0]) return true;
+  strncpy(f.InputBuf, filter, sizeof f.InputBuf - 1);
+  f.InputBuf[sizeof f.InputBuf - 1] = 0;
+  f.Build();
+  return f.PassFilter(l.key) || f.PassFilter(l.text);
+}
+
+void gui::drawhelp(bool *open)
+{
+  static char filter[64] = "";
+  int s;
+
+  ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 46.0f, ImGui::GetFontSize() * 36.0f), ImGuiCond_FirstUseEver);
+  {
+    ImGuiViewport *vp = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+  }
+  if (!ImGui::Begin(WIN_HELP, open, ImGuiWindowFlags_NoDocking))
+  {
+    ImGui::End();
+    return;
+  }
+  if (ImGui::IsWindowAppearing()) ImGui::SetWindowFocus();
+
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  ImGui::InputTextWithHint("##filter", "Search keys and commands", filter, sizeof filter);
+  ImGui::BeginChild("##helptext");
+
+  for (s = 0; sections[s].title; s++)
+  {
+    const HelpLine *l;
+    bool any = false;
+
+    for (l = sections[s].lines; l->key; l++)
+    {
+      if (linematches(*l, filter)) { any = true; break; }
+    }
+    if (!any) continue;
+
+    sectiontitle(sections[s].title);
+    if (ImGui::BeginTable(sections[s].title, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+    {
+      ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 9.5f);
+      ImGui::TableSetupColumn("text", ImGuiTableColumnFlags_WidthStretch);
+      for (l = sections[s].lines; l->key; l++)
+      {
+        if (!linematches(*l, filter)) continue;
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::PushFont(fontmono, 0.0f);
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.instr), "%s", l->key);
+        ImGui::PopFont();
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextWrapped("%s", l->text);
+      }
+      ImGui::EndTable();
+    }
+  }
+  ImGui::EndChild();
+  ImGui::End();
+}

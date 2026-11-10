@@ -98,6 +98,16 @@ extern char packedsongname[MAX_PATHNAME];
 #define printmainscreen()
 #endif
 
+#ifndef GT2RELOC
+// Set by the export dialog: skip the option screens and write the file to
+// reloctarget. The packing results go to relocreport, relocresult = 1 when
+// the file was written
+int relocquiet = 0;
+char reloctarget[MAX_PATHNAME];
+char relocreport[512];
+int relocresult = 0;
+#endif
+
 void relocator(void)
 {
 #ifndef GT2RELOC
@@ -511,12 +521,16 @@ void relocator(void)
 
   // Select playroutine options
 #ifndef GT2RELOC
+  relocresult = 0;
+  relocreport[0] = 0;
+  if (!relocquiet)
+  {
   clearscreen();
   printblankc(0, 0, 15+16, MAX_COLUMNS);
   if (!strlen(loadedsongfilename))
     sprintf(textbuffer, "%s Packer/Relocator", programname);
   else
-    sprintf(textbuffer, "%s Packer/Relocator - %s", programname, loadedsongfilename);
+    sprintf(textbuffer, "%s Packer/Relocator - %s", programname, gt_basename(loadedsongfilename));
   textbuffer[MAX_COLUMNS] = 0;
   printtext(0, 0, 15+16, textbuffer);
   printtext(1, 2, CTITLE, "SELECT PLAYROUTINE OPTIONS: (CURSORS=MOVE/CHANGE, ENTER=ACCEPT, ESC=CANCEL)");
@@ -585,6 +599,7 @@ void relocator(void)
     }
   }
   if (selectdone == -1) goto PRCLEANUP;
+  }
 #endif
 
   // Disable optimizations if necessary
@@ -938,6 +953,8 @@ void relocator(void)
   fprintf(STDOUT, "Player address:   $%04X\n", playeradr);
   fprintf(STDOUT, "Zeropage address: $%04X\n", zeropageadr);
 #else
+  if (!relocquiet)
+  {
   sprintf(textbuffer, "SELECT START ADDRESS: (CURSORS=MOVE, ENTER=ACCEPT, ESC=CANCEL)");
   printtext(1, 11, 15, textbuffer);
 
@@ -1063,6 +1080,7 @@ void relocator(void)
   }
 
   if (selectdone == -1) goto PRCLEANUP;
+  }
 #endif
 
   // Validate frequencytable parameters
@@ -1439,12 +1457,29 @@ void relocator(void)
   }
 
 #else
+  if (relocquiet)
+  {
+    snprintf(relocreport, sizeof relocreport,
+      "Player %d, songs %d, orderlists %d, pattern table %d, patterns %d, instruments %d, tables %d bytes. Total %d bytes ($%04X-$%04X)",
+      playersize, songtblsize, songdatasize, patttblsize, pattdatasize, instrsize,
+      wavetblsize+pulsetblsize+filttblsize+speedtblsize, packedsize, playeradr, playeradr + packedsize - 1);
+    strncpy(packedsongname, reloctarget, sizeof packedsongname - 1);
+    packedsongname[sizeof packedsongname - 1] = 0;
+    songhandle = fopen(packedsongname, "wb");
+    if (!songhandle)
+    {
+      snprintf(relocreport, sizeof relocreport, "Could not write %s", packedsongname);
+      goto PRCLEANUP;
+    }
+  }
+  else
+  {
   clearscreen();
   printblankc(0, 0, 15+16, MAX_COLUMNS);
   if (!strlen(loadedsongfilename))
     sprintf(textbuffer, "%s Packer/Relocator", programname);
   else
-    sprintf(textbuffer, "%s Packer/Relocator - %s", programname, loadedsongfilename);
+    sprintf(textbuffer, "%s Packer/Relocator - %s", programname, gt_basename(loadedsongfilename));
   textbuffer[80] = 0;
   printtext(0, 0, 15+16, textbuffer);
 
@@ -1529,60 +1564,37 @@ void relocator(void)
   }
   if (selectdone == -1) goto PRCLEANUP;
 
-  // By default, copy loaded song name up to the extension
-  memset(packedsongname, 0, sizeof packedsongname);
-  for (c = 0; c < strlen(loadedsongfilename); c++)
+  // By default, the song's file name with the extension of the format
   {
-    if (loadedsongfilename[c] == '.') break;
-    packedsongname[c] = loadedsongfilename[c];
-  }
-  switch (fileformat)
-  {
-    case FORMAT_PRG:
-    strcat(packedsongname, ".prg");
-    break;
+    const char *ext = (fileformat == FORMAT_PRG) ? ".prg" : (fileformat == FORMAT_BIN) ? ".bin" : ".sid";
+    const char *base = "untitled";
 
-    case FORMAT_BIN:
-    strcat(packedsongname, ".bin");
-    break;
+    if (loadedsongfilename[0]) base = gt_basename(loadedsongfilename);
+    else if (suggestedsongname[0]) base = suggestedsongname;
+    gt_replaceext(base, ext, packedsongname, sizeof packedsongname);
 
-    case FORMAT_SID:
-    strcat(packedsongname, ".sid");
-    break;
-  }
-
-  // Now ask for filename, retry if unsuccessful
-  while (!songhandle)
-  {
-    if (!fileselector(packedsongname, packedpath, packedfilter, "Save Music+Playroutine", 3))
-      goto PRCLEANUP;
-
-    if (strlen(packedsongname) < MAX_FILENAME-4)
+    // Now ask for filename, retry if unsuccessful
+    while (!songhandle)
     {
-      int extfound = 0;
-      for (c = strlen(packedsongname)-1; c >= 0; c--)
-      {
-        if (packedsongname[c] == '.') extfound = 1;
-      }
-      if (!extfound)
-      {
-        switch (fileformat)
-        {
-          case FORMAT_PRG:
-          strcat(packedsongname, ".prg");
-          break;
+#ifdef __APPLE__
+      char savepath[MAX_PATHNAME];
 
-          case FORMAT_BIN:
-          strcat(packedsongname, ".bin");
-          break;
+      // Native save panel
+      if (!filedialog_save("Export the song with its player", ext + 1, packedsongname, savepath, MAX_PATHNAME))
+        goto PRCLEANUP;
+      strcpy(packedsongname, savepath);
+#else
+      if (!fileselector(packedsongname, packedpath, packedfilter, "Save Music+Playroutine", 3))
+        goto PRCLEANUP;
 
-          case FORMAT_SID:
-          strcat(packedsongname, ".sid");
-          break;
-        }
+      if (!strrchr(gt_basename(packedsongname), '.'))
+      {
+        if (strlen(packedsongname) < MAX_FILENAME-4) strcat(packedsongname, ext);
       }
+#endif
+      songhandle = fopen(packedsongname, "wb");
     }
-    songhandle = fopen(packedsongname, "wb");
+  }
   }
 #endif
 
@@ -1699,6 +1711,9 @@ void relocator(void)
 
   fwrite(packeddata, packedsize, 1, songhandle);
   fclose(songhandle);
+#ifndef GT2RELOC
+  relocresult = 1;
+#endif
 
   PRCLEANUP:
   membuf_free(&src);

@@ -135,12 +135,16 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
 
     SDL_PauseAudio(1);
 
-    if (SDL_OpenAudio(&desired, &obtained))
+    // SDL2: with obtained == NULL the requested format is guaranteed (SDL
+    // converts if the device wants something else, e.g. float on macOS) and
+    // the calculated buffer size is written back into desired
+    if (SDL_OpenAudio(&desired, NULL))
     {
         bme_error = BME_OPEN_ERROR;
         snd_uninit();
         return BME_ERROR;
     }
+    obtained = desired;
     snd_sndinitted = 1;
 
     snd_mixmode = 0;

@@ -1,6 +1,12 @@
 #ifndef GCONSOLE_H
 #define GCONSOLE_H
 
+// GoatTracker "console": keyboard/mouse input state that the editors read,
+// plus the classic 100x37 text screen. The text screen is only used by the
+// few remaining classic full-screen dialogs (file selector on non-macOS
+// systems, packer/relocator options); the GUI layer draws it as an overlay
+// on top of the new interface while such a dialog runs.
+
 #define MAX_COLUMNS 100
 #define MAX_ROWS 37
 #define HOLDDELAY 24
@@ -16,6 +22,16 @@
 #define MENUCMD_SELECTALL 5
 #define MENUCMD_IMPORTMIDI 6
 
+// Modifier bits of a queued key event
+#define KMOD_GT_SHIFT 1
+#define KMOD_GT_CTRL 2
+#define KMOD_GT_ALT 4
+#define KMOD_GT_META 8
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int initscreen(void);
 void closescreen(void);
 void clearscreen(void);
@@ -27,12 +43,38 @@ void printblank(int x, int y, int length);
 void printblankc(int x, int y, int color, int length);
 void drawbox(int x, int y, int color, int sx, int sy);
 void printbg(int x, int y, int color, int length);
+// Runs one frame of the user interface (with the text screen shown, as the
+// classic dialogs expect) and takes the next key / mouse input
 void getkey(void);
 void changetextsize(int dir);
 void togglefullscreen(void);
 
-#ifndef GCONSOLE_C
-extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shiftonlypressed,cursorflashdelay;
+// Key event queue, filled by the GUI layer from SDL events. rawkey is an
+// SDL keycode (KEY_xxx), key the typed character (0 if none) and mods a
+// combination of KMOD_GT_xxx
+void input_pushkey(int rawkey, int key, int mods);
+// Adds a typed character to the key event just pushed, or queues it on its
+// own if it does not belong to one
+void input_pushtext(int key, int mods);
+// Takes the next queued key event into key/rawkey/shiftpressed etc. and
+// applies the macOS/numpad key conversions. Returns 0 if the queue was empty
+// (key and rawkey are then 0)
+int input_nextkey(void);
+// Discards all queued key events
+void input_clearkeys(void);
+// Takes the next MIDI note event into midinoteon/midinoteoff. Returns 0 if
+// there was none
+int input_nextmidi(void);
+
+// The text screen: one unsigned per character, char | color << 16
+extern unsigned *scrbuffer;
+// Set while a classic dialog is drawing on the text screen
+extern int textscreenactive;
+// The mouse position on the text screen, as character cells (set by the GUI
+// while the text screen is shown)
+extern int textscreenmousex, textscreenmousey;
+
+extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shiftonlypressed, cursorflashdelay;
 extern int midinoteon, midinoteoff;
 extern int menucommand;
 extern int mouseb, prevmouseb;
@@ -43,6 +85,10 @@ extern unsigned bigwindow;
 extern unsigned bigwindowcmdline;
 extern unsigned windowedxsize;
 extern unsigned windowedysize;
+extern unsigned textsizepercent;
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif

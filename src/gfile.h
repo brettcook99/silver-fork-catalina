@@ -2,7 +2,9 @@
 #define GFILE_H
 
 #define MAX_DIRFILES 16384
-#define MAX_FILENAME 60
+#define MAX_FILENAME 256
+// Width of the name fields in the classic file selector box
+#define FS_BOXWIDTH 60
 #define MAX_PATHNAME 256
 
 typedef struct

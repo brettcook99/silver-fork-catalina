@@ -22,7 +22,20 @@ FILE *writehandle = NULL;
 
 void sound_playrout(void);
 void sound_mixer(Sint32 *dest, unsigned samples);
-Uint32 sound_timer(Uint32 interval);
+Uint32 sound_timer(Uint32 interval, void *param);
+
+// SDL2 timer used for HardSID / CatWeasel output (SDL 1.2 had SDL_SetTimer)
+static SDL_TimerID soundtimerid = 0;
+
+static void sound_settimer(Uint32 ms)
+{
+  if (soundtimerid)
+  {
+    SDL_RemoveTimer(soundtimerid);
+    soundtimerid = 0;
+  }
+  if (ms) soundtimerid = SDL_AddTimer(ms, sound_timer, NULL);
+}
 
 #ifdef __WIN32__
 
@@ -141,12 +154,12 @@ int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsig
     else return 0;
     if (!cycleexacthardsid)
     {
-      SDL_SetTimer(1000 / framerate, sound_timer);
+      sound_settimer(1000 / framerate);
     }
     else
     {
       runplayerthread = TRUE;
-      playerthread = SDL_CreateThread(sound_thread, NULL);
+      playerthread = SDL_CreateThread(sound_thread, "gt2player", NULL);
       if (!playerthread) return 0;
     }
     #else
@@ -163,7 +176,7 @@ int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsig
       }
     }
     else return 0;
-    SDL_SetTimer(1000 / framerate, sound_timer);
+    sound_settimer(1000 / framerate);
     #endif
 
     goto SOUNDOK;
@@ -191,7 +204,7 @@ int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsig
     #endif
 
     usecatweasel = 1;
-    SDL_SetTimer(1000 / framerate, sound_timer);
+    sound_settimer(1000 / framerate);
     goto SOUNDOK;
   }
 
@@ -239,7 +252,7 @@ void sound_uninit(void)
     #ifdef __WIN32__
     if (!playerthread)
     {
-      SDL_SetTimer(0, NULL);
+      sound_settimer(0);
     }
     else
     {
@@ -248,7 +261,7 @@ void sound_uninit(void)
       playerthread = NULL;
     }
     #else
-    SDL_SetTimer(0, NULL);
+    sound_settimer(0);
     #endif
   }
   else
@@ -341,8 +354,9 @@ void sound_flush(void)
   #endif
 }
 
-Uint32 sound_timer(Uint32 interval)
+Uint32 sound_timer(Uint32 interval, void *param)
 {
+  (void)param;
   if (!initted) return interval;
   sound_playrout();
   return interval;

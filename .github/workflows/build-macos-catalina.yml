@@ -41,6 +41,26 @@ jobs:
           else
             echo "::error::app icon $icon.icns missing from the bundle"; status=1
           fi
+          # Info.plist is valid and declares the document types (Finder double-click)
+          plutil -lint "$app/Contents/Info.plist" || status=1
+          if /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0' "$app/Contents/Info.plist" | grep -qx sng; then
+            echo "document types: ok"
+          else
+            echo "::error::CFBundleDocumentTypes for .sng missing"; status=1
+          fi
+          # SDL2 is linked directly; sdl12-compat is gone
+          if otool -L "$app/Contents/MacOS/goattrk2" | grep -q 'SDL2.framework'; then
+            echo "goattrk2 links SDL2.framework"
+          else
+            echo "::error::goattrk2 does not link SDL2.framework"; status=1
+          fi
+          if [ -e "$app/Contents/Frameworks/libSDL-1.2.0.dylib" ]; then
+            echo "::error::leftover sdl12-compat library in the bundle"; status=1
+          fi
+          # Interface fonts
+          for font in Inter-Regular.ttf Inter-SemiBold.ttf JetBrainsMono-Regular.ttf; do
+            [ -f "$app/Contents/Resources/fonts/$font" ] || { echo "::error::font $font missing"; status=1; }
+          done
           while IFS= read -r f; do
             case "$(file -b "$f")" in *Mach-O*) ;; *) continue ;; esac
             lipo "$f" -verify_arch x86_64 || { echo "::error::$f has no x86_64 code"; status=1; continue; }

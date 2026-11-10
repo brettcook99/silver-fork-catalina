@@ -1,20 +1,23 @@
 //
 // GOATTRACKER v2 macOS menu bar
 //
-// File, Edit, Control and Help menus are added between the application
-// menu and the Window menu that SDL creates. Clicking an item queues its key
-// (see gmacmenu.h); getkey() then handles it like a keypress.
+// File, Edit, Control, View and Help menus are added between the
+// application menu and the Window menu that SDL creates. Clicking an item
+// queues its command (gcommand.h); the main loop runs it.
 //
 
 #import <Cocoa/Cocoa.h>
-#include "SDL_keysym.h"
 #include "gmacmenu.h"
+#include "gcommand.h"
 
-static int pendingitem = 0;
+// Recent files list, kept by the GUI
+extern int gui_recentfilecount(void);
+extern const char *gui_recentfile(int index);
+
 static int recordstate = 1;
 static int followstate = 1;
 
-// The tracker handles the shortcut keys itself (they also arrive as SDL key
+// The GUI handles the shortcut keys itself (they also arrive as SDL key
 // events), so these menus must not act on them a second time. They only
 // show the shortcuts and handle clicks
 @interface GTMenu : NSMenu
@@ -28,46 +31,100 @@ static int followstate = 1;
 }
 @end
 
-@interface GTMenuTarget : NSObject
+@interface GTMenuTarget : NSObject <NSMenuDelegate>
 - (void)itemSelected:(id)sender;
+- (void)recentSelected:(id)sender;
 @end
 
 @implementation GTMenuTarget
 - (void)itemSelected:(id)sender
 {
-  pendingitem = (int)[sender tag];
+  cmd_post((int)[sender tag]);
+}
+
+- (void)recentSelected:(id)sender
+{
+  NSString *path = [sender representedObject];
+  if (path) cmd_postfile(GTCMD_OPENFILE, [path fileSystemRepresentation]);
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem *)item
 {
   int tag = (int)[item tag];
 
-  if (tag == (SDLK_r | MACMENU_CMD))
+  if (tag == GTCMD_RECORD)
     [item setState:recordstate ? NSControlStateValueOn : NSControlStateValueOff];
-  if (tag == (SDLK_f | MACMENU_CMD))
+  if (tag == GTCMD_FOLLOW)
     [item setState:followstate ? NSControlStateValueOn : NSControlStateValueOff];
 
-  // Tag 0 = not available (Redo)
-  return tag != 0;
+  // Tag 0 = not available
+  if (([item action] == @selector(itemSelected:)) && (tag == 0)) return NO;
+  return YES;
+}
+
+// Fills the Open Recent menu each time it opens
+- (void)menuNeedsUpdate:(NSMenu *)menu
+{
+  int c;
+  int count = gui_recentfilecount();
+
+  [menu removeAllItems];
+  for (c = 0; c < count; c++)
+  {
+    const char *path = gui_recentfile(c);
+    NSString *fullpath;
+    NSMenuItem *item;
+
+    if ((!path) || (!path[0])) continue;
+    fullpath = [NSString stringWithUTF8String:path];
+    if (!fullpath) continue;
+    item = [[NSMenuItem alloc] initWithTitle:[fullpath lastPathComponent] action:@selector(recentSelected:) keyEquivalent:@""];
+    [item setTarget:self];
+    [item setRepresentedObject:fullpath];
+    [item setToolTip:fullpath];
+    [menu addItem:item];
+    [item release];
+  }
+  if (![menu numberOfItems])
+  {
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"No Recent Files" action:nil keyEquivalent:@""];
+    [item setEnabled:NO];
+    [menu addItem:item];
+    [item release];
+  }
 }
 @end
 
 static GTMenuTarget *target = nil;
 
-// Adds an item. key is the key equivalent shown in the menu ("" = none) and
-// tag is what the item does (a key with modifier flags, 0 = disabled)
-static void additem(NSMenu *menu, NSString *title, NSString *key, int tag)
+#define MOD_CMD 1
+#define MOD_SHIFT 2
+#define MOD_OPTION 4
+#define MOD_CTRL 8
+
+// Adds an item. key is the key equivalent shown in the menu ("" = none),
+// mods the modifiers shown with it and cmd the command it runs
+static void additem(NSMenu *menu, NSString *title, NSString *key, int mods, int cmd)
 {
   NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:title action:@selector(itemSelected:) keyEquivalent:key];
   NSEventModifierFlags mask = 0;
 
-  if (tag & MACMENU_CMD) mask |= NSEventModifierFlagCommand;
-  if (tag & MACMENU_SHIFT) mask |= NSEventModifierFlagShift;
+  if (mods & MOD_CMD) mask |= NSEventModifierFlagCommand;
+  if (mods & MOD_SHIFT) mask |= NSEventModifierFlagShift;
+  if (mods & MOD_OPTION) mask |= NSEventModifierFlagOption;
+  if (mods & MOD_CTRL) mask |= NSEventModifierFlagControl;
   [item setKeyEquivalentModifierMask:mask];
   [item setTarget:target];
-  [item setTag:tag];
+  [item setTag:cmd];
   [menu addItem:item];
   [item release];
+}
+
+// An item with a function key (F1...) as its shortcut
+static void addfkeyitem(NSMenu *menu, NSString *title, int fkey, int mods, int cmd)
+{
+  unichar ch = (unichar)(NSF1FunctionKey + fkey - 1);
+  additem(menu, title, [NSString stringWithCharacters:&ch length:1], mods, cmd);
 }
 
 static NSMenu *newmenu(NSString *title)
@@ -86,6 +143,14 @@ static void insertmenu(NSMenu *mainmenu, NSMenu *menu, NSInteger index)
   [item release];
 }
 
+static void addsubmenu(NSMenu *menu, NSMenu *submenu)
+{
+  NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:[submenu title] action:nil keyEquivalent:@""];
+  [item setSubmenu:submenu];
+  [menu addItem:item];
+  [item release];
+}
+
 void macmenu_init(void)
 {
   static int initted = 0;
@@ -96,7 +161,7 @@ void macmenu_init(void)
   @autoreleasepool
   {
     NSMenu *mainmenu = [NSApp mainMenu];
-    NSMenu *file, *edit, *control, *help;
+    NSMenu *file, *recent, *import, *edit, *control, *view, *help;
     NSInteger index = -1;
 
     if (!mainmenu) return;
@@ -104,65 +169,100 @@ void macmenu_init(void)
     target = [[GTMenuTarget alloc] init];
 
     file = newmenu(@"File");
-    additem(file, @"Load Song/Instrument…", @"o", SDLK_o | MACMENU_CMD);
-    additem(file, @"Merge Song…", @"o", SDLK_o | MACMENU_CMD | MACMENU_SHIFT);
-    additem(file, @"Save Song/Instrument…", @"s", SDLK_s | MACMENU_CMD);
+    additem(file, @"New Song", @"n", MOD_CMD, GTCMD_NEW);
+    additem(file, @"Open…", @"o", MOD_CMD, GTCMD_OPEN);
+    recent = newmenu(@"Open Recent");
+    [recent setDelegate:target];
+    addsubmenu(file, recent);
     [file addItem:[NSMenuItem separatorItem]];
-    additem(file, @"Import MIDI File…", @"i", SDLK_i | MACMENU_CMD);
+    additem(file, @"Save", @"s", MOD_CMD, GTCMD_SAVE);
+    additem(file, @"Save As…", @"s", MOD_CMD | MOD_SHIFT, GTCMD_SAVEAS);
+    [file addItem:[NSMenuItem separatorItem]];
+    additem(file, @"Merge Song…", @"o", MOD_CMD | MOD_SHIFT, GTCMD_MERGE);
+    import = newmenu(@"Import");
+    additem(import, @"SID File…", @"i", MOD_CMD | MOD_SHIFT, GTCMD_IMPORTSID);
+    additem(import, @"MIDI File…", @"i", MOD_CMD, GTCMD_IMPORTMIDI);
+    additem(import, @"chipsynth C64 Patch (.fermatax)…", @"", 0, GTCMD_IMPORTPATCH);
+    addsubmenu(file, import);
+    [file addItem:[NSMenuItem separatorItem]];
+    additem(file, @"Load Instrument…", @"", 0, GTCMD_LOADINSTR);
+    additem(file, @"Save Instrument…", @"", 0, GTCMD_SAVEINSTR);
+    [file addItem:[NSMenuItem separatorItem]];
+    additem(file, @"Export SID / PRG / BIN…", @"e", MOD_CMD, GTCMD_EXPORT);
 
     edit = newmenu(@"Edit");
-    additem(edit, @"Undo", @"z", SDLK_z | MACMENU_CMD);
-    additem(edit, @"Redo", @"z", 0);
-    [[edit itemAtIndex:1] setKeyEquivalentModifierMask:NSEventModifierFlagCommand | NSEventModifierFlagShift];
+    additem(edit, @"Undo", @"z", MOD_CMD, GTCMD_UNDO);
     [edit addItem:[NSMenuItem separatorItem]];
-    additem(edit, @"Cut", @"x", SDLK_x | MACMENU_CMD);
-    additem(edit, @"Copy", @"c", SDLK_c | MACMENU_CMD);
-    additem(edit, @"Paste", @"v", SDLK_v | MACMENU_CMD);
-    additem(edit, @"Delete", @"", SDLK_DELETE);
-    additem(edit, @"Select All", @"a", SDLK_a | MACMENU_CMD);
+    additem(edit, @"Cut", @"x", MOD_CMD, GTCMD_CUT);
+    additem(edit, @"Copy", @"c", MOD_CMD, GTCMD_COPY);
+    additem(edit, @"Paste", @"v", MOD_CMD, GTCMD_PASTE);
+    additem(edit, @"Delete", @"", 0, GTCMD_DELETE);
+    additem(edit, @"Select All", @"a", MOD_CMD, GTCMD_SELECTALL);
+    [edit addItem:[NSMenuItem separatorItem]];
+    additem(edit, @"Transpose Up", @"", 0, GTCMD_TRANSPOSEUP);
+    additem(edit, @"Transpose Down", @"", 0, GTCMD_TRANSPOSEDOWN);
+    additem(edit, @"Transpose Octave Up", @"", 0, GTCMD_TRANSPOSEOCTUP);
+    additem(edit, @"Transpose Octave Down", @"", 0, GTCMD_TRANSPOSEOCTDOWN);
+    [edit addItem:[NSMenuItem separatorItem]];
+    additem(edit, @"Hard Restart ADSR…", @"", 0, GTCMD_HRADSR);
+    additem(edit, @"Clear / Optimize Song…", @"", 0, GTCMD_CLEARSONG);
 
     control = newmenu(@"Control");
-    additem(control, @"Play From Beginning", @"1", SDLK_1 | MACMENU_CMD);
-    additem(control, @"Play From Current Position", @"2", SDLK_2 | MACMENU_CMD);
-    additem(control, @"Play Pattern", @"3", SDLK_3 | MACMENU_CMD);
-    additem(control, @"Stop", @"4", SDLK_4 | MACMENU_CMD);
-    additem(control, @"Play / Stop", @" ", MACMENU_PLAYSTOP);
+    additem(control, @"Play / Stop", @" ", 0, GTCMD_PLAYSTOP);
+    addfkeyitem(control, @"Play From Beginning", 1, 0, GTCMD_PLAYSONG);
+    addfkeyitem(control, @"Play From Current Position", 2, 0, GTCMD_PLAYPOS);
+    addfkeyitem(control, @"Play Pattern", 3, 0, GTCMD_PLAYPATTERN);
+    addfkeyitem(control, @"Stop", 4, 0, GTCMD_STOP);
     [control addItem:[NSMenuItem separatorItem]];
-    additem(control, @"Record (Edit Mode)", @"r", SDLK_r | MACMENU_CMD);
-    additem(control, @"Follow Playback", @"f", SDLK_f | MACMENU_CMD);
+    additem(control, @"Record (Edit Mode)", @"r", MOD_CMD, GTCMD_RECORD);
+    additem(control, @"Follow Playback", @"f", MOD_CMD, GTCMD_FOLLOW);
     [control addItem:[NSMenuItem separatorItem]];
-    additem(control, @"Go To Pattern Editor", @"5", SDLK_5 | MACMENU_CMD);
-    additem(control, @"Go To Song Editor", @"6", SDLK_6 | MACMENU_CMD);
-    additem(control, @"Go To Instrument/Table Editor", @"7", SDLK_7 | MACMENU_CMD);
-    additem(control, @"Go To Songname Editor", @"8", SDLK_8 | MACMENU_CMD);
+    additem(control, @"Octave Up", @"", 0, GTCMD_OCTAVEUP);
+    additem(control, @"Octave Down", @"", 0, GTCMD_OCTAVEDOWN);
+    additem(control, @"Next Subtune", @"", 0, GTCMD_NEXTSUBTUNE);
+    additem(control, @"Previous Subtune", @"", 0, GTCMD_PREVSUBTUNE);
     [control addItem:[NSMenuItem separatorItem]];
-    additem(control, @"Export Song", @"9", SDLK_9 | MACMENU_CMD);
+    addfkeyitem(control, @"Pattern Editor", 5, 0, GTCMD_EDITPATTERN);
+    addfkeyitem(control, @"Arrangement (Orderlist)", 6, 0, GTCMD_EDITORDER);
+    addfkeyitem(control, @"Instrument / Tables", 7, 0, GTCMD_EDITINSTR);
+    addfkeyitem(control, @"Song Info", 8, 0, GTCMD_EDITNAMES);
+
+    view = newmenu(@"View");
+    additem(view, @"Library", @"", 0, GTCMD_TOGGLELIBRARY);
+    additem(view, @"Inspector", @"", 0, GTCMD_TOGGLEINSPECTOR);
+    additem(view, @"Arrangement", @"", 0, GTCMD_TOGGLETRACKS);
+    additem(view, @"Tables", @"", 0, GTCMD_TOGGLETABLES);
+    additem(view, @"Song Info", @"", 0, GTCMD_TOGGLESONG);
+    additem(view, @"Reset Layout", @"", 0, GTCMD_RESETLAYOUT);
+    [view addItem:[NSMenuItem separatorItem]];
+    additem(view, @"Bigger Text", @"=", MOD_CMD, GTCMD_ZOOMIN);
+    additem(view, @"Smaller Text", @"-", MOD_CMD, GTCMD_ZOOMOUT);
+    additem(view, @"Default Text Size", @"0", MOD_CMD, GTCMD_ZOOMRESET);
+    [view addItem:[NSMenuItem separatorItem]];
+    additem(view, @"Enter Full Screen", @"f", MOD_CMD | MOD_CTRL, GTCMD_FULLSCREEN);
 
     help = newmenu(@"Help");
-    additem(help, @"GoatTracker Help", @"", SDLK_F12);
+    additem(help, @"GoatTracker Help", @"?", MOD_CMD, GTCMD_HELP);
 
-    // File, Edit and Control go before the Window menu, Help at the end
+    // File, Edit, Control and View go before the Window menu, Help at the end
     if ([NSApp windowsMenu]) index = [mainmenu indexOfItemWithSubmenu:[NSApp windowsMenu]];
     if (index < 0) index = [mainmenu indexOfItemWithTitle:@"Window"];
     if (index < 0) index = [mainmenu numberOfItems];
     insertmenu(mainmenu, file, index);
     insertmenu(mainmenu, edit, index + 1);
     insertmenu(mainmenu, control, index + 2);
+    insertmenu(mainmenu, view, index + 3);
     insertmenu(mainmenu, help, [mainmenu numberOfItems]);
     [NSApp setHelpMenu:help];
 
     [file release];
+    [recent release];
+    [import release];
     [edit release];
     [control release];
+    [view release];
     [help release];
   }
-}
-
-int macmenu_getitem(void)
-{
-  int item = pendingitem;
-  pendingitem = 0;
-  return item;
 }
 
 void macmenu_setstate(int record, int follow)

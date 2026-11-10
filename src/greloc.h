@@ -37,6 +37,14 @@ extern int tableerror;
 #endif
 
 void relocator(void);
+
+#ifndef GT2RELOC
+// Export dialog: options set beforehand, no option screens (see greloc.c)
+extern int relocquiet;
+extern char reloctarget[];
+extern char relocreport[];
+extern int relocresult;
+#endif
 int testoverlap(int area1start, int area1size, int area2start, int area2size);
 int packpattern(unsigned char *dest, unsigned char *src, int rows);
 unsigned char swapnybbles(unsigned char n);

@@ -4,12 +4,12 @@
 #
 # Builds GoatTracker 2 as a self-contained GoatTracker2.app that
 # runs on macOS 10.15 Catalina and later. Homebrew and MacPorts are NOT needed:
-# the script downloads the official SDL2 framework and the sdl12-compat source,
-# builds sdl12-compat, compiles GoatTracker and puts everything into the app.
+# the script downloads the official SDL2 framework, compiles GoatTracker
+# (with its Dear ImGui user interface) and puts everything into the app.
 #
 # Requirements:
 #   - Xcode Command Line Tools   (install with: xcode-select --install)
-#   - Internet access on the first run (about 3 MB, cached in build-macos/)
+#   - Internet access on the first run (about 2 MB, cached in build-macos/)
 #
 # Usage:
 #   ./build_catalina.sh
@@ -31,11 +31,6 @@ set -euo pipefail
 SDL2_VERSION="2.32.10"
 SDL2_SHA256="4a7ac31640d70214e848f994be8a12849c0f97918a7e6c2e27a40036166d1a7f"
 SDL2_URL="https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.dmg"
-
-SDL12COMPAT_VERSION="1.2.78"
-SDL12COMPAT_SHA256="bdc5277cf3a8ae18c7493a7d4d0867c53439a9e5a661133dcf1f2eb0b9ddca4d"
-SDL12COMPAT_URL="https://github.com/libsdl-org/sdl12-compat/releases/download/release-${SDL12COMPAT_VERSION}/sdl12-compat-${SDL12COMPAT_VERSION}.tar.gz"
-SDL12_DYLIB_VERSION="12.78.0"   # dylib current_version, as sdl12-compat's CMake sets it
 
 ARCH="${ARCH:-x86_64}"
 MACOS_MIN="${MACOS_MIN:-10.15}"
@@ -120,9 +115,7 @@ fetch() {
 
 step "Fetching dependencies"
 SDL2_DMG="$DL/SDL2-$SDL2_VERSION.dmg"
-SDL12_TGZ="$DL/sdl12-compat-$SDL12COMPAT_VERSION.tar.gz"
 fetch "$SDL2_URL" "$SDL2_SHA256" "$SDL2_DMG"
-fetch "$SDL12COMPAT_URL" "$SDL12COMPAT_SHA256" "$SDL12_TGZ"
 
 # ---------------------------------------------------------------------------
 # SDL2: official framework from the release disk image (supports 10.11+)
@@ -143,71 +136,36 @@ cleanup
 trap - EXIT
 
 # ---------------------------------------------------------------------------
-# sdl12-compat: SDL 1.2 API on top of SDL2 (what Homebrew's sdl12-compat is)
-# ---------------------------------------------------------------------------
-
-step "Building sdl12-compat $SDL12COMPAT_VERSION"
-SDL12_SRC="$BUILD/sdl12-compat-$SDL12COMPAT_VERSION"
-SDL12_OBJ="$BUILD/obj-sdl12-compat"
-rm -rf "$SDL12_SRC" "$SDL12_OBJ" "$DEPS/lib" "$DEPS/include"
-tar -xzf "$SDL12_TGZ" -C "$BUILD"
-mkdir -p "$SDL12_OBJ" "$DEPS/lib" "$DEPS/include"
-
-SDL12_CFLAGS=(-O2 -fPIC -DNDEBUG -D_THREAD_SAFE -DSDL_DISABLE_IMMINTRIN_H -w)
-
-# The library itself is compiled against the SDL2 headers. sdl12-compat
-# includes "SDL.h" (needs -I) and the framework's headers include each other
-# as <SDL2/...> (needs -F, the framework search path).
-SDL2_INC=(-F"$DEPS" -I"$DEPS/SDL2.framework/Headers")
-"${CC_CMD[@]}" "${SDL12_CFLAGS[@]}" "${SDL2_INC[@]}" \
-    -c "$SDL12_SRC/src/SDL12_compat.c" -o "$SDL12_OBJ/SDL12_compat.o"
-"${CC_CMD[@]}" "${SDL12_CFLAGS[@]}" "${SDL2_INC[@]}" \
-    -c "$SDL12_SRC/src/SDL12_compat_objc.m" -o "$SDL12_OBJ/SDL12_compat_objc.o"
-
-# ...and loads SDL2 at runtime from the app's Contents/Frameworks folder.
-"${CC_CMD[@]}" -dynamiclib -o "$DEPS/lib/libSDL-1.2.0.dylib" \
-    "$SDL12_OBJ/SDL12_compat.o" "$SDL12_OBJ/SDL12_compat_objc.o" \
-    -Wl,-install_name,@rpath/libSDL-1.2.0.dylib \
-    -Wl,-compatibility_version,12.0.0 \
-    -Wl,-current_version,"$SDL12_DYLIB_VERSION" \
-    -Wl,-undefined,error \
-    -framework AppKit
-ln -sf libSDL-1.2.0.dylib "$DEPS/lib/libSDL.dylib"
-
-# SDLmain provides main() and the Cocoa application wrapper for SDL 1.2 apps.
-"${CC_CMD[@]}" -O2 -D_THREAD_SAFE -w -I"$SDL12_SRC/include/SDL" \
-    -c "$SDL12_SRC/src/SDLmain/macosx/SDLMain.m" -o "$SDL12_OBJ/SDLMain.o"
-libtool -static -o "$DEPS/lib/libSDLmain.a" "$SDL12_OBJ/SDLMain.o"
-
-cp -R "$SDL12_SRC/include/SDL" "$DEPS/include/"
-
-# ---------------------------------------------------------------------------
 # GoatTracker
 # ---------------------------------------------------------------------------
 
 step "Building GoatTracker2"
 
-# src/makefile asks sdl-config for compiler/linker flags. Provide one that
-# points at the libraries built above. Paths are relative to src/ (where make
-# runs) so that a repository path containing spaces does not break the build.
+# src/makefile asks sdl2-config for compiler/linker flags. Provide one that
+# points at the SDL2 framework extracted above. Paths are relative to src/
+# (where make runs) so that a repository path containing spaces does not
+# break the build. The framework headers include each other as <SDL2/...>
+# (needs -F) and GoatTracker includes "SDL.h" (needs -I).
 mkdir -p "$BUILD/bin"
-cat > "$BUILD/bin/sdl-config" <<'EOF'
+rm -f "$BUILD/bin/sdl-config"
+cat > "$BUILD/bin/sdl2-config" <<'EOF'
 #!/bin/sh
-# sdl-config for the build_catalina.sh build (paths relative to src/)
+# sdl2-config for the build_catalina.sh build (paths relative to src/)
 for arg in "$@"; do
     case "$arg" in
-        --cflags)  echo "-I../build-macos/deps/include/SDL -D_THREAD_SAFE" ;;
-        --libs)    echo "-L../build-macos/deps/lib -lSDLmain -lSDL -Wl,-framework,Cocoa -Wl,-rpath,@executable_path/../Frameworks" ;;
-        --version) echo "1.2.15" ;;
+        --cflags)  echo "-F../build-macos/deps -I../build-macos/deps/SDL2.framework/Headers -D_THREAD_SAFE" ;;
+        --libs)    echo "-F../build-macos/deps -framework SDL2 -Wl,-rpath,@executable_path/../Frameworks" ;;
+        --version) echo "2.32.10" ;;
         --prefix|--exec-prefix) echo "../build-macos/deps" ;;
     esac
 done
 EOF
-chmod +x "$BUILD/bin/sdl-config"
+chmod +x "$BUILD/bin/sdl2-config"
 export PATH="$BUILD/bin:$PATH"
 
 # reSID is C++98 code (it uses 'register', which C++17 rejects). Pin the
 # dialect so newer Xcode versions compile it the same way Catalina's does.
+# (The makefile compiles the Dear ImGui interface files as C++11.)
 export CXXFLAGS="-std=gnu++98"
 
 # Remove leftovers. The sf-v1.1 release zip ships Apple Silicon .o files and
@@ -219,6 +177,7 @@ make -C "$ROOT/src" clean >/dev/null
 # files). Without this, file timestamps after a clone/unzip can trigger it.
 make -C "$ROOT/src" -j"$JOBS" \
     -o goattrk2.dat -o goatdata.c \
+    SDLCONFIG=sdl2-config \
     CC="${CC_CMD[*]}" CXX="${CXX_CMD[*]}"
 
 for t in $TOOLS; do
@@ -236,9 +195,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resourc
 for t in $TOOLS; do
     cp "$ROOT/linux/$t" "$APP/Contents/MacOS/"
 done
-cp "$DEPS/lib/libSDL-1.2.0.dylib" "$APP/Contents/Frameworks/"
 ditto "$DEPS/SDL2.framework" "$APP/Contents/Frameworks/SDL2.framework"
 cp "$ROOT/macos/GoatTracker2.icns" "$APP/Contents/Resources/GoatTracker2.icns"
+# Interface fonts (Inter, JetBrains Mono; SIL Open Font License)
+mkdir -p "$APP/Contents/Resources/fonts"
+cp "$ROOT"/fonts/*.ttf "$ROOT"/fonts/*-OFL.txt "$APP/Contents/Resources/fonts/"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -271,6 +232,125 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>GoatTracker Song</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>CFBundleTypeExtensions</key>
+            <array><string>sng</string></array>
+            <key>LSItemContentTypes</key>
+            <array><string>net.sourceforge.goattracker2.song</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>GoatTracker Instrument</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>CFBundleTypeExtensions</key>
+            <array><string>ins</string></array>
+            <key>LSItemContentTypes</key>
+            <array><string>net.sourceforge.goattracker2.instrument</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SID Music File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array><string>sid</string></array>
+            <key>LSItemContentTypes</key>
+            <array><string>org.c64.sid</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>chipsynth C64 Preset</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array><string>fermatax</string></array>
+            <key>LSItemContentTypes</key>
+            <array><string>com.plogue.fermatax</string></array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>MIDI File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array><string>public.midi-audio</string></array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.sourceforge.goattracker2.song</string>
+            <key>UTTypeDescription</key>
+            <string>GoatTracker Song</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array><string>sng</string></array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>net.sourceforge.goattracker2.instrument</string>
+            <key>UTTypeDescription</key>
+            <string>GoatTracker Instrument</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array><string>ins</string></array>
+            </dict>
+        </dict>
+    </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>org.c64.sid</string>
+            <key>UTTypeDescription</key>
+            <string>SID Music File</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.data</string><string>public.audio</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array><string>sid</string></array>
+            </dict>
+        </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.plogue.fermatax</string>
+            <key>UTTypeDescription</key>
+            <string>chipsynth Preset</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.data</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array><string>fermatax</string></array>
+            </dict>
+        </dict>
+    </array>
 </dict>
 </plist>
 EOF
@@ -302,8 +382,8 @@ for a in $ARCH; do
 done
 
 if [ "$can_run" = 1 ]; then
-    # gt2reloc links the same SDL libraries as the tracker, so converting an
-    # example song proves the bundled sdl12-compat + SDL2 load correctly.
+    # gt2reloc links the same SDL2 framework as the tracker, so converting an
+    # example song proves the bundled SDL2 loads correctly.
     # perl's alarm() is a timeout: a missing SDL2 would show a modal dialog.
     # Short relative file names, since gt2reloc uses fixed-size path buffers.
     cp "$ROOT/examples/everlasting.sng" "$BUILD/selftest.sng"
@@ -327,9 +407,12 @@ Done: $APP
   Start it:     open "$APP"   (or double-click it in Finder)
   Install it:   drag GoatTracker2.app to /Applications
   CLI tools:    "$APP/Contents/MacOS/gt2reloc" song.sng song.sid
-  Settings are stored in ~/.goattrk/goattrk2.cfg
+  Settings are stored in ~/.goattrk/ (goattrk2.cfg, the window layout in
+  imgui.ini and the recent files)
 
-CMD+1 to CMD+9 work as F1-F9 (see the Control menu). For F10-F12 hold the
-fn key, or enable "Use F1, F2, etc. keys as
-standard function keys" in System Preferences > Keyboard.
+Songs, SID, MIDI and chipsynth files open by double-clicking them in the
+Finder (choose Open With > GoatTracker2 the first time) or by dropping them
+on the window. CMD+1 to CMD+9 work as F1-F9 (see the Control menu). For
+F10-F12 hold the fn key, or enable "Use F1, F2, etc. keys as standard
+function keys" in System Preferences > Keyboard.
 EOF
