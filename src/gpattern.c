@@ -873,27 +873,12 @@ void patterncommands(void)
     break;
 
     case KEY_SPACE:
+    // SPACE starts & stops playing (from the cursor), SHIFT+SPACE plays from
+    // the cursor without following. CMD+R switches edit/jam mode
     if (!shiftpressed)
-      recordmode ^= 1;
+      playstop();
     else
-    {
-      if (lastsonginit != PLAY_PATTERN)
-      {
-        if (editorInfo.eseditpos != editorUndoInfo.editorInfo[editorInfo.eschn].espos)
-        {
-          int c;
-
-          for (c = 0; c < MAX_CHN; c++)
-          {
-            if (editorInfo.eseditpos < songlen[editorInfo.esnum][c]) editorUndoInfo.editorInfo[c].espos = editorInfo.eseditpos;
-            if (editorUndoInfo.editorInfo[c].esend <= editorUndoInfo.editorInfo[c].espos) editorUndoInfo.editorInfo[c].esend = 0;
-          }
-        }
-        initsongpos(editorInfo.esnum, PLAY_POS, editorInfo.eppos);
-      }
-      else initsongpos(editorInfo.esnum, PLAY_PATTERN, editorInfo.eppos);
-      followplay = 0;
-    }
+      playfromcursor(0);
     break;
 
     case KEY_RIGHT:
@@ -1328,3 +1313,34 @@ void joinpattern(void)
 }
 
 
+
+// Starts playing from the pattern editor cursor row. follow = the pattern
+// editor follows the playback
+void playfromcursor(int follow)
+{
+  if (lastsonginit != PLAY_PATTERN)
+  {
+    if (editorInfo.eseditpos != editorUndoInfo.editorInfo[editorInfo.eschn].espos)
+    {
+      int c;
+
+      for (c = 0; c < MAX_CHN; c++)
+      {
+        if (editorInfo.eseditpos < songlen[editorInfo.esnum][c]) editorUndoInfo.editorInfo[c].espos = editorInfo.eseditpos;
+        if (editorUndoInfo.editorInfo[c].esend <= editorUndoInfo.editorInfo[c].espos) editorUndoInfo.editorInfo[c].esend = 0;
+      }
+    }
+    initsongpos(editorInfo.esnum, PLAY_POS, editorInfo.eppos);
+  }
+  else initsongpos(editorInfo.esnum, PLAY_PATTERN, editorInfo.eppos);
+  followplay = follow;
+}
+
+// Starts playing from the pattern editor cursor, or stops if playing
+void playstop(void)
+{
+  if (isplaying())
+    stopsong();
+  else
+    playfromcursor(followmode);
+}

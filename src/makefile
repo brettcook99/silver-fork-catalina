@@ -7,9 +7,15 @@ PREFIX=../linux/
 SUFFIX=
 LIBS+=`sdl-config --libs`
 
-# MIDI input uses CoreMIDI on macOS
+# MIDI input uses CoreMIDI on macOS, the menu bar Cocoa
 ifeq ($(shell uname -s),Darwin)
-LIBS+=-framework CoreMIDI -framework CoreFoundation
+LIBS+=-framework CoreMIDI -framework CoreFoundation -framework Cocoa
+MACOBJ=gmacmenu.o
 endif
 
 include makefile.common
+
+ifeq ($(shell uname -s),Darwin)
+gmacmenu.o: gmacmenu.m gmacmenu.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+endif

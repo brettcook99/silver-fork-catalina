@@ -29,6 +29,7 @@ int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
 int recordmode = 1;
 int followplay = 0;
+int followmode = 1;
 int hexnybble = -1;
 int stepsize = 4;
 int autoadvance = 0;
@@ -122,6 +123,7 @@ char* usage[] = {
 	"-Zxx Set random reSID write delay in cycles (0 = off) DEFAULT=off",
 	"-wxx Set initial window size (1 to 4 = 1 to 4 times 800x518). The window can be resized freely",
 	"-mxx MIDI keyboard input (0 = off, 1 = on) DEFAULT=on",
+	"-fxx Follow playback in the pattern editor (0 = off, 1 = on) DEFAULT=on",
 	"-N   Use NTSC timing",
 	"-P   Use PAL timing (DEFAULT)",
 	"-W   Write sound output to a file SIDAUDIO.RAW",
@@ -216,6 +218,7 @@ int main(int argc, char **argv)
 		getparam(configfile, &windowedxsize);
 		getparam(configfile, &windowedysize);
 		getparam(configfile, &midiinput);
+		getparam(configfile, (unsigned *)&followmode);
 		fclose(configfile);
 	}
 
@@ -347,6 +350,10 @@ int main(int argc, char **argv)
 				sscanf(&argv[c][2], "%u", &midiinput);
 				break;
 
+			case 'f':
+				sscanf(&argv[c][2], "%d", &followmode);
+				break;
+
 			case 'C':
 				sscanf(&argv[c][2], "%u", &catweasel);
 				break;
@@ -403,6 +410,7 @@ int main(int argc, char **argv)
 	if (editorInfo.multiplier > 16) editorInfo.multiplier = 16;
 	if (keypreset > 2) keypreset = 0;
 	if (midiinput > 1) midiinput = 1;
+	if (followmode) followmode = 1;
 
 	// removing 'usefinevib' since it's not actually being used and is
 	// not being saved. Code suggests FV not to be used for multi-speed. 
@@ -536,7 +544,8 @@ int main(int argc, char **argv)
 			";Path to a Scala tuning file .scl (0 = none)\n%s\n\n"
 			";Window width in windowed mode (0 = automatic)\n%d\n\n"
 			";Window height in windowed mode (0 = automatic)\n%d\n\n"
-			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n",
+			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n"
+			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n",
 			b,
 			mr,
 			hardsid,
@@ -581,7 +590,8 @@ int main(int argc, char **argv)
 			scalatuningfilepath[0] ? scalatuningfilepath : "0",
 			windowedxsize,
 			windowedysize,
-			midiinput);
+			midiinput,
+			followmode);
 		fclose(configfile);
 	}
 
@@ -612,6 +622,9 @@ void waitkeymouse(void)
 		if (win_quitted) break;
 		if (mouseb) break;
 		if ((midinoteon) || (midinoteoff)) break;
+		if (menucommand) break;
+		// Check marks in the macOS menu bar
+		macmenu_setstate(recordmode, followmode);
 	}
 
 	converthex();
@@ -679,6 +692,9 @@ void toggle_interpolation_mode() {
 
 void docommand(void)
 {
+	// Menu bar & CMD key commands
+	if (menucommands()) return;
+
 	// "GUI" operation :)
 	mousecommands();
 
@@ -736,6 +752,46 @@ void docommand(void)
 
 	// General commands
 	generalcommands();
+}
+
+// Handles the command from the menu bar or a CMD key shortcut, if any.
+// Returns nonzero if nothing else is to be done for this keypress
+int menucommands(void)
+{
+	switch (menucommand)
+	{
+	case MENUCMD_UNDO:
+		undoPerform();
+		return 1;
+
+	case MENUCMD_RECORD:
+		recordmode ^= 1;
+		return 1;
+
+	case MENUCMD_FOLLOW:
+		followmode ^= 1;
+		if (isplaying()) followplay = followmode;
+		return 1;
+
+	case MENUCMD_PLAYSTOP:
+		playstop();
+		return 1;
+
+	case MENUCMD_IMPORTMIDI:
+		importmidi();
+		return 1;
+
+	case MENUCMD_SELECTALL:
+		// Mark the whole pattern / orderlist (SHIFT+L)
+		if ((editorInfo.editmode == EDIT_PATTERN) || (editorInfo.editmode == EDIT_ORDERLIST))
+		{
+			rawkey = KEY_L;
+			key = 0;
+			shiftpressed = 1;
+		}
+		break;
+	}
+	return 0;
 }
 
 void midicommands(void)
@@ -1042,17 +1098,17 @@ void mousecommands(void)
 			if ((mousex >= 0) && (mousex <= 5))
 			{
 				initsong(editorInfo.esnum, PLAY_BEGINNING);
-				followplay = shiftpressed;
+				followplay = followmode ^ shiftpressed;
 			}
 			if ((mousex >= 7) && (mousex <= 15))
 			{
 				initsong(editorInfo.esnum, PLAY_POS);
-				followplay = shiftpressed;
+				followplay = followmode ^ shiftpressed;
 			}
 			if ((mousex >= 17) && (mousex <= 26))
 			{
 				initsong(editorInfo.esnum, PLAY_PATTERN);
-				followplay = shiftpressed;
+				followplay = followmode ^ shiftpressed;
 			}
 			if ((mousex >= 28) && (mousex <= 33))
 				stopsong();
@@ -1210,17 +1266,17 @@ void generalcommands(void)
 
 	case KEY_F1:
 		initsong(editorInfo.esnum, PLAY_BEGINNING);
-		followplay = shiftpressed;
+		followplay = followmode ^ shiftpressed;
 		break;
 
 	case KEY_F2:
 		initsong(editorInfo.esnum, PLAY_POS);
-		followplay = shiftpressed;
+		followplay = followmode ^ shiftpressed;
 		break;
 
 	case KEY_F3:
 		initsong(editorInfo.esnum, PLAY_PATTERN);
-		followplay = shiftpressed;
+		followplay = followmode ^ shiftpressed;
 		break;
 
 	case KEY_F4:
@@ -1362,6 +1418,91 @@ void save(void)
 			}
 		}
 	}
+	key = 0;
+	rawkey = 0;
+}
+
+// File > Import MIDI (CMD+I): converts a MIDI file to a song and loads it.
+// The song gets the MIDI file's name, so saving it suggests name.sng
+void importmidi(void)
+{
+	static char midifilename[MAX_FILENAME] = "";
+	static char midifilter[MAX_FILENAME] = "*.mid";
+	char olddir[MAX_PATHNAME];
+	char temppath[MAX_PATHNAME];
+	char report[256];
+	char *tempdir;
+	MIDI2SNG_OPTIONS opt;
+	int ok;
+
+	stopsong();
+	if (!fileselector(midifilename, songpath, midifilter, "IMPORT MIDI FILE", 0))
+	{
+		key = 0;
+		rawkey = 0;
+		return;
+	}
+
+	// The song is written to a temporary file and loaded from there
+	if (!getcwd(olddir, MAX_PATHNAME)) olddir[0] = 0;
+	tempdir = getenv("TMPDIR");
+	if ((!tempdir) || (!tempdir[0])) tempdir = getenv("TEMP");
+	if ((!tempdir) || (!tempdir[0])) tempdir = getenv("TMP");
+#ifdef __WIN32__
+	if ((!tempdir) || (!tempdir[0])) tempdir = ".";
+#else
+	if ((!tempdir) || (!tempdir[0])) tempdir = "/tmp";
+#endif
+	snprintf(temppath, MAX_PATHNAME, "%s/goattrk2-midi.sng", tempdir);
+
+	midi2sng_defaults(&opt);
+	opt.ntsc = editorInfo.ntsc;
+	ok = midi2sng(midifilename, temppath, &opt, report, sizeof report);
+	if (ok)
+	{
+		char savedname[MAX_FILENAME];
+		int c;
+
+		strcpy(savedname, midifilename);
+		ok = 0;
+		if (!chdir(tempdir))
+		{
+			strcpy(songfilename, "goattrk2-midi.sng");
+			loadsong();
+			remove(songfilename);
+			ok = 1;
+		}
+		if (olddir[0]) chdir(olddir);
+
+		if (ok)
+		{
+			// name.mid -> name.sng
+			for (c = strlen(savedname) - 1; c >= 0; c--)
+			{
+				if (savedname[c] == '.')
+				{
+					savedname[c] = 0;
+					break;
+				}
+			}
+			if (strlen(savedname) > MAX_FILENAME - 5) savedname[MAX_FILENAME - 5] = 0;
+			strcat(savedname, ".sng");
+			strcpy(songfilename, savedname);
+			strcpy(loadedsongfilename, savedname);
+			undoInitAllAreas();
+		}
+		else strcpy(report, "Could not load the converted song");
+	}
+
+	// Show the result until a key is pressed
+	report[56] = 0;
+	printblank(20, 35, 58);
+	printblank(20, 36, 58);
+	printtextcp(49, 35, 15, ok ? "MIDI file imported:" : "MIDI import failed:");
+	printtextcp(49, 36, 15, report);
+	waitkey();
+	printblank(20, 35, 58);
+	printblank(20, 36, 58);
 	key = 0;
 	rawkey = 0;
 }

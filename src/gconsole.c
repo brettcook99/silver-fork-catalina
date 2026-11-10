@@ -31,6 +31,7 @@ int metapressed = 0;
 int cursorflashdelay = 0;
 int midinoteon = 0;
 int midinoteoff = 0;
+int menucommand = 0;
 int mouseb = 0;
 int prevmouseb = 0;
 unsigned mousex = 0;
@@ -126,6 +127,9 @@ int initscreen(void)
   gfxinitted = 1;
   clearscreen();
   atexit(closescreen);
+
+  // macOS menu bar (does nothing elsewhere)
+  macmenu_init();
   return 1;
 }
 
@@ -716,6 +720,7 @@ void getkey(void)
   int c;
   int mx, my;
   win_asciikey = 0;
+  menucommand = 0;
   cursorflashdelay += win_getspeed(50);
 
   applyvideochanges();
@@ -795,6 +800,28 @@ void getkey(void)
       win_keystate[SDLK_LSUPER] || win_keystate[SDLK_RSUPER])
     metapressed = 1;
 
+  // A clicked menu bar item (macOS) works like its key combination
+  {
+    int item = macmenu_getitem();
+
+    if (item & MACMENU_PLAYSTOP)
+    {
+      menucommand = MENUCMD_PLAYSTOP;
+      key = 0;
+      rawkey = 0;
+    }
+    else if (item)
+    {
+      rawkey = item & MACMENU_KEYMASK;
+      key = 0;
+      shiftpressed = (item & MACMENU_SHIFT) ? 1 : 0;
+      shiftonlypressed = shiftpressed;
+      metapressed = (item & MACMENU_CMD) ? 1 : 0;
+      ctrlpressed = 0;
+      altpressed = 0;
+    }
+  }
+
   // Text size: CTRL/CMD + = bigger, - smaller, 0 default. The key is
   // consumed so that it doesn't also change instrument or enter a note.
   // The typed character is checked too: a very short tap can be released
@@ -835,6 +862,76 @@ void getkey(void)
       rawkey = 0;
       return;
     }
+  }
+
+  // CMD key shortcuts (macOS), also shown in the menu bar. They work like
+  // the keys they stand for. Other CMD combinations are ignored, so that
+  // e.g. CMD+H (hide) or CMD+M (minimize) don't also enter a note
+  if ((metapressed) && (!ctrlpressed) && (!altpressed) && (rawkey))
+  {
+    switch (rawkey)
+    {
+      case SDLK_1:
+      case SDLK_2:
+      case SDLK_3:
+      case SDLK_4:
+      case SDLK_5:
+      case SDLK_6:
+      case SDLK_7:
+      case SDLK_8:
+      case SDLK_9:
+      // CMD+1-9 = F1-F9, also with SHIFT
+      rawkey = SDLK_F1 + rawkey - SDLK_1;
+      break;
+
+      case SDLK_o:
+      // Load (with SHIFT: merge song)
+      rawkey = SDLK_F10;
+      break;
+
+      case SDLK_s:
+      rawkey = SDLK_F11;
+      break;
+
+      case SDLK_x:
+      case SDLK_c:
+      case SDLK_v:
+      // Cut, copy & paste = SHIFT+X,C,V in every editor
+      if (shiftpressed) rawkey = 0;
+      else shiftpressed = 1;
+      break;
+
+      case SDLK_z:
+      if (!shiftpressed) menucommand = MENUCMD_UNDO;
+      rawkey = 0;
+      break;
+
+      case SDLK_r:
+      menucommand = MENUCMD_RECORD;
+      rawkey = 0;
+      break;
+
+      case SDLK_f:
+      menucommand = MENUCMD_FOLLOW;
+      rawkey = 0;
+      break;
+
+      case SDLK_a:
+      menucommand = MENUCMD_SELECTALL;
+      rawkey = 0;
+      break;
+
+      case SDLK_i:
+      menucommand = MENUCMD_IMPORTMIDI;
+      rawkey = 0;
+      break;
+
+      default:
+      rawkey = 0;
+      break;
+    }
+    key = 0;
+    metapressed = 0;
   }
 
   if (rawkey == SDLK_KP_ENTER)

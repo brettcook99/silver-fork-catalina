@@ -29,6 +29,7 @@ int menu = 0;
 int editmode = EDIT_PATTERN;
 int recordmode = 1;
 int followplay = 0;
+int followmode = 1;
 int hexnybble = -1;
 int stepsize = 4;
 int autoadvance = 0;

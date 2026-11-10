@@ -22,7 +22,7 @@
 #
 # Output:
 #   GoatTracker2.app next to this script. The command line tools (gt2reloc,
-#   ins2snd2, sngspli2, mod2sng) are inside GoatTracker2.app/Contents/MacOS.
+#   ins2snd2, sngspli2, mod2sng, midi2sng) are inside GoatTracker2.app/Contents/MacOS.
 #
 
 set -euo pipefail
@@ -45,7 +45,7 @@ BUILD="$ROOT/build-macos"
 DL="$BUILD/downloads"
 DEPS="$BUILD/deps"
 APP="$ROOT/GoatTracker2.app"
-TOOLS="goattrk2 gt2reloc ins2snd2 sngspli2 mod2sng"
+TOOLS="goattrk2 gt2reloc ins2snd2 sngspli2 mod2sng midi2sng"
 
 die()  { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$*"; }
@@ -329,6 +329,7 @@ Done: $APP
   CLI tools:    "$APP/Contents/MacOS/gt2reloc" song.sng song.sid
   Settings are stored in ~/.goattrk/goattrk2.cfg
 
-Remember to hold the fn key for F1-F12, or enable "Use F1, F2, etc. keys as
+CMD+1 to CMD+9 work as F1-F9 (see the Control menu). For F10-F12 hold the
+fn key, or enable "Use F1, F2, etc. keys as
 standard function keys" in System Preferences > Keyboard.
 EOF

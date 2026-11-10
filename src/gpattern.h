@@ -72,6 +72,8 @@ typedef struct {
 extern EDITOR_INFO editorInfo;
 
 void patterncommands(void);
+void playfromcursor(int follow);
+void playstop(void);
 void nextpattern(void);
 void prevpattern(void);
 void patternup(void);

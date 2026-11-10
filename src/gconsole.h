@@ -6,6 +6,16 @@
 #define HOLDDELAY 24
 #define DOUBLECLICKDELAY 15
 
+// Commands from the menu bar and CMD key shortcuts that have no key of
+// their own (menucommand)
+#define MENUCMD_NONE 0
+#define MENUCMD_UNDO 1
+#define MENUCMD_RECORD 2
+#define MENUCMD_FOLLOW 3
+#define MENUCMD_PLAYSTOP 4
+#define MENUCMD_SELECTALL 5
+#define MENUCMD_IMPORTMIDI 6
+
 int initscreen(void);
 void closescreen(void);
 void clearscreen(void);
@@ -24,6 +34,7 @@ void togglefullscreen(void);
 #ifndef GCONSOLE_C
 extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shiftonlypressed,cursorflashdelay;
 extern int midinoteon, midinoteoff;
+extern int menucommand;
 extern int mouseb, prevmouseb;
 extern int mouseheld;
 extern int mousex, mousey;

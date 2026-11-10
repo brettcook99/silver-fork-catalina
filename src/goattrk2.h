@@ -29,6 +29,8 @@
 #include "ginstr.h"
 #include "gtable.h"
 #include "gmidi.h"
+#include "gmidifile.h"
+#include "gmacmenu.h"
 
 #define EDIT_PATTERN 0
 #define EDIT_ORDERLIST 1
@@ -52,6 +54,7 @@ extern int menu;
 //extern int editorInfo.editmode;
 extern int recordmode;
 extern int followplay;
+extern int followmode;
 extern int hexnybble;
 extern int stepsize;
 extern int autoadvance;
@@ -115,6 +118,8 @@ void onlinehelp(int standalone, int context);
 void mousecommands(void);
 void generalcommands(void);
 void midicommands(void);
+int menucommands(void);
+void importmidi(void);
 void load(void);
 void save(void);
 void quit(void);
