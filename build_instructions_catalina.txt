@@ -6,16 +6,16 @@ Why the regular instructions don't work on Catalina
 - The prebuilt binaries in the sf-v1.1 release zip are Apple Silicon (arm64)
   only, need macOS 13 or newer, and expect Homebrew's SDL in /opt/homebrew.
   Catalina only runs on Intel Macs, so they can never start there.
-- "brew install sdl12-compat" is unreliable on Catalina: Homebrew no longer
+- "brew install sdl2" is unreliable on Catalina: Homebrew no longer
   supports it, so there are no prebuilt packages and builds from source
   often fail.
 - The release zip also contains leftover arm64 .o files in src/, so running
   "make" on an Intel Mac tries to link them and fails.
 
 build_catalina.sh avoids all of this. It does not use Homebrew. It downloads
-the official SDL2 framework and the sdl12-compat source (about 3 MB, checked
-against SHA-256 checksums), builds everything for Intel, and produces a
-self-contained GoatTracker2.app.
+the official SDL2 framework (about 2 MB, checked against its SHA-256
+checksum), builds everything for Intel, and produces a self-contained
+GoatTracker2.app with the SDL2 framework and the interface fonts inside.
 
 
 Steps
@@ -63,11 +63,10 @@ Notes
     GoatTracker2.app/Contents/MacOS/mod2sng
   They need the libraries in GoatTracker2.app/Contents/Frameworks, so run
   them from there instead of copying them somewhere else.
-- No internet connection on the Mac? Download these two files with any
-  computer, put them in build-macos/downloads/ (create the folder), and run
-  the script again:
+- No internet connection on the Mac? Download this file with any computer,
+  put it in build-macos/downloads/ (create the folder), and run the script
+  again:
     https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.dmg
-    https://github.com/libsdl-org/sdl12-compat/releases/download/release-1.2.78/sdl12-compat-1.2.78.tar.gz
 - If you copied the folder from Windows and the script says the makefiles
   have CRLF line endings, follow the command it prints, or clone the
   repository on the Mac instead.
