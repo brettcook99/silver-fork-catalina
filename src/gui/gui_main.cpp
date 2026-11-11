@@ -909,12 +909,24 @@ static void beginframe(int textscreen)
 // Renders the frame and shows it. bg is the color behind everything
 static void endframe(ImU32 bg)
 {
+  ImDrawData *drawdata;
+  float sx, sy;
   Uint32 now;
 
   ImGui::Render();
+  drawdata = ImGui::GetDrawData();
+
+  // ImGui works in points, the renderer in pixels. On a Retina (HiDPI)
+  // display there are 2 pixels per point, and the SDL_Renderer backend
+  // leaves scaling the vertices to the renderer: without this everything is
+  // drawn at half size into the top left quarter of the window
+  sx = drawdata->FramebufferScale.x > 0.0f ? drawdata->FramebufferScale.x : 1.0f;
+  sy = drawdata->FramebufferScale.y > 0.0f ? drawdata->FramebufferScale.y : 1.0f;
+  SDL_RenderSetScale(renderer, sx, sy);
+
   SDL_SetRenderDrawColor(renderer, bg & 0xff, (bg >> 8) & 0xff, (bg >> 16) & 0xff, 255);
   SDL_RenderClear(renderer);
-  ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
+  ImGui_ImplSDLRenderer2_RenderDrawData(drawdata, renderer);
   testscreenshot();
   SDL_RenderPresent(renderer);
 
