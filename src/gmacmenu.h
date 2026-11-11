@@ -15,12 +15,16 @@ void macmenu_init(void);
 // Tells the menus whether record (edit) mode and follow playback are on, to
 // show check marks
 void macmenu_setstate(int record, int follow);
+// Tells the menus whether the retro interface is used (it has no panels to
+// show or hide)
+void macmenu_setretro(int retro);
 #ifdef __cplusplus
 }
 #endif
 #else
 #define macmenu_init()
 #define macmenu_setstate(record, follow)
+#define macmenu_setretro(retro)
 #endif
 
 #endif

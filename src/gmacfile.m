@@ -62,6 +62,12 @@ int macfile_open(const char *title, const char *exts, const char *startdir, char
   }
 }
 
+int macfile_modifiersheld(void)
+{
+  NSEventModifierFlags flags = [NSEvent modifierFlags];
+  return (flags & (NSEventModifierFlagShift | NSEventModifierFlagOption)) ? 1 : 0;
+}
+
 int macfile_save(const char *title, const char *ext, const char *suggestedname, const char *startdir, char *path, int pathsize)
 {
   @autoreleasepool

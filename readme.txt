@@ -228,11 +228,24 @@ model 8580 and to load "dojo.sng" on startup.
 -Xxx Set window type (0 = window, 1 = fullscreen) DEFAULT=window
 -Yxx Path to a Scala tuning file .scl
 -Zxx Set random reSID write delay in cycles (0 = off) DEFAULT=off
+-uxx Interface (0 = ask at startup, 1 = modern, 2 = retro) DEFAULT=ask
 -N   Use NTSC timing
 -P   Use PAL timing (DEFAULT)
 -W   Write emulated sound output to a file SIDAUDIO.RAW
 -?   Show command line options
 -??  Standalone online help window
+
+GoatTracker Ultimate asks at startup whether to use the modern interface
+(panels, arrangement timeline, mouse-friendly editors) or the retro one (the
+classic 100x37 text screen described in this file, in its original font and
+colors). Tick "Don't ask again" to keep the choice. Holding SHIFT (or OPTION
+on macOS) while the program starts, View > Ask for Interface at Next Launch,
+or the -u option bring the choice back.
+
+A song or SID file given on the command line (or double-clicked in the macOS
+Finder) is loaded and starts playing. A SID file is converted into a song
+with the import options used last. A file dropped on the window is only
+loaded.
 
 Try the command line options if there are any problems. For example, if you
 experience choppy audio you can increase audio buffering with -B option. SDL
@@ -344,6 +357,10 @@ INS       Insert row (Press INS/DEL on endmark to change pattern/song length)
 DEL       Delete row
 SHIFT+ESC Optimize musicdata, or clear musicdata & set default pattern length
 ESC       Exit program
+NUMPAD 0  Play from the start of the pattern / stop
+NUMPAD .  Switch between jam/editmode
+CTRL+NUMPAD 1,2,3 Put the cursor on track (channel) 1, 2 or 3 in the pattern
+          editor
 
 2.3.2 Pattern edit mode
 -----------------------
@@ -383,6 +400,8 @@ SHIFT+M,N   Choose highlighting step size
 SHIFT+X,C,V Cut,copy,paste pattern
 SHIFT+E,R   Copy,paste commands
 SHIFT+Z     Cycle autoadvance-mode
+NUMPAD 1-8  Go to row 0, 8, 16, 24, 32, 40, 48 or 56
+Mouse wheel Scroll the pattern
 
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and
@@ -566,6 +585,9 @@ active. Continue to hold and click with left button to select options.
 
 In the fileselector, confirm loading or entering a directory by double-
 clicking. Doubleclick outside the selector to cancel.
+
+The mouse wheel scrolls the pattern editor. While the song plays, the view
+then stops following the playback until playback is started again.
 
 
 3. Song data

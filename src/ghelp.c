@@ -31,6 +31,7 @@ void onlinehelp(int standalone,int context)
     "CMD+F      Follow playback",
     "CMD+O,S    Load, save",
     "CMD+I      Import MIDI file",
+    "SHIFT+CMD+I Import SID file",
     "(also in the menu bar)",
     NULL
   };
@@ -54,11 +55,12 @@ void onlinehelp(int standalone,int context)
     "F7  Go to instrument/table editor",
     "F8  Go to songname editor",
     "F9  Pack, relocate & save PRG,SID etc.",
-    "F10 Load song/instrument",
+    "F10 Load song/SID/MIDI/instrument",
     "F11 Save song/instrument",
     "F12 This screen",
     "SHIFT+F1-F3 Play, opposite follow mode",
     "NUMPAD 0 Play from patt. start / stop",
+    "NUMPAD . Switch edit / jam mode",
     "SHIFT+F4 Mute current channel",
     "SHIFT+F5-F6 Change speed multiplier",
     "SHIFT+F7 Change hardrestart ADSR",
@@ -87,7 +89,8 @@ void onlinehelp(int standalone,int context)
     "< > Select pattern",
     "BACKQUOTE Select channel",
     "SHIFT+SPC Play, don't follow",
-    "NUMPAD 1-7 Go to row 8,16,24...56",
+    "NUMPAD 1-8 Go to row 0,8,16...56",
+    "CTRL+NUMPAD 1-3 Go to track 1-3",
     "Mouse wheel Scroll pattern",
     "SHIFT+CRSR Mark pattern",
     "SHIFT+Q,W Transpose half/octave up",
@@ -366,7 +369,7 @@ void onlinehelp(int standalone,int context)
     if(!lastrow) lastrow=left;
 
     printblank(0, 0, MAX_COLUMNS);
-    sprintf(textbuffer, "%s Online Help", programname);
+    sprintf(textbuffer, "%s Help", programname);
     printtext(0, 0, HELP_HEADER, textbuffer);
     if(standalone) {
       printtext(55, 0, HELP_HEADER, "Arrows/PgUp/PgDn/Home/End scroll, ESC exits");
@@ -381,7 +384,8 @@ void onlinehelp(int standalone,int context)
 
     if (win_quitted)
     {
-      exitprogram = 1;
+      // Within the tracker the main loop asks to save the changes first
+      if (standalone) exitprogram = 1;
       break;
     }
 

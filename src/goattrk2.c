@@ -25,9 +25,13 @@
 #include "goattrk2.h"
 #include "bme.h"
 #include "gui/gui.h"
+#include "gmacfile.h"
 
 static void mainloopframe(void);
+static void retromainloop(void);
+static int chooseinterface(void);
 static void presskey(int newrawkey, int newkey, int shift);
+static void startplay(int mode);
 
 int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
@@ -69,6 +73,7 @@ unsigned interpolate = 3;
 unsigned residdelay = 0;
 unsigned hardsidbufinteractive = 20;
 unsigned hardsidbufplayback = 400;
+unsigned uimode = UI_ASK;  // Interface: ask at startup, modern or retro
 float basepitch = 0.0f;
 float equaldivisionsperoctave = 12.0f;
 int tuningcount = 0;
@@ -127,6 +132,7 @@ char* usage[] = {
 	"-wxx Set initial window size (1 to 4 = 1 to 4 times 800x518). The window can be resized freely",
 	"-mxx MIDI keyboard input (0 = off, 1 = on) DEFAULT=on",
 	"-fxx Follow playback in the pattern editor (0 = off, 1 = on) DEFAULT=on",
+	"-uxx Interface (0 = ask at startup, 1 = modern, 2 = retro) DEFAULT=ask",
 	"-N   Use NTSC timing",
 	"-P   Use PAL timing (DEFAULT)",
 	"-W   Write sound output to a file SIDAUDIO.RAW",
@@ -227,6 +233,7 @@ int main(int argc, char **argv)
 		getparam(configfile, &midiinput);
 		getparam(configfile, (unsigned *)&followmode);
 		getparam(configfile, &textsizepercent);
+		getparam(configfile, &uimode);
 		fclose(configfile);
 	}
 
@@ -358,6 +365,10 @@ int main(int argc, char **argv)
 				sscanf(&argv[c][2], "%d", &followmode);
 				break;
 
+			case 'u':
+				sscanf(&argv[c][2], "%u", &uimode);
+				break;
+
 			case 'C':
 				sscanf(&argv[c][2], "%u", &catweasel);
 				break;
@@ -417,6 +428,7 @@ int main(int argc, char **argv)
 	if (keypreset > 2) keypreset = 0;
 	if (midiinput > 1) midiinput = 1;
 	if (followmode) followmode = 1;
+	if (uimode > UI_RETRO) uimode = UI_ASK;
 
 	// removing 'usefinevib' since it's not actually being used and is
 	// not being saved. Code suggests FV not to be used for multi-speed. 
@@ -453,6 +465,11 @@ int main(int argc, char **argv)
 	if (!initscreen())
 		return EXIT_FAILURE;
 
+	// Modern or retro interface. It is asked unless chosen for good before;
+	// holding SHIFT (or OPTION on macOS) while starting asks again
+	if (!chooseinterface())
+		return EXIT_SUCCESS;
+
 	// Reset channels/song
 	initchannels();
 	clearsong(1, 1, 1, 1, 1);
@@ -471,18 +488,27 @@ int main(int argc, char **argv)
 	if (midiinput)
 		midi_init();
 
-	// Open the file given on the command line, if any. Files opened from the
-	// Finder arrive as drop events instead
+	// Open and play the file given on the command line, if any (also a file
+	// double-clicked on Windows). Files opened from the macOS Finder arrive as
+	// drop events instead, and are played too
 	if (startfile[0])
-		gt_openfile(startfile);
-
-	if (showhelpatstart)
-		gui_command(GTCMD_HELP);
+		runcommand(GTCMD_OPENFILEPLAY, startfile);
 
 	// Start editor mainloop
-	while (!exitprogram)
+	if (retromode)
 	{
-		mainloopframe();
+		if (showhelpatstart)
+			onlinehelp(0, 0);
+		retromainloop();
+	}
+	else
+	{
+		if (showhelpatstart)
+			gui_command(GTCMD_HELP);
+		while (!exitprogram)
+		{
+			mainloopframe();
+		}
 	}
 
 	// Shutdown sound output & MIDI input now
@@ -552,7 +578,8 @@ int main(int argc, char **argv)
 			";Window height in windowed mode (0 = automatic)\n%d\n\n"
 			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n"
 			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n"
-			";Text size in percent (100 = default)\n%d\n\n",
+			";Text size in percent (100 = default)\n%d\n\n"
+			";Interface (0 = ask at startup, 1 = modern, 2 = retro)\n%d\n\n",
 			b,
 			mr,
 			hardsid,
@@ -599,7 +626,8 @@ int main(int argc, char **argv)
 			windowedysize,
 			midiinput,
 			followmode,
-			textsizepercent);
+			textsizepercent,
+			uimode);
 		fclose(configfile);
 	}
 
@@ -655,6 +683,86 @@ static void mainloopframe(void)
 	{
 		win_quitted = 0;
 		runcommand(GTCMD_QUIT, NULL);
+	}
+}
+
+// Nonzero if SHIFT (or OPTION on macOS) is held down while the program
+// starts
+static int startupmodifierheld(void)
+{
+#ifdef __APPLE__
+	return macfile_modifiersheld();
+#elif defined(__WIN32__)
+	return (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
+#else
+	SDL_PumpEvents();
+	return (SDL_GetModState() & KMOD_SHIFT) ? 1 : 0;
+#endif
+}
+
+// Asks for the modern or the retro interface unless it has been chosen for
+// good, and sets it up. Returns 0 if the window was closed instead
+static int chooseinterface(void)
+{
+	int choice = uimode;
+
+	if ((choice == UI_ASK) || (startupmodifierheld()))
+	{
+		int remember = (uimode != UI_ASK);
+		choice = gui_chooseinterface(uimode != UI_ASK ? uimode : UI_MODERN, &remember);
+		if (choice == UI_ASK) return 0;
+		uimode = remember ? choice : UI_ASK;
+	}
+	retromode = (choice == UI_RETRO);
+	gui_setretro(retromode);
+	return 1;
+}
+
+// The retro interface's main loop: the classic main screen, with its keys
+// and mouse, plus the menu commands and drag & drop of the new version
+static void retromainloop(void)
+{
+	int cmd;
+	char path[MAX_PATHNAME];
+
+	printmainscreen();
+	while (!exitprogram)
+	{
+		int input = 0;
+
+		// Wait for a key, mouse button or wheel, MIDI note or a command
+		retroatmainscreen = 1;
+		for (;;)
+		{
+			followplayback();
+			displayupdate();
+			getkey();
+			macmenu_setstate(recordmode, followmode);
+			if ((rawkey) || (key) || (mouseb) || (mousewheel) || (midinoteon) || (midinoteoff) || (menucommand))
+			{
+				input = 1;
+				break;
+			}
+			if ((win_quitted) || (exitprogram) || (cmd_pending())) break;
+		}
+		retroatmainscreen = 0;
+
+		if ((input) && (!exitprogram))
+		{
+			converthex();
+			docommand();
+		}
+
+		// Menus, drag & drop, commands from the dialogs
+		while ((!exitprogram) && (cmd_poll(&cmd, path, MAX_PATHNAME)))
+			runcommand(cmd, path);
+
+		// Window closed / CMD+Q
+		if (win_quitted)
+		{
+			win_quitted = 0;
+			runcommand(GTCMD_QUIT, NULL);
+		}
 	}
 }
 
@@ -752,10 +860,12 @@ void docommand(void)
 	// Menu bar & CMD key commands
 	if (menucommands()) return;
 
-	// Numpad play/stop & pattern row jumps
+	// Numpad play/stop, pattern row jumps, edit/jam mode & channel select
 	if (numpadcommands()) return;
 
-	// Mouse operation is handled by the GUI panels (gui/)
+	// Mouse operation is handled by the GUI panels (gui/), in the retro
+	// interface by the classic main screen
+	if (retromode) retro_mousecommands();
 
 	GTUNDO_OBJECT *ed = undoCreateEditorInfo();
 
@@ -853,13 +963,33 @@ int menucommands(void)
 	return 0;
 }
 
-// Numpad 0 = play from the start of the pattern / stop (SHIFT: play the
-// other follow way, like SHIFT+F1-F3). Numpad 1-7 = go to pattern row 8, 16,
-// 24, 32, 40, 48 or 56 in the pattern editor. Not in the songname editor, and
-// not with CTRL/CMD (CTRL/CMD + numpad 0 is the default text size).
+// Numpad keys:
+// - CTRL + numpad 1-3 = put the cursor on track (channel) 1-3 in the pattern
+//   editor, from any editor
+// - Numpad 0 = play from the start of the pattern / stop (SHIFT: play the
+//   other follow way, like SHIFT+F1-F3)
+// - Numpad 1-8 = go to pattern row 0, 8, 16, 24, 32, 40, 48 or 56 in the
+//   pattern editor
+// - Numpad . = switch between edit mode and jam mode
+// The plain numpad keys don't work in the songname editor, nor with
+// CTRL/CMD (CTRL/CMD + numpad 0 is the default text size).
 // Returns nonzero if nothing else is to be done for this keypress
 int numpadcommands(void)
 {
+	// SDL2: KP_1-KP_9 are consecutive, but KP_0 comes after KP_9
+	if ((ctrlpressed) && (!metapressed) && (!altpressed) && (rawkey >= KEY_KP1) && (rawkey <= KEY_KP3))
+	{
+		int len;
+
+		editorInfo.editmode = EDIT_PATTERN;
+		editorInfo.epchn = rawkey - KEY_KP1;
+		len = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+		if (editorInfo.eppos > len) editorInfo.eppos = len;
+		key = 0;
+		rawkey = 0;
+		return 1;
+	}
+
 	if ((editorInfo.editmode == EDIT_NAMES) || (ctrlpressed) || (metapressed) || (altpressed))
 		return 0;
 
@@ -871,10 +1001,18 @@ int numpadcommands(void)
 		return 1;
 	}
 
-	if ((rawkey >= KEY_KP1) && (rawkey <= KEY_KP7) && (editorInfo.editmode == EDIT_PATTERN))
+	if ((rawkey >= KEY_KP1) && (rawkey <= KEY_KP8) && (editorInfo.editmode == EDIT_PATTERN))
 	{
-		// SDL2: KP_1-KP_9 are consecutive, but KP_0 comes after KP_9
-		patternjump((rawkey - KEY_KP1 + 1) * 8);
+		patternjump((rawkey - KEY_KP1) * 8);
+		key = 0;
+		rawkey = 0;
+		return 1;
+	}
+
+	if (rawkey == KEY_KPPERIOD)
+	{
+		recordmode ^= 1;
+		gui_message(recordmode ? "Edit mode: notes are entered" : "Jam mode: notes are only played");
 		key = 0;
 		rawkey = 0;
 		return 1;
@@ -1026,7 +1164,12 @@ void generalcommands(void)
 		break;
 
 	case KEY_F12:
-		gui_command(GTCMD_HELP);
+		// The retro interface has the classic online help screen (SHIFT:
+		// help for the current editor)
+		if (retromode)
+			onlinehelp(0, shiftpressed);
+		else
+			gui_command(GTCMD_HELP);
 		break;
 
 	case KEY_TAB:
@@ -1039,16 +1182,19 @@ void generalcommands(void)
 	case KEY_F1:
 		initsong(editorInfo.esnum, PLAY_BEGINNING);
 		followplay = followmode ^ shiftpressed;
+		followsuspended = 0;
 		break;
 
 	case KEY_F2:
 		initsong(editorInfo.esnum, PLAY_POS);
 		followplay = followmode ^ shiftpressed;
+		followsuspended = 0;
 		break;
 
 	case KEY_F3:
 		initsong(editorInfo.esnum, PLAY_PATTERN);
 		followplay = followmode ^ shiftpressed;
+		followsuspended = 0;
 		break;
 
 	case KEY_F4:
@@ -1231,6 +1377,21 @@ void runcommand(int cmd, const char *path)
 		gt_openfile(path);
 		break;
 
+	case GTCMD_OPENFILEPLAY:
+		// A file opened from the Finder or the command line: a song (or a
+		// SID / MIDI file, converted at once) is loaded and played
+		if ((!path) || (!path[0])) break;
+		filetype = gt_filetype(path);
+		if ((filetype == GTFILE_INSTRUMENT) || (filetype == GTFILE_PATCH))
+		{
+			gt_openfile(path);
+			break;
+		}
+		if (gui_asksavechanges(cmd, path)) break;
+		if (gt_openfile_direct(path))
+			startplay(PLAY_BEGINNING);
+		break;
+
 	case GTCMD_SAVE:
 		if (currentsongpath[0])
 		{
@@ -1275,8 +1436,13 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_LOADINSTR:
-		if (filedialog_open("Load an instrument into the current slot", "ins", newpath, MAX_PATHNAME))
-			gt_loadinstrument(newpath, editorInfo.einum ? editorInfo.einum : 1);
+		if (filedialog_open("Load an instrument or a chipsynth C64 patch into the current slot", "ins;fermatax", newpath, MAX_PATHNAME))
+		{
+			if (gt_filetype(newpath) == GTFILE_PATCH)
+				gt_importpatch(newpath);
+			else
+				gt_loadinstrument(newpath, editorInfo.einum ? editorInfo.einum : 1);
+		}
 		break;
 
 	case GTCMD_SAVEINSTR:
@@ -1478,6 +1644,19 @@ void runcommand(int cmd, const char *path)
 
 	case GTCMD_INVERTSEL:
 		patternkey(KEY_I, 'i', 1);
+		break;
+
+	case GTCMD_HELP:
+		// The retro interface has the classic online help screen
+		if (retromode)
+			onlinehelp(0, 0);
+		else
+			gui_command(cmd);
+		break;
+
+	case GTCMD_ASKINTERFACE:
+		uimode = UI_ASK;
+		gui_message("The choice of modern or retro interface will be shown at the next start");
 		break;
 
 	default:

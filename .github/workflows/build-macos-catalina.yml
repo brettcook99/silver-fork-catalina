@@ -1,6 +1,6 @@
 name: macOS Catalina build
 
-# Builds GoatTracker2.app for Intel Macs running macOS 10.15 Catalina or later
+# Builds GoatTracker Ultimate.app for Intel Macs running macOS 10.15 Catalina or later
 # with build_catalina.sh, checks that it doesn't depend on Homebrew and that
 # every binary in it allows macOS 10.15, then uploads it as a zip artifact.
 
@@ -16,13 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build GoatTracker2.app (x86_64, macOS 10.15+)
+      - name: Build GoatTracker Ultimate.app (x86_64, macOS 10.15+)
         run: bash build_catalina.sh
 
       - name: Verify the bundle runs on Catalina
         run: |
           set -euo pipefail
-          app=GoatTracker2.app
+          app="GoatTracker Ultimate.app"
           # minimum macOS of a Mach-O file (x86_64 slice)
           minos() {
             otool -arch x86_64 -l "$1" | awk '
@@ -43,6 +43,13 @@ jobs:
           fi
           # Info.plist is valid and declares the document types (Finder double-click)
           plutil -lint "$app/Contents/Info.plist" || status=1
+          # the name shown in the menu bar
+          name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$app/Contents/Info.plist")"
+          if [ "$name" = "GoatTracker Ultimate" ]; then
+            echo "bundle name: $name"
+          else
+            echo "::error::CFBundleName is '$name', not 'GoatTracker Ultimate'"; status=1
+          fi
           if /usr/libexec/PlistBuddy -c 'Print :CFBundleDocumentTypes:0:CFBundleTypeExtensions:0' "$app/Contents/Info.plist" | grep -qx sng; then
             echo "document types: ok"
           else
@@ -74,9 +81,9 @@ jobs:
           exit $status
 
       - name: Package
-        run: ditto -c -k --sequesterRsrc --keepParent GoatTracker2.app GoatTracker2-catalina-x86_64.zip
+        run: ditto -c -k --sequesterRsrc --keepParent "GoatTracker Ultimate.app" GoatTracker-Ultimate-catalina-x86_64.zip
 
       - uses: actions/upload-artifact@v7
         with:
-          name: GoatTracker2-catalina-x86_64
-          path: GoatTracker2-catalina-x86_64.zip
+          name: GoatTracker-Ultimate-catalina-x86_64
+          path: GoatTracker-Ultimate-catalina-x86_64.zip

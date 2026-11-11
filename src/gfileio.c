@@ -14,6 +14,10 @@ char currentsongpath[MAX_PATHNAME] = "";
 char suggestedsongname[MAX_PATHNAME] = "";
 SID2SNG_OPTIONS sidimportoptions;
 static int sidimportoptionsset = 0;
+// Set by gt_openfile_direct(): SID files are converted without the dialog
+static int sidimportdirect = 0;
+
+static int importsid(const char *path, const SID2SNG_OPTIONS *opt, int quiet);
 
 /*
  * Path helpers
@@ -351,11 +355,21 @@ int gt_importsid(const char *path)
     sid2sng_defaults(&sidimportoptions);
     sidimportoptionsset = 1;
   }
+  // Opened from the Finder or the command line: convert at once with the
+  // options last used
+  if (sidimportdirect) return importsid(path, &sidimportoptions, 1);
   gui_opensidimport(path);
   return 1;
 }
 
 int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt)
+{
+  return importsid(path, opt, 0);
+}
+
+// Converts and loads a SID file. quiet: no box telling how it went when the
+// conversion worked (only the status message)
+static int importsid(const char *path, const SID2SNG_OPTIONS *opt, int quiet)
 {
   char temppath[MAX_PATHNAME];
   char report[1024];
@@ -373,7 +387,7 @@ int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt)
     gui_alert("SID import failed", "Could not load the converted song");
     return 0;
   }
-  gui_alert("SID file imported", report);
+  if (!quiet) gui_alert("SID file imported", report);
   gui_message("Imported %s", gt_basename(path));
   return 1;
 }
@@ -446,6 +460,16 @@ int gt_openfile(const char *path)
   }
   gui_alert("GoatTracker can't open this kind of file", path);
   return 0;
+}
+
+int gt_openfile_direct(const char *path)
+{
+  int ok;
+
+  sidimportdirect = 1;
+  ok = gt_openfile(path);
+  sidimportdirect = 0;
+  return ok;
 }
 
 /*

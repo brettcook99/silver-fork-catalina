@@ -1,5 +1,5 @@
-# GoatTracker v2.82
-##### Macbook related fixes and improvements
+# GoatTracker Ultimate (v2.82)
+##### GoatTracker 2 with a modern or the classic retro interface, Macbook related fixes and improvements
 \
 Editor by Lasse Öörni (loorni@gmail.com)  
 HardSID 4U support by Téli Sándor.  
@@ -36,6 +36,16 @@ http://sourceforge.net/projects/goattracker2
 ## Revision history
 
 This fork is based on the official above version of Goat Tracker. See [readme.txt](../readme.txt) for full history.
+
+### GoatTracker Ultimate: modern or retro interface
+
+- **Choose at startup**: a window asks for the **Modern** interface (below) or the **Retro** one, the classic 100x37 GoatTracker 2 text screen in its original font and colors, scaled sharply to the window, with its mouse controls (click to edit, right/middle-drag to mark, right-click the title bar for the menu, the status line toggles). Tick *Don't ask again* to keep the choice; hold Shift (or Option on macOS) while starting, use View > Ask for Interface at Next Launch, or the `-u` option (`-u0` ask, `-u1` modern, `-u2` retro) to choose again. Both interfaces edit the same songs with the same keys.
+- The retro interface keeps the new version's features: the macOS menu bar, native open/save panels, drag & drop, SID / MIDI / chipsynth import and export. Dialogs added by the new version (save changes, quit, clear, hard restart ADSR, export, SID import) appear as pop-ups over the text screen. CTRL/CMD + / - step through the classic window sizes, F12 shows the classic help screen.
+- **Numpad** (both interfaces): 1-8 go to pattern rows 00, 08, 16 ... 56; `.` switches between edit and jam mode; CTRL+1/2/3 put the cursor on track 1, 2 or 3; 0 plays the pattern / stops.
+- **Mouse wheel** scrolls the pattern in both interfaces.
+- **Double-click a .sng or .sid in the Finder**: GoatTracker Ultimate opens it and starts playing (a SID is converted with the last import options, no dialog). A file dropped on the window is only opened.
+- F10 in the instrument editor also loads chipsynth C64 `.fermatax` patches.
+- The app is now called **GoatTracker Ultimate** (menu bar, window title, `GoatTracker Ultimate.app`). Settings stay in `~/.goattrk/`.
 
 ### New user interface
 

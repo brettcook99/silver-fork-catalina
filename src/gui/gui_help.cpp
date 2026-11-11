@@ -19,9 +19,11 @@ struct HelpSection
 #ifdef __APPLE__
 #define CMD "CMD"
 #define FINDERTEXT ", or double-click them in the Finder"
+#define OPENPLAYTEXT "A song or SID file double-clicked in the Finder (or given on the command line) is loaded and starts playing. Dropping a file onto the window only loads it."
 #else
 #define CMD "CTRL"
 #define FINDERTEXT ""
+#define OPENPLAYTEXT "A song or SID file given on the command line (or double-clicked, when GoatTracker Ultimate opens that kind of file) is loaded and starts playing. Dropping a file onto the window only loads it."
 #endif
 
 static const HelpLine interfacelines[] = {
@@ -33,7 +35,9 @@ static const HelpLine interfacelines[] = {
   { "Instruments", "Pick an instrument in the Library (double-click to rename). The Inspector has knobs for the envelope, waveform buttons, and the arrows jump to the instrument's tables. Hold the speaker / Hold to Play to hear it." },
   { "Tables", "Hover a row to see what it does. Click to edit, drag to mark, right-click for table commands." },
   { "Files", "File > Open (F10) opens songs and imports SID, MIDI and chipsynth files. You can also drop files onto the window" FINDERTEXT "." },
+  { "Opening and playing", OPENPLAYTEXT },
   { "Text size", CMD " + = bigger, " CMD " + - smaller, " CMD " + 0 default. ALT/OPTION+ENTER toggles full screen." },
+  { "Retro interface", "The classic GoatTracker screen is available too: hold Shift (or Option on macOS) while the program starts, or use View > Ask for Interface at Next Launch." },
   { NULL, NULL }
 };
 
@@ -53,6 +57,8 @@ static const HelpLine generallines[] = {
   { "SHIFT+F8", "Switch between 6581 and 8580" },
   { "SHIFT+F9", "Toggle reSID interpolation" },
   { "NUMPAD 0", "Play from the start of the pattern / stop" },
+  { "NUMPAD .", "Edit mode / jam mode" },
+  { "CTRL+NUMPAD 1-3", "Go to track 1 / 2 / 3 in the pattern editor" },
   { "SHIFT+, .", "Move the song start position & restart" },
   { "- +", "Select instrument" },
   { "/ *", "Select octave" },
@@ -74,7 +80,7 @@ static const HelpLine patternlines[] = {
   { "INS / DEL", "Insert / delete a row (on the end mark: change the length)" },
   { "< >", "Select pattern" },
   { "BACKQUOTE", "Select channel" },
-  { "NUMPAD 1-7", "Go to row 8, 16, 24 ... 56" },
+  { "NUMPAD 1-8", "Go to row 0, 8, 16 ... 56" },
   { "SHIFT+CURSOR", "Mark" },
   { "SHIFT+Q / A", "Transpose half step up / down" },
   { "SHIFT+W / S", "Transpose octave up / down" },

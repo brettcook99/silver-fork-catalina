@@ -4,7 +4,7 @@ To build under MacOS (Intel or Apple Silicon):
    (if you don't already have Homebrew installed, consult the internet)
     > brew install sdl2
 
-   (To build a self-contained GoatTracker2.app without Homebrew, run
+   (To build a self-contained GoatTracker Ultimate.app without Homebrew, run
    build_catalina.sh instead; see build_instructions_catalina.txt.)
 
 2. Install Xcode command line developer tools:

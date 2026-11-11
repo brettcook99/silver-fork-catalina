@@ -16,6 +16,7 @@ extern const char *gui_recentfile(int index);
 
 static int recordstate = 1;
 static int followstate = 1;
+static int retrostate = 0;
 
 // The GUI handles the shortcut keys itself (they also arrive as SDL key
 // events), so these menus must not act on them a second time. They only
@@ -59,6 +60,11 @@ static int followstate = 1;
 
   // Tag 0 = not available
   if (([item action] == @selector(itemSelected:)) && (tag == 0)) return NO;
+
+  // The panels are only in the modern interface
+  if ((retrostate) && ((tag == GTCMD_TOGGLELIBRARY) || (tag == GTCMD_TOGGLEINSPECTOR) || (tag == GTCMD_TOGGLETRACKS) ||
+      (tag == GTCMD_TOGGLETABLES) || (tag == GTCMD_TOGGLESONG) || (tag == GTCMD_RESETLAYOUT)))
+    return NO;
   return YES;
 }
 
@@ -240,9 +246,11 @@ void macmenu_init(void)
     additem(view, @"Default Text Size", @"0", MOD_CMD, GTCMD_ZOOMRESET);
     [view addItem:[NSMenuItem separatorItem]];
     additem(view, @"Enter Full Screen", @"f", MOD_CMD | MOD_CTRL, GTCMD_FULLSCREEN);
+    [view addItem:[NSMenuItem separatorItem]];
+    additem(view, @"Ask for Interface at Next Launch", @"", 0, GTCMD_ASKINTERFACE);
 
     help = newmenu(@"Help");
-    additem(help, @"GoatTracker Help", @"?", MOD_CMD, GTCMD_HELP);
+    additem(help, @"GoatTracker Ultimate Help", @"?", MOD_CMD, GTCMD_HELP);
 
     // File, Edit, Control and View go before the Window menu, Help at the end
     if ([NSApp windowsMenu]) index = [mainmenu indexOfItemWithSubmenu:[NSApp windowsMenu]];
@@ -269,4 +277,9 @@ void macmenu_setstate(int record, int follow)
 {
   recordstate = record;
   followstate = follow;
+}
+
+void macmenu_setretro(int retro)
+{
+  retrostate = retro;
 }

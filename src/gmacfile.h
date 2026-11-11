@@ -8,6 +8,9 @@
 // startdir may be NULL. Return 1 with the full path, 0 if cancelled.
 int macfile_open(const char *title, const char *exts, const char *startdir, char *path, int pathsize);
 int macfile_save(const char *title, const char *ext, const char *suggestedname, const char *startdir, char *path, int pathsize);
+// Nonzero if SHIFT or OPTION is held down right now (also before the window
+// gets any key events, e.g. while the program starts)
+int macfile_modifiersheld(void);
 #endif
 
 #endif

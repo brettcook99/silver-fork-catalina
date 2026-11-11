@@ -1,6 +1,7 @@
 //
 // GOATTRACKER v2 display state: note names, the song timer and following the
-// playback position. The screen itself is drawn by the GUI layer (gui/).
+// playback position. The modern interface is drawn by the GUI layer (gui/),
+// the retro interface's main screen by gretro.c.
 //
 
 #define GDISPLAY_C
@@ -26,13 +27,21 @@ int timeframe = 0;
 // or follow is switched on again
 int followsuspended = 0;
 
-// The classic main screen no longer exists; kept for the classic dialogs
-// that call it when they close
+// Called by the classic dialogs when they close. The retro interface draws
+// its main screen again; the modern interface has no main screen on the
+// text screen
 void printmainscreen(void)
 {
+  if (retromode)
+  {
+    clearscreen();
+    retro_printstatus();
+    return;
+  }
   textscreenactive = 0;
 }
 
+// Once per frame: the cursor flash, and the retro interface's main screen
 void displayupdate(void)
 {
   if (cursorflashdelay >= 6)
@@ -41,6 +50,7 @@ void displayupdate(void)
     cursorflash++;
     cursorflash &= 3;
   }
+  if (retromode) retro_printstatus();
 }
 
 // Moves the pattern and orderlist edit positions along with the playback

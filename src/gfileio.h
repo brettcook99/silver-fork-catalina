@@ -42,6 +42,9 @@ int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt);
 int gt_importpatch(const char *path);
 // Opens any supported file by its type (a song replaces the current song)
 int gt_openfile(const char *path);
+// The same, but a SID file is converted at once with the import options last
+// used, without the import dialog. Returns 1 if the file was opened
+int gt_openfile_direct(const char *path);
 
 // File dialogs: the native ones on macOS, the classic file selector
 // elsewhere. exts is a list of extensions without dots, separated by ';'.

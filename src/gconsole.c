@@ -17,6 +17,8 @@
 
 unsigned *scrbuffer = NULL;
 int textscreenactive = 0;
+int retromode = 0;
+int retroatmainscreen = 0;
 int textscreenmousex = 0;
 int textscreenmousey = 0;
 
@@ -248,7 +250,7 @@ int input_nextmidi(void)
 
 int initscreen(void)
 {
-  if (win_openwindow("GoatTracker", NULL) != BME_OK) return 0;
+  if (win_openwindow("GoatTracker Ultimate", NULL) != BME_OK) return 0;
 
   scrbuffer = (unsigned*)malloc(MAX_COLUMNS * MAX_ROWS * sizeof(unsigned));
   if (!scrbuffer) return 0;

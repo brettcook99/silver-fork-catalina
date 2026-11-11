@@ -2,10 +2,12 @@
 #define GCONSOLE_H
 
 // GoatTracker "console": keyboard/mouse input state that the editors read,
-// plus the classic 100x37 text screen. The text screen is only used by the
-// few remaining classic full-screen dialogs (file selector on non-macOS
-// systems, packer/relocator options); the GUI layer draws it as an overlay
-// on top of the new interface while such a dialog runs.
+// plus the classic 100x37 text screen. With the modern interface the text
+// screen is only used by the few remaining classic full-screen dialogs (file
+// selector on non-macOS systems, packer/relocator options); the GUI layer
+// draws it as an overlay on top of the new interface while such a dialog
+// runs. With the retro interface the text screen is the whole interface, as
+// in the original GoatTracker.
 
 #define MAX_COLUMNS 100
 #define MAX_ROWS 37
@@ -70,6 +72,11 @@ int input_nextmidi(void);
 extern unsigned *scrbuffer;
 // Set while a classic dialog is drawing on the text screen
 extern int textscreenactive;
+// Nonzero with the retro interface (the classic full-window text screen)
+extern int retromode;
+// Set by the retro main loop while it waits for input on the main screen
+// (not in a classic dialog such as the file selector or the online help)
+extern int retroatmainscreen;
 // The mouse position on the text screen, as character cells (set by the GUI
 // while the text screen is shown)
 extern int textscreenmousex, textscreenmousey;

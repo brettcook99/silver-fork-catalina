@@ -1,7 +1,7 @@
 #ifndef GOATTRK2_H
 #define GOATTRK2_H
 
-#define PROGRAMNAME "$VER: GoatTracker v2.82"
+#define PROGRAMNAME "$VER: GoatTracker Ultimate v2.82"
 
 #include <unistd.h>
 #include <stdio.h>
@@ -32,6 +32,7 @@
 #include "gmacmenu.h"
 #include "gcommand.h"
 #include "gfileio.h"
+#include "gretro.h"
 
 #define EDIT_PATTERN 0
 #define EDIT_ORDERLIST 1
@@ -128,6 +129,8 @@ void do_sound_init(void);
 void toggle_interpolation_mode(void);
 void prevmultiplier(void);
 void nextmultiplier(void);
+// The classic online help screen (ghelp.c), used by the retro interface
+void onlinehelp(int standalone, int context);
 void calculatefreqtable(void);
 void setspecialnotenames(void);
 void readscalatuningfile(void);

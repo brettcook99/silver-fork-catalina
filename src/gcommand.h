@@ -84,6 +84,10 @@ enum
   GTCMD_TOGGLETABLES,
   GTCMD_TOGGLESONG,
 
+  // Added later: kept at the end so that the numbers above stay the same
+  GTCMD_OPENFILEPLAY,     // Open the file given as path and play it (Finder, command line)
+  GTCMD_ASKINTERFACE,     // Show the modern / retro choice again at the next start
+
   GTCMD_COUNT
 };
 
@@ -96,6 +100,8 @@ void cmd_postfile(int cmd, const char *path);
 // Takes the next queued command. path gets the file name of GTCMD_OPENFILE
 // (empty for other commands). Returns 0 if the queue is empty
 int cmd_poll(int *cmd, char *path, int pathsize);
+// Nonzero if a command is waiting
+int cmd_pending(void);
 
 #ifdef __cplusplus
 }

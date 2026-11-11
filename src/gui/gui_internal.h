@@ -116,6 +116,21 @@ namespace gui
   void drawtextscreen(void);
   void drawmenubar(void);
 
+  // The retro interface: the classic text screen with the original font and
+  // palette, scaled to fill the window. Also sets the text screen mouse state
+  void drawretroscreen(SDL_Renderer *renderer);
+  void freeretroscreen(void);
+  // Largest character cell (in pixels, 8:14 shape) that fits the 100x37
+  // screen into maxx * maxy pixels
+  void retrofitcell(int maxx, int maxy, int *w, int *h);
+  // Color 0-15 of the classic palette
+  ImU32 retrocolor(int index);
+
+  // The startup window asking for the modern or the retro interface.
+  // selected is the highlighted choice, remember the "Don't ask again"
+  // checkbox. Returns UI_MODERN or UI_RETRO when chosen, UI_ASK until then
+  int drawchooser(int *selected, bool *remember);
+
   // Panel visibility
   extern bool showtracks, showpattern, showlibrary, showinspector, showtables, showsong, showhelp;
   // Requests a new default layout on the next frame

@@ -4,7 +4,9 @@
  */
 
 #include "gui/gui.h"
+#include "gretro.h"
 
+void retro_printstatus(void) { }
 int gui_init(void) { return 0; }
 void gui_shutdown(void) { }
 void gui_frame(int textscreen) { (void)textscreen; }

@@ -317,7 +317,7 @@ extern "C" int gui_init(void)
   fullscreen = win_fullscreen ? 1 : 0;
   if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
-  window = SDL_CreateWindow("GoatTracker", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
+  window = SDL_CreateWindow("GoatTracker Ultimate", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
   if (!window) return 0;
   SDL_SetWindowMinimumSize(window, 960, 600);
   loadicon();
@@ -357,6 +357,7 @@ extern "C" void gui_shutdown(void)
 {
   if (!initted) return;
   initted = false;
+  freeretroscreen();
   ImGui_ImplSDLRenderer2_Shutdown();
   ImGui_ImplSDL2_Shutdown();
   ImGui::DestroyContext();
@@ -377,10 +378,128 @@ extern "C" void gui_togglefullscreen(void)
 static const unsigned textsizes[] = { 70, 80, 90, 100, 110, 120, 135, 150, 175, 200 };
 #define NUM_TEXTSIZES ((int)(sizeof textsizes / sizeof textsizes[0]))
 
+/*
+ * Retro interface window: 100x37 characters of 8x14 pixels at 1x
+ */
+
+#define RETRO_MINXSIZE 800
+#define RETRO_MINYSIZE 518
+
+// Window sizes (in % of 1x) that CTRL/CMD + and - step through in the retro
+// interface, as in the classic version
+static const int zoomsteps[] = { 100, 125, 150, 175, 200, 225, 250, 275, 300, 350, 400, 500, 600 };
+#define NUM_ZOOMSTEPS ((int)(sizeof zoomsteps / sizeof zoomsteps[0]))
+
+static void zoomsize(int percent, int *w, int *h)
+{
+  *w = MAX_COLUMNS * ((8 * percent + 50) / 100);
+  *h = MAX_ROWS * ((14 * percent + 50) / 100);
+}
+
+// Largest retro window that fits the given percentage of the desktop
+static void retrofitsize(int xpercent, int ypercent, int *w, int *h)
+{
+  SDL_Rect usable;
+  int cw, ch;
+
+  if (SDL_GetDisplayUsableBounds(SDL_GetWindowDisplayIndex(window), &usable) != 0)
+  {
+    usable.w = 1440;
+    usable.h = 900;
+  }
+  retrofitcell(usable.w * xpercent / 100, usable.h * ypercent / 100, &cw, &ch);
+  if ((cw < 8) || (ch < 14))
+  {
+    cw = 8;
+    ch = 14;
+  }
+  *w = cw * MAX_COLUMNS;
+  *h = ch * MAX_ROWS;
+}
+
+// CTRL/CMD + - 0 in the retro interface: the next larger or smaller window
+// size, or the default size
+static void retrozoom(int dir)
+{
+  int winw, winh, cellw, cellh;
+  int neww = 0;
+  int newh = 0;
+  int w, h, c;
+
+  if ((!window) || (fullscreen)) return;
+  if (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) SDL_RestoreWindow(window);
+  SDL_GetWindowSize(window, &winw, &winh);
+  retrofitcell(winw, winh, &cellw, &cellh);
+
+  if (!dir)
+    retrofitsize(90, 80, &neww, &newh);
+  else if (dir > 0)
+  {
+    int maxw, maxh;
+
+    retrofitsize(92, 88, &maxw, &maxh);
+    for (c = 0; c < NUM_ZOOMSTEPS; c++)
+    {
+      zoomsize(zoomsteps[c], &w, &h);
+      if (h / MAX_ROWS > cellh)
+      {
+        neww = w;
+        newh = h;
+        break;
+      }
+    }
+    // The next step doesn't fit: the largest size that does
+    if ((!neww) || (neww > maxw) || (newh > maxh))
+    {
+      neww = maxw;
+      newh = maxh;
+    }
+    if (newh / MAX_ROWS <= cellh) return;
+  }
+  else
+  {
+    for (c = NUM_ZOOMSTEPS - 1; c >= 0; c--)
+    {
+      zoomsize(zoomsteps[c], &w, &h);
+      if (h / MAX_ROWS < cellh)
+      {
+        neww = w;
+        newh = h;
+        break;
+      }
+    }
+    if (!neww) return; // Already the smallest size
+  }
+
+  if (neww < RETRO_MINXSIZE) neww = RETRO_MINXSIZE;
+  if (newh < RETRO_MINYSIZE) newh = RETRO_MINYSIZE;
+  SDL_SetWindowSize(window, neww, newh);
+  windowedxsize = neww;
+  windowedysize = newh;
+}
+
+extern "C" void gui_setretro(int on)
+{
+  macmenu_setretro(on);
+  if (!window) return;
+  if (on)
+    SDL_SetWindowMinimumSize(window, RETRO_MINXSIZE, RETRO_MINYSIZE);
+  else
+    SDL_SetWindowMinimumSize(window, 960, 600);
+}
+
 extern "C" void gui_changetextsize(int dir)
 {
   int c;
   int current = 3;
+
+  // The retro interface has the classic window sizes instead (the dialogs
+  // keep their text size)
+  if (retromode)
+  {
+    retrozoom(dir);
+    return;
+  }
 
   if (!dir)
   {
@@ -401,7 +520,8 @@ extern "C" int gui_command(int cmd)
 {
   switch (cmd)
   {
-    case GTCMD_HELP: showhelp = !showhelp; return 1;
+    // The retro interface has the classic online help screen instead
+    case GTCMD_HELP: if (retromode) return 0; showhelp = !showhelp; return 1;
     case GTCMD_ZOOMIN: gui_changetextsize(1); return 1;
     case GTCMD_ZOOMOUT: gui_changetextsize(-1); return 1;
     case GTCMD_ZOOMRESET: gui_changetextsize(0); return 1;
@@ -441,6 +561,9 @@ static bool editorsblocked(void)
   return false;
 }
 
+// textscreen: a classic full-screen dialog (file selector, online help...)
+// has the keyboard. The retro interface's main screen doesn't count as one:
+// there the keys work as in the modern interface
 static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
 {
   SDL_Keycode sym = k.keysym.sym;
@@ -538,6 +661,10 @@ static void pollevents(int textscreen)
 {
   SDL_Event e;
 
+  // On the retro interface's main screen the keys work as in the modern
+  // interface; only its classic dialogs are "text screens"
+  if ((retromode) && (retroatmainscreen)) textscreen = 0;
+
   tsmousewheel = 0;
   while (SDL_PollEvent(&e))
   {
@@ -565,7 +692,10 @@ static void pollevents(int textscreen)
       case SDL_DROPFILE:
       if (e.drop.file)
       {
-        cmd_postfile(GTCMD_OPENFILE, e.drop.file);
+        // A file dropped onto the window is opened. A file opened from the
+        // Finder (double-click, Open With) comes without a window: it is
+        // opened and played
+        cmd_postfile(e.drop.windowID ? GTCMD_OPENFILE : GTCMD_OPENFILEPLAY, e.drop.file);
         SDL_free(e.drop.file);
       }
       break;
@@ -627,6 +757,15 @@ static void drawall(int textscreen)
   ImVec2 pos, size;
   ImGuiWindowFlags barflags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+  // Retro interface: the classic text screen fills the window (also while a
+  // classic dialog runs on it), with the dialogs on top
+  if (retromode)
+  {
+    drawretroscreen(renderer);
+    drawdialogs();
+    return;
+  }
 
 #ifndef __APPLE__
   // macOS has its own menu bar
@@ -697,10 +836,15 @@ static void drawall(int textscreen)
 // Testing aid: with the environment variable GT_SCREENSHOT=file.bmp the
 // window is saved to that file after GT_SCREENSHOT_FRAMES frames (default
 // 30) and the program quits. GT_SCREENSHOT_CMDS can list commands to run
-// first (comma-separated GTCMD numbers), e.g. to open a dialog
+// first (comma-separated GTCMD numbers), e.g. to open a dialog.
+// GT_SCREENSHOT_KEYS can list key presses (comma-separated SDL keycodes in
+// decimal, each optionally followed by :c for CTRL, :s for SHIFT, :a for
+// ALT) that are sent as SDL key events, one every other frame from frame 10
+// on (the commands have taken effect by then)
 static void testscreenshot(void)
 {
   static int frames = 0;
+  static const char *keys = NULL;
   const char *path = getenv("GT_SCREENSHOT");
   const char *wait = getenv("GT_SCREENSHOT_FRAMES");
   int target = wait ? atoi(wait) : 30;
@@ -719,6 +863,26 @@ static void testscreenshot(void)
       while ((*cmds) && (*cmds != ',')) cmds++;
       if (*cmds == ',') cmds++;
     }
+    keys = getenv("GT_SCREENSHOT_KEYS");
+  }
+  if ((frames >= 10) && (frames & 1) && (keys) && (*keys))
+  {
+    SDL_Event e;
+    memset(&e, 0, sizeof e);
+    e.type = SDL_KEYDOWN;
+    e.key.state = SDL_PRESSED;
+    e.key.windowID = SDL_GetWindowID(window);
+    e.key.keysym.sym = (SDL_Keycode)atoi(keys);
+    e.key.keysym.scancode = SDL_GetScancodeFromKey(e.key.keysym.sym);
+    while ((*keys) && (*keys != ','))
+    {
+      if (*keys == 'c') e.key.keysym.mod |= KMOD_LCTRL;
+      if (*keys == 's') e.key.keysym.mod |= KMOD_LSHIFT;
+      if (*keys == 'a') e.key.keysym.mod |= KMOD_LALT;
+      keys++;
+    }
+    if (*keys == ',') keys++;
+    SDL_PushEvent(&e);
   }
   if (frames != target) return;
   if (SDL_GetRendererOutputSize(renderer, &w, &h) != 0) return;
@@ -730,13 +894,9 @@ static void testscreenshot(void)
   exitprogram = 1;
 }
 
-extern "C" void gui_frame(int textscreen)
+// Window events, then a new ImGui frame
+static void beginframe(int textscreen)
 {
-  Uint32 now;
-
-  if (!initted) return;
-  ImGuiIO &io = ImGui::GetIO();
-
   pollevents(textscreen);
 
   ImGui::GetStyle().FontScaleMain = textsizepercent / 100.0f;
@@ -744,15 +904,15 @@ extern "C" void gui_frame(int textscreen)
   ImGui_ImplSDLRenderer2_NewFrame();
   ImGui_ImplSDL2_NewFrame();
   ImGui::NewFrame();
+}
 
-  updatemeters(io.DeltaTime);
-  drawall(textscreen);
+// Renders the frame and shows it. bg is the color behind everything
+static void endframe(ImU32 bg)
+{
+  Uint32 now;
 
   ImGui::Render();
-  {
-    ImU32 bg = theme.bgdeep;
-    SDL_SetRenderDrawColor(renderer, bg & 0xff, (bg >> 8) & 0xff, (bg >> 16) & 0xff, 255);
-  }
+  SDL_SetRenderDrawColor(renderer, bg & 0xff, (bg >> 8) & 0xff, (bg >> 16) & 0xff, 255);
   SDL_RenderClear(renderer);
   ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
   testscreenshot();
@@ -765,6 +925,50 @@ extern "C" void gui_frame(int textscreen)
   else if ((lastframeticks) && (now - lastframeticks < 10))
     SDL_Delay(10 - (now - lastframeticks));
   lastframeticks = SDL_GetTicks();
+}
+
+extern "C" void gui_frame(int textscreen)
+{
+  if (!initted) return;
+  ImGuiIO &io = ImGui::GetIO();
+
+  beginframe(textscreen);
+  updatemeters(io.DeltaTime);
+  drawall(textscreen);
+  // The classic screen has black margins around it
+  endframe(retromode ? IM_COL32(0, 0, 0, 255) : theme.bgdeep);
+}
+
+extern "C" int gui_chooseinterface(int current, int *remember)
+{
+  int selected = (current == UI_RETRO) ? UI_RETRO : UI_MODERN;
+  bool rem = (remember) && (*remember);
+  int result = UI_ASK;
+
+  if (!initted) return selected;
+
+  for (;;)
+  {
+    beginframe(0);
+    result = drawchooser(&selected, &rem);
+    endframe(theme.bgdeep);
+    if (result != UI_ASK) break;
+    // Window closed (or the screenshot test aid is done)
+    if ((win_quitted) || (exitprogram)) break;
+  }
+
+  // Keys pressed in the chooser are not for the editors. Commands (files
+  // opened from the Finder meanwhile) stay queued
+  input_clearkeys();
+  if (remember) *remember = rem ? 1 : 0;
+  return result;
+}
+
+extern "C" const char *gui_currentmessage(void)
+{
+  if ((!initted) || (!statusmessage[0])) return NULL;
+  if (ImGui::GetTime() - statusmessagetime >= 8.0) return NULL;
+  return statusmessage;
 }
 
 extern "C" int gui_textscreenmousebuttons(void)

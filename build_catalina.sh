@@ -2,7 +2,7 @@
 #
 # build_catalina.sh
 #
-# Builds GoatTracker 2 as a self-contained GoatTracker2.app that
+# Builds GoatTracker Ultimate as a self-contained GoatTracker Ultimate.app that
 # runs on macOS 10.15 Catalina and later. Homebrew and MacPorts are NOT needed:
 # the script downloads the official SDL2 framework, compiles GoatTracker
 # (with its Dear ImGui user interface) and puts everything into the app.
@@ -21,9 +21,9 @@
 #   JOBS=n                Parallel compile jobs (default: number of CPUs).
 #
 # Output:
-#   GoatTracker2.app next to this script. The command line tools (gt2reloc,
-#   ins2snd2, sngspli2, mod2sng, midi2sng, sid2sng) are inside
-#   GoatTracker2.app/Contents/MacOS.
+#   GoatTracker Ultimate.app next to this script. The command line tools
+#   (gt2reloc, ins2snd2, sngspli2, mod2sng, midi2sng, sid2sng) are inside
+#   GoatTracker Ultimate.app/Contents/MacOS.
 #
 
 set -euo pipefail
@@ -40,7 +40,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/build-macos"
 DL="$BUILD/downloads"
 DEPS="$BUILD/deps"
-APP="$ROOT/GoatTracker2.app"
+APP="$ROOT/GoatTracker Ultimate.app"
 TOOLS="goattrk2 gt2reloc ins2snd2 sngspli2 mod2sng midi2sng sid2sng"
 
 die()  { printf '\nerror: %s\n' "$*" >&2; exit 1; }
@@ -85,7 +85,7 @@ CC_CMD=(clang "${ARCH_FLAGS[@]}" -mmacosx-version-min="$MACOS_MIN")
 CXX_CMD=(clang++ "${ARCH_FLAGS[@]}" -mmacosx-version-min="$MACOS_MIN")
 JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 2)}"
 
-echo "GoatTracker2 macOS build"
+echo "GoatTracker Ultimate macOS build"
 echo "  architecture(s): $ARCH"
 echo "  minimum macOS:   $MACOS_MIN"
 echo "  compiler:        $(clang --version 2>/dev/null | sed -n 1p)"
@@ -140,7 +140,7 @@ trap - EXIT
 # GoatTracker
 # ---------------------------------------------------------------------------
 
-step "Building GoatTracker2"
+step "Building GoatTracker Ultimate"
 
 # src/makefile asks sdl2-config for compiler/linker flags. Provide one that
 # points at the SDL2 framework extracted above. Paths are relative to src/
@@ -189,7 +189,7 @@ done
 # App bundle
 # ---------------------------------------------------------------------------
 
-step "Assembling GoatTracker2.app"
+step "Assembling GoatTracker Ultimate.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 
@@ -218,9 +218,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>GoatTracker2</string>
+    <string>GoatTracker Ultimate</string>
     <key>CFBundleDisplayName</key>
-    <string>GoatTracker 2</string>
+    <string>GoatTracker Ultimate</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -416,14 +416,18 @@ cat <<EOF
 Done: $APP
 
   Start it:     open "$APP"   (or double-click it in Finder)
-  Install it:   drag GoatTracker2.app to /Applications
+  Install it:   drag "GoatTracker Ultimate.app" to /Applications
   CLI tools:    "$APP/Contents/MacOS/gt2reloc" song.sng song.sid
   Settings are stored in ~/.goattrk/ (goattrk2.cfg, the window layout in
   imgui.ini and the recent files)
 
+At startup you choose the modern or the retro (classic text screen)
+interface; hold Shift or Option while it starts to choose again.
+
 Songs, SID, MIDI and chipsynth files open by double-clicking them in the
-Finder (choose Open With > GoatTracker2 the first time) or by dropping them
-on the window. CMD+1 to CMD+9 work as F1-F9 (see the Control menu). For
+Finder (choose Open With > GoatTracker Ultimate the first time); songs and
+SID files then start playing. Dropping a file on the window opens it
+without playing. CMD+1 to CMD+9 work as F1-F9 (see the Control menu). For
 F10-F12 hold the fn key, or enable "Use F1, F2, etc. keys as standard
 function keys" in System Preferences > Keyboard.
 EOF

@@ -410,11 +410,13 @@ void gui::drawmenubar(void)
     if (ImGui::MenuItem("Smaller Text", "CTRL+-")) cmd_post(GTCMD_ZOOMOUT);
     if (ImGui::MenuItem("Default Text Size", "CTRL+0")) cmd_post(GTCMD_ZOOMRESET);
     if (ImGui::MenuItem("Full Screen", "ALT+ENTER")) cmd_post(GTCMD_FULLSCREEN);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Ask for Interface at Next Launch")) cmd_post(GTCMD_ASKINTERFACE);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Help"))
   {
-    if (ImGui::MenuItem("GoatTracker Help", "F12")) cmd_post(GTCMD_HELP);
+    if (ImGui::MenuItem("GoatTracker Ultimate Help", "F12")) cmd_post(GTCMD_HELP);
     ImGui::EndMenu();
   }
   ImGui::EndMainMenuBar();

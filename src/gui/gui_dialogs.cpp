@@ -182,7 +182,7 @@ static void quitdialog(void)
   {
     const char *labels[] = { "Quit", "Cancel" };
     int r;
-    title("Quit GoatTracker?");
+    title("Quit GoatTracker Ultimate?");
     body("All changes are saved.");
     r = buttons(labels, 2, 1);
     if (r == 0)
@@ -536,6 +536,244 @@ void gui::drawdialogs(void)
   cleardialog();
   hrdialog();
   alertdialog();
+}
+
+/*
+ * The startup window: modern or retro interface
+ */
+
+// Small picture of the modern interface: bars, panels, arrangement regions
+// and the pattern grid
+static void previewmodern(ImDrawList *dl, ImVec2 a, ImVec2 b)
+{
+  float w = b.x - a.x;
+  float h = b.y - a.y;
+  float barh = h * 0.12f;
+  float leftw = w * 0.22f;
+  float rightw = w * 0.24f;
+  float arrh = h * 0.30f;
+  ImVec2 c0(a.x + leftw + 3.0f, a.y + barh + 3.0f);
+  ImVec2 c1(b.x - rightw - 3.0f, b.y - 3.0f);
+  int c, r;
+
+  dl->AddRectFilled(a, b, theme.bgdeep, 6.0f);
+  dl->AddRectFilled(a, ImVec2(b.x, a.y + barh), theme.bgraised, 6.0f, ImDrawFlags_RoundCornersTop);
+  dl->AddRectFilled(ImVec2(a.x + w * 0.40f, a.y + barh * 0.22f), ImVec2(a.x + w * 0.62f, a.y + barh * 0.78f), theme.lcdbg, 2.0f);
+  dl->AddCircleFilled(ImVec2(a.x + barh * 0.6f, a.y + barh * 0.5f), barh * 0.22f, theme.text);
+  dl->AddCircleFilled(ImVec2(a.x + barh * 1.4f, a.y + barh * 0.5f), barh * 0.22f, theme.record);
+  // Library / inspector and tables / song panels
+  dl->AddRectFilled(ImVec2(a.x + 3.0f, a.y + barh + 3.0f), ImVec2(a.x + leftw, b.y - 3.0f), theme.bgpanel, 3.0f);
+  dl->AddRectFilled(ImVec2(b.x - rightw, a.y + barh + 3.0f), ImVec2(b.x - 3.0f, b.y - 3.0f), theme.bgpanel, 3.0f);
+  for (r = 0; r < 6; r++)
+  {
+    float y = a.y + barh + 10.0f + r * h * 0.07f;
+    dl->AddRectFilled(ImVec2(a.x + 8.0f, y), ImVec2(a.x + leftw - 8.0f - (r % 3) * 6.0f, y + 3.0f), theme.textfaint, 1.0f);
+    dl->AddRectFilled(ImVec2(b.x - rightw + 6.0f, y), ImVec2(b.x - 8.0f - (r % 2) * 10.0f, y + 3.0f), theme.textfaint, 1.0f);
+  }
+  // Arrangement: a region strip for each voice
+  dl->AddRectFilled(c0, ImVec2(c1.x, c0.y + arrh), theme.bgpanel, 3.0f);
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    float y = c0.y + 5.0f + c * (arrh - 10.0f) / MAX_CHN;
+    float rh = (arrh - 10.0f) / MAX_CHN - 3.0f;
+    for (r = 0; r < 4; r++)
+    {
+      float x0 = c0.x + 5.0f + r * (c1.x - c0.x - 10.0f) / 4.0f;
+      float x1 = x0 + (c1.x - c0.x - 10.0f) / 4.0f - 2.0f;
+      dl->AddRectFilled(ImVec2(x0, y), ImVec2(x1, y + rh), alpha(theme.chn[c], 0.75f), 2.0f);
+    }
+  }
+  // Pattern editor grid
+  {
+    ImVec2 p0(c0.x, c0.y + arrh + 3.0f);
+    dl->AddRectFilled(p0, c1, theme.bgfield, 3.0f);
+    for (r = 0; r < 9; r++)
+    {
+      float y = p0.y + 6.0f + r * (c1.y - p0.y - 12.0f) / 9.0f;
+      if (r == 4) dl->AddRectFilled(ImVec2(p0.x + 2.0f, y - 2.0f), ImVec2(c1.x - 2.0f, y + 5.0f), theme.accentsoft);
+      for (c = 0; c < MAX_CHN; c++)
+      {
+        float x = p0.x + 6.0f + c * (c1.x - p0.x - 12.0f) / MAX_CHN;
+        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + (c1.x - p0.x) * 0.16f, y + 3.0f), (r % 2) ? theme.textfaint : theme.note, 1.0f);
+      }
+    }
+  }
+}
+
+// Small picture of the retro interface: the classic text screen in its own
+// colors
+static void previewretro(ImDrawList *dl, ImVec2 a, ImVec2 b)
+{
+  static const char *const lines[] =
+  {
+    "GoatTracker Ultimate",
+    "",
+    "CHN1 PATT.00  CHN2 PATT.01",
+    "00 C-4 01 000 00 ... 00 000",
+    "01 ... 00 000 01 G-3 02 000",
+    "02 D#4 01 000 02 ... 00 000",
+    "03 ... 00 000 03 ... 00 000",
+    "04 F-4 01 304 04 C-3 02 000",
+    "05 ... 00 000 05 ... 00 000",
+    "06 G-4 01 000 06 ... 00 000",
+  };
+  int count = (int)(sizeof lines / sizeof lines[0]);
+  float lineh = (b.y - a.y - 8.0f) / count;
+  float size = lineh * 0.82f;
+  int c;
+
+  dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, 255), 6.0f);
+  // Title bar
+  dl->AddRectFilled(ImVec2(a.x, a.y), ImVec2(b.x, a.y + 4.0f + lineh), retrocolor(1), 6.0f, ImDrawFlags_RoundCornersTop);
+  dl->PushClipRect(a, b, true);
+  for (c = 0; c < count; c++)
+  {
+    ImU32 col = retrocolor(CNORMAL);
+    ImVec2 p(a.x + 6.0f, a.y + 4.0f + c * lineh);
+    if ((c == 0) || (c == 2)) col = retrocolor(CTITLE);
+    if (c == 5)
+    {
+      // Edit cursor row
+      dl->AddRectFilled(ImVec2(a.x + 2.0f, p.y), ImVec2(b.x - 2.0f, p.y + lineh), retrocolor(1));
+      col = retrocolor(CEDIT);
+    }
+    if (c == 7) col = retrocolor(CPLAYING);
+    dl->AddText(fontmono, size, p, col, lines[c]);
+  }
+  dl->PopClipRect();
+}
+
+int gui::drawchooser(int *selected, bool *remember)
+{
+  ImGuiViewport *vp = ImGui::GetMainViewport();
+  ImDrawList *dl;
+  float fs = ImGui::GetFontSize();
+  float cardw = fs * 19.0f;
+  float cardh = fs * 17.0f;
+  float gap = fs * 1.5f;
+  float totalw = cardw * 2.0f + gap;
+  float totalh = cardh + fs * 10.0f;
+  float left, top;
+  int result = UI_ASK;
+  int c;
+  static const char *const names[2] = { "Modern", "Retro" };
+  static const char *const texts[2] =
+  {
+    "Panels you can arrange, the song as regions on a timeline, mouse-friendly editors and dialogs.",
+    "The classic GoatTracker screen: 100 x 37 characters in the original font and colors, keyboard first.",
+  };
+  static const char *const keys[2] = { "M", "R" };
+
+  ImGui::SetNextWindowPos(vp->Pos);
+  ImGui::SetNextWindowSize(vp->Size);
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::ColorConvertU32ToFloat4(theme.bgdeep));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  ImGui::Begin("##chooser", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+    ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav);
+  ImGui::PopStyleVar(2);
+  ImGui::PopStyleColor();
+  dl = ImGui::GetWindowDrawList();
+
+  left = (vp->Size.x - totalw) * 0.5f;
+  top = (vp->Size.y - totalh) * 0.5f;
+  if (left < fs) left = fs;
+  if (top < fs) top = fs;
+
+  // Heading
+  ImGui::SetCursorPos(ImVec2(left, top));
+  ImGui::PushFont(fontbold, ImGui::GetStyle().FontSizeBase * 1.7f);
+  ImGui::TextUnformatted("GoatTracker Ultimate");
+  ImGui::PopFont();
+  ImGui::SetCursorPosX(left);
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(theme.textdim));
+  ImGui::TextUnformatted("Choose the interface. Both edit the same songs with the same keys.");
+  ImGui::PopStyleColor();
+  ImGui::Dummy(ImVec2(0.0f, fs * 0.8f));
+
+  // The two choices
+  {
+    float y = ImGui::GetCursorPosY();
+    for (c = 0; c < 2; c++)
+    {
+      int choice = c ? UI_RETRO : UI_MODERN;
+      bool sel = (*selected == choice);
+      ImVec2 a, b, pa, pb;
+      ImU32 border;
+
+      ImGui::SetCursorPos(ImVec2(left + c * (cardw + gap), y));
+      ImGui::PushID(c);
+      if (ImGui::InvisibleButton("choice", ImVec2(cardw, cardh)))
+      {
+        *selected = choice;
+        result = choice;
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+      a = ImGui::GetItemRectMin();
+      b = ImGui::GetItemRectMax();
+      border = sel ? theme.accent : (ImGui::IsItemHovered() ? theme.textfaint : theme.border);
+      dl->AddRectFilled(a, b, ImGui::IsItemHovered() ? mix(theme.bgpanel, theme.bgraised, 0.5f) : theme.bgpanel, 10.0f);
+      dl->AddRect(a, b, border, 10.0f, 0, sel ? 2.5f : 1.0f);
+
+      pa = ImVec2(a.x + fs, a.y + fs);
+      pb = ImVec2(b.x - fs, a.y + cardh * 0.58f);
+      if (c) previewretro(dl, pa, pb);
+      else previewmodern(dl, pa, pb);
+
+      dl->AddText(fontbold, fs * 1.25f, ImVec2(a.x + fs, pb.y + fs * 0.7f), theme.text, names[c]);
+      {
+        char hint[16];
+        ImVec2 ks;
+        snprintf(hint, sizeof hint, "%s", keys[c]);
+        ks = fontui->CalcTextSizeA(fs, FLT_MAX, 0.0f, hint);
+        dl->AddRect(ImVec2(b.x - fs - ks.x - 10.0f, pb.y + fs * 0.75f), ImVec2(b.x - fs, pb.y + fs * 0.75f + ks.y + 4.0f), theme.textfaint, 4.0f);
+        dl->AddText(fontui, fs, ImVec2(b.x - fs - ks.x - 5.0f, pb.y + fs * 0.75f + 2.0f), theme.textdim, hint);
+      }
+      dl->AddText(fontui, fs, ImVec2(a.x + fs, pb.y + fs * 2.4f), theme.textdim, texts[c], NULL, cardw - fs * 2.0f);
+      ImGui::PopID();
+    }
+    ImGui::SetCursorPos(ImVec2(left, y + cardh + fs * 1.2f));
+  }
+
+  // Don't ask again
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+  ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
+  ImGui::Checkbox("Don't ask again", remember);
+  ImGui::PopStyleColor();
+  ImGui::PopStyleVar();
+  ImGui::SetCursorPosX(left);
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
+#ifdef __APPLE__
+  ImGui::TextUnformatted("Hold Shift or Option while GoatTracker Ultimate starts to choose again.");
+#else
+  ImGui::TextUnformatted("Hold Shift while GoatTracker Ultimate starts to choose again.");
+#endif
+  ImGui::PopStyleColor();
+
+  // Continue button
+  ImGui::SameLine();
+  {
+    const char *label = "Continue";
+    float bw = ImGui::CalcTextSize(label).x + 40.0f;
+    ImGui::SetCursorPosX(left + totalw - bw);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - fs * 0.6f);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(theme.accent));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(mix(theme.accent, IM_COL32(255, 255, 255, 255), 0.15f)));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(mix(theme.accent, IM_COL32(0, 0, 0, 255), 0.15f)));
+    if (ImGui::Button(label, ImVec2(bw, 0.0f))) result = *selected;
+    ImGui::PopStyleColor(3);
+  }
+
+  // Keyboard: arrows choose, Return continues, M / R pick directly
+  if ((ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) || (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) || (ImGui::IsKeyPressed(ImGuiKey_Tab)))
+    *selected = (*selected == UI_RETRO) ? UI_MODERN : UI_RETRO;
+  if ((ImGui::IsKeyPressed(ImGuiKey_Enter, false)) || (ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)))
+    result = *selected;
+  if (ImGui::IsKeyPressed(ImGuiKey_M, false)) result = *selected = UI_MODERN;
+  if (ImGui::IsKeyPressed(ImGuiKey_R, false)) result = *selected = UI_RETRO;
+
+  ImGui::End();
+  return result;
 }
 
 /*

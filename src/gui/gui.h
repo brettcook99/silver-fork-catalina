@@ -12,10 +12,28 @@ extern "C" {
 int gui_init(void);
 void gui_shutdown(void);
 
+// Interface choices for gui_chooseinterface() and the uimode setting
+#define UI_ASK 0
+#define UI_MODERN 1
+#define UI_RETRO 2
+
+// Shows the startup window that asks for the modern or the retro interface.
+// current is the choice selected at first (UI_MODERN or UI_RETRO). remember
+// is the "Don't ask again" checkbox (in: its first state, out: the user's
+// choice). Returns UI_MODERN or UI_RETRO, or UI_ASK if the window was closed
+int gui_chooseinterface(int current, int *remember);
+// Switches the window between the modern and the retro interface (minimum
+// window size, background)
+void gui_setretro(int on);
+// The status message shown at the moment, or NULL if there is none (for the
+// retro interface, which shows it on the text screen)
+const char *gui_currentmessage(void);
+
 // Runs one frame: handles window events, draws the interface and shows it.
 // With textscreen nonzero the classic text screen (scrbuffer) is drawn on
-// top as a modal dialog. Key presses for the editors are queued with
-// input_pushkey(), menu commands with cmd_post().
+// top as a modal dialog. With the retro interface the text screen fills the
+// window instead, whatever textscreen is. Key presses for the editors are
+// queued with input_pushkey(), menu commands with cmd_post().
 void gui_frame(int textscreen);
 
 // Mouse state over the classic text screen (buttons as MOUSEB_xxx bits)

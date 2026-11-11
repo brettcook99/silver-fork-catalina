@@ -60,3 +60,8 @@ int cmd_poll(int *cmd, char *path, int pathsize)
   cmdhead = (cmdhead + 1) % CMDQUEUESIZE;
   return 1;
 }
+
+int cmd_pending(void)
+{
+  return cmdhead != cmdtail;
+}
