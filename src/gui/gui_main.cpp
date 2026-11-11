@@ -589,6 +589,15 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     return;
   }
 
+  // Holding CTRL/CMD+C or X doesn't repeat: the first copy / cut takes the
+  // selection away, so a repeat would copy (or clear!) the whole pattern.
+  // Neither do the CMD+A/R/F toggles (they would flip back and forth)
+  if ((k.repeat) && (mod & (KMOD_CTRL | KMOD_GUI)) && (!(mod & KMOD_ALT)))
+  {
+    if ((sym == SDLK_c) || (sym == SDLK_x)) return;
+    if ((mod & KMOD_GUI) && ((sym == SDLK_a) || (sym == SDLK_r) || (sym == SDLK_f))) return;
+  }
+
   // ALT/OPTION + numpad 5: the instrument designer, from anywhere (also while
   // typing into a field or with a dialog open). The scancode works with
   // NumLock on and off. While a classic full-screen dialog has the keyboard

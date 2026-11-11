@@ -41,6 +41,18 @@ static int designerstate = 0;
 @implementation GTMenuTarget
 - (void)itemSelected:(id)sender
 {
+  // A shortcut key that reaches the menu anyway (performKeyEquivalent above
+  // is not asked for every submenu) must not run its command a second time:
+  // the key has already arrived as an SDL key event. Running it twice broke
+  // e.g. CMD+C (the second copy, with the selection gone, copied the whole
+  // pattern), CMD+V (pasted that and went to the end of the pattern) and the
+  // CMD+A/R/F toggles. Clicks, and RETURN in a menu opened from the keyboard,
+  // still work
+  NSEvent *event = [NSApp currentEvent];
+  if ((event) && ([event type] == NSEventTypeKeyDown) && ([[sender keyEquivalent] length]) &&
+      ([event modifierFlags] & (NSEventModifierFlagCommand | NSEventModifierFlagFunction)))
+    return;
+
   cmd_post((int)[sender tag]);
 }
 
