@@ -17,6 +17,7 @@ extern const char *gui_recentfile(int index);
 static int recordstate = 1;
 static int followstate = 1;
 static int retrostate = 0;
+static int designerstate = 0;
 
 // The GUI handles the shortcut keys itself (they also arrive as SDL key
 // events), so these menus must not act on them a second time. They only
@@ -57,6 +58,8 @@ static int retrostate = 0;
     [item setState:recordstate ? NSControlStateValueOn : NSControlStateValueOff];
   if (tag == GTCMD_FOLLOW)
     [item setState:followstate ? NSControlStateValueOn : NSControlStateValueOff];
+  if (tag == GTCMD_DESIGNER)
+    [item setState:designerstate ? NSControlStateValueOn : NSControlStateValueOff];
 
   // Tag 0 = not available
   if (([item action] == @selector(itemSelected:)) && (tag == 0)) return NO;
@@ -234,6 +237,8 @@ void macmenu_init(void)
     addfkeyitem(control, @"Song Info", 8, 0, GTCMD_EDITNAMES);
 
     view = newmenu(@"View");
+    additem(view, @"Instrument Designer", @"d", MOD_CMD, GTCMD_DESIGNER);
+    [view addItem:[NSMenuItem separatorItem]];
     additem(view, @"Library", @"", 0, GTCMD_TOGGLELIBRARY);
     additem(view, @"Inspector", @"", 0, GTCMD_TOGGLEINSPECTOR);
     additem(view, @"Arrangement", @"", 0, GTCMD_TOGGLETRACKS);
@@ -282,4 +287,9 @@ void macmenu_setstate(int record, int follow)
 void macmenu_setretro(int retro)
 {
   retrostate = retro;
+}
+
+void macmenu_setdesigner(int on)
+{
+  designerstate = on;
 }

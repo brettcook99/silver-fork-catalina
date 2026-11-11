@@ -38,6 +38,48 @@ int cmdcopyrows = 0;
 //int editorInfo.epmarkstart;
 //int editorInfo.epmarkend;
 
+// The note a note key plays with the current key layout and octave
+// (FIRSTNOTE...LASTNOTE), -1 if the key is not a note key
+int notekeytonote(int key)
+{
+  int newnote = -1;
+  unsigned c;
+
+  switch (keypreset)
+  {
+    case KEY_TRACKER:
+    for (c = 0; c < sizeof(notekeytbl1); c++)
+    {
+      if (key == notekeytbl1[c]) newnote = FIRSTNOTE+c+editorInfo.epoctave*12;
+    }
+    for (c = 0; c < sizeof(notekeytbl2); c++)
+    {
+      if (key == notekeytbl2[c]) newnote = FIRSTNOTE+c+(editorInfo.epoctave+1)*12;
+    }
+    break;
+
+    case KEY_DMC:
+    for (c = 0; c < sizeof(dmckeytbl); c++)
+    {
+      if (key == dmckeytbl[c]) newnote = FIRSTNOTE+c+editorInfo.epoctave*12;
+    }
+    break;
+
+    case KEY_JANKO:
+    for (c = 0; c < sizeof(jankokeytbl1); c++)
+    {
+      if (key == jankokeytbl1[c]) newnote = FIRSTNOTE+c+editorInfo.epoctave*12;
+    }
+    for (c = 0; c < sizeof(jankokeytbl2); c++)
+    {
+      if (key == jankokeytbl2[c]) newnote = FIRSTNOTE+c+(editorInfo.epoctave+1)*12;
+    }
+    break;
+  }
+  if (newnote > LASTNOTE) newnote = -1;
+  return newnote;
+}
+
 void patterncommands(void)
 {
   int c, scrrep;

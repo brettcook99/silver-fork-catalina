@@ -155,6 +155,11 @@ void mutechannel(int chnnum)
   chn[chnnum].mute ^= 1;
 }
 
+int playfilterptr(void)
+{
+  return filterptr;
+}
+
 int isplaying(void)
 {
   return (songinit != PLAY_STOPPED);

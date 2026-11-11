@@ -7,6 +7,7 @@
 
 #include "goattrk2.h"
 #include "gfermatax.h"
+#include "gpatch.h"
 
 #define MAX_PARAMS 512
 #define NUM_OSC 3
@@ -172,27 +173,19 @@ static int oscon(int n)
 // there is no room
 static int addtable(int t, const unsigned char *left, const unsigned char *right, int rows)
 {
-  int start = gettablelen(t);
-  int c;
-
-  if (start + rows > MAX_TABLELEN) return 0;
-  for (c = 0; c < rows; c++)
-  {
-    ltable[t][start + c] = left[c];
-    rtable[t][start + c] = right[c];
-  }
-  return start + 1;
+  return patch_addrows(t, left, right, rows);
 }
 
 static int emptyinstrument(int i)
 {
-  INSTR *p = &instr[i];
-  return (!p->ad) && (!p->sr) && (!p->ptr[0]) && (!p->ptr[1]) && (!p->ptr[2]) && (!p->ptr[3]) &&
-    (!p->vibdelay) && (!p->name[0]);
+  return patch_emptyinstr(i);
 }
 
-// Makes instrument i from oscillator n. Returns 0 if a table is full
-static int makeinstrument(int i, int n, const char *name, char *notes, int notessize)
+// Makes instrument i from oscillator n. filterroute: the SID voices the
+// filter is for (oscillator n plays on voice n+1, as in the instrument
+// designer), 0 = no filtertable for this instrument. Returns 0 if a table is
+// full
+static int makeinstrument(int i, int n, const char *name, char *notes, int notessize, int filterroute)
 {
   int base = 768 + 16 * n;
   int waveform = getparam_i(base + 2, DEF_WAVEFORM) & 0x0f;
@@ -203,7 +196,6 @@ static int makeinstrument(int i, int n, const char *name, char *notes, int notes
   int r = clamp(getparam_i(base + 10, DEF_RELEASE), 0, 15);
   int sync = getparam_i(base + 5, 0) != 0;
   int ring = getparam_i(base + 6, 0) != 0;
-  int tofilter = getparam_i(base + 11, 0) != 0;
   int coarse = clamp(getparam_i(512 + 16 * n + 5, 0), -32, 95);
   int fine = getparam_i(512 + 16 * n + 6, 0);
   unsigned char l[4], rt[4];
@@ -248,8 +240,9 @@ static int makeinstrument(int i, int n, const char *name, char *notes, int notes
     if (!p->ptr[PTBL]) return 0;
   }
 
-  // Filtertable: type, resonance (voice 1), cutoff
-  if (tofilter)
+  // Filtertable: type, resonance, voices, cutoff. chipsynth has one filter
+  // for all oscillators, so only one instrument gets the table
+  if (filterroute)
   {
     int cutoff = clamp(getparam_i(865, DEF_CUTOFF), 0, 2047);
     int res = clamp(getparam_i(866, DEF_RESONANCE), 0, 15);
@@ -257,7 +250,7 @@ static int makeinstrument(int i, int n, const char *name, char *notes, int notes
     int bp = getparam_i(868, 0) != 0;
     int hp = getparam_i(869, 0) != 0;
     l[0] = (unsigned char)(0x80 | (lp ? 0x10 : 0) | (bp ? 0x20 : 0) | (hp ? 0x40 : 0));
-    rt[0] = (unsigned char)((res << 4) | 0x01);
+    rt[0] = (unsigned char)((res << 4) | (filterroute & 7));
     l[1] = 0x00;
     rt[1] = (unsigned char)(cutoff >> 3);
     l[2] = 0xff;
@@ -285,6 +278,8 @@ int fermatax_import(const char *path, int slot, char *report, int reportsize)
   int oscs[NUM_OSC];
   int numosc = 0;
   int made = 0;
+  int route = 0;
+  int filterdone = 0;
   int n;
 
   report[0] = 0;
@@ -324,9 +319,16 @@ int fermatax_import(const char *path, int slot, char *report, int reportsize)
     }
   }
 
+  // The voices that go through the filter (oscillator n on voice n+1)
+  for (n = 0; n < numosc; n++)
+  {
+    if (getparam_i(768 + 16 * oscs[n] + 11, 0)) route |= 1 << oscs[n];
+  }
+
   for (n = 0; n < numosc; n++)
   {
     int i = slot;
+    int thisroute = 0;
     char name[MAX_INSTRNAMELEN + 8];
 
     if (n)
@@ -342,16 +344,24 @@ int fermatax_import(const char *path, int slot, char *report, int reportsize)
         break;
       }
     }
+    // Several oscillators: "NAME:1".."NAME:3", one patch in the instrument
+    // designer
     if (numosc > 1)
     {
       char cut[MAX_INSTRNAMELEN];
-      memcpy(cut, basename, MAX_INSTRNAMELEN - 4);
-      cut[MAX_INSTRNAMELEN - 4] = 0;
-      snprintf(name, sizeof name, "%s %d", cut, oscs[n] + 1);
+      memcpy(cut, basename, MAX_INSTRNAMELEN - 3);
+      cut[MAX_INSTRNAMELEN - 3] = 0;
+      snprintf(name, sizeof name, "%s:%d", cut, oscs[n] + 1);
     }
     else strcpy(name, basename);
 
-    if (!makeinstrument(i, oscs[n], name, notes, sizeof notes))
+    // The first oscillator that is filtered gets the filtertable
+    if ((route) && (!filterdone) && (getparam_i(768 + 16 * oscs[n] + 11, 0)))
+    {
+      thisroute = route;
+      filterdone = 1;
+    }
+    if (!makeinstrument(i, oscs[n], name, notes, sizeof notes, thisroute))
     {
       snprintf(report, reportsize, "The tables are full");
       return made;

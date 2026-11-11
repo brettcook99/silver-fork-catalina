@@ -242,6 +242,20 @@ colors). Tick "Don't ask again" to keep the choice. Holding SHIFT (or OPTION
 on macOS) while the program starts, View > Ask for Interface at Next Launch,
 or the -u option bring the choice back.
 
+The instrument designer is a full-window editor that looks like a C64 screen
+and is laid out like Plogue chipsynth C64's patch page. CTRL+D (CMD+D on
+macOS) or ALT/OPTION+numpad 5 open it from anywhere, also the rainbow button
+in the control bar, View > Instrument Designer and, in the retro interface,
+C64 in the right-click menu bar. ESC or the same keys return to the tracker.
+A patch has up to three oscillators, the instruments named NAME:1, NAME:2 and
+NAME:3, played together on SID voices 1-3. The PATCH page has the waveforms,
+sync / ring / test, pulse width, envelope, tuning, vibrato and the filter; the
+WAVE, PULSE and FILTER pages show the instrument's table rows as steps with
+graphs, presets and sweep makers; the EMU page has the chip settings and the
+SID registers. Note keys, a MIDI keyboard and the on-screen keyboard play the
+patch. A C64 character ROM named chargen in the settings folder replaces the
+built-in characters.
+
 A song or SID file given on the command line (or double-clicked in the macOS
 Finder) is loaded and starts playing. A SID file is converted into a song
 with the import options used last. A file dropped on the window is only

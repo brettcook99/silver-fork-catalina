@@ -72,6 +72,7 @@ typedef struct {
 extern EDITOR_INFO editorInfo;
 
 void patterncommands(void);
+int notekeytonote(int key);
 void playfromcursor(int follow);
 void playstop(void);
 void playfromrow(int row, int follow);

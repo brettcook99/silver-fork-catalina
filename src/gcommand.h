@@ -87,6 +87,7 @@ enum
   // Added later: kept at the end so that the numbers above stay the same
   GTCMD_OPENFILEPLAY,     // Open the file given as path and play it (Finder, command line)
   GTCMD_ASKINTERFACE,     // Show the modern / retro choice again at the next start
+  GTCMD_DESIGNER,         // Switch between the tracker and the instrument designer
 
   GTCMD_COUNT
 };

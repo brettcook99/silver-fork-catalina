@@ -1026,6 +1026,13 @@ void midicommands(void)
 	static int lastnote = 0;
 	static int lastchn = 0;
 
+	// The instrument designer plays its whole patch
+	if (gui_designeractive())
+	{
+		if ((midinoteon) || (midinoteoff)) gui_designermidi(midinoteon, midinoteoff);
+		return;
+	}
+
 	if (midinoteon)
 	{
 		// The pattern editor enters & plays the note like a note key does.

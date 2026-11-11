@@ -117,6 +117,11 @@ int gui::recentcount(void)
   return numrecent;
 }
 
+const char *gui::configdirectory(void)
+{
+  return configdir;
+}
+
 const char *gui::recentpath(int index)
 {
   if ((index < 0) || (index >= numrecent)) return NULL;
@@ -357,6 +362,7 @@ extern "C" void gui_shutdown(void)
 {
   if (!initted) return;
   initted = false;
+  closedesigner();
   freeretroscreen();
   ImGui_ImplSDLRenderer2_Shutdown();
   ImGui_ImplSDL2_Shutdown();
@@ -535,6 +541,10 @@ extern "C" int gui_command(int cmd)
     case GTCMD_TOGGLETRACKS: showtracks = !showtracks; return 1;
     case GTCMD_TOGGLETABLES: showtables = !showtables; return 1;
     case GTCMD_TOGGLESONG: showsong = !showsong; return 1;
+    case GTCMD_DESIGNER:
+      if (showdesigner) closedesigner();
+      else opendesigner();
+      return 1;
   }
   return 0;
 }
@@ -576,6 +586,27 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     case SDLK_LSHIFT: case SDLK_RSHIFT: case SDLK_LCTRL: case SDLK_RCTRL:
     case SDLK_LALT: case SDLK_RALT: case SDLK_LGUI: case SDLK_RGUI:
     case SDLK_CAPSLOCK: case SDLK_NUMLOCKCLEAR: case SDLK_MODE:
+    return;
+  }
+
+  // ALT/OPTION + numpad 5: the instrument designer, from anywhere (also while
+  // typing into a field or with a dialog open). The scancode works with
+  // NumLock on and off. While a classic full-screen dialog has the keyboard
+  // the command waits until it closes
+  if ((k.keysym.scancode == SDL_SCANCODE_KP_5) && (mod & KMOD_ALT) && (!(mod & (KMOD_CTRL | KMOD_GUI))))
+  {
+    if (!k.repeat) cmd_post(GTCMD_DESIGNER);
+    return;
+  }
+
+  // CTRL+D (CMD+D on macOS): the instrument designer
+#ifdef __APPLE__
+  if ((sym == SDLK_d) && (mod & KMOD_GUI) && (!(mod & (KMOD_ALT | KMOD_SHIFT | KMOD_CTRL))))
+#else
+  if ((sym == SDLK_d) && (mod & KMOD_CTRL) && (!(mod & (KMOD_ALT | KMOD_SHIFT | KMOD_GUI))))
+#endif
+  {
+    if ((!k.repeat) && (!textscreen)) cmd_post(GTCMD_DESIGNER);
     return;
   }
 
@@ -631,6 +662,13 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
 
   // Typing into a text field or answering a dialog
   if ((!textscreen) && (editorsblocked())) return;
+
+  // The instrument designer has the keyboard
+  if (designerwanted(textscreen))
+  {
+    designerkey(k, true);
+    return;
+  }
 
   switch (sym)
   {
@@ -704,7 +742,17 @@ static void pollevents(int textscreen)
       handlekeydown(e.key, textscreen);
       break;
 
+      case SDL_KEYUP:
+      // The designer plays a note while its key is held
+      if (designerwanted(textscreen)) designerkey(e.key, false);
+      break;
+
       case SDL_TEXTINPUT:
+      if (designerwanted(textscreen))
+      {
+        if (!editorsblocked()) designertext(utf8first(e.text.text));
+        break;
+      }
       if ((textscreen) || (!editorsblocked()))
       {
         int ch = utf8first(e.text.text);
@@ -757,6 +805,18 @@ static void drawall(int textscreen)
   ImVec2 pos, size;
   ImGuiWindowFlags barflags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+  // The instrument designer fills the window in both interfaces (but not over
+  // a classic full-screen dialog), with the dialogs on top. The text screen
+  // gets no mouse input meanwhile
+  if (designerwanted(textscreen))
+  {
+    drawdesigner(renderer);
+    drawdialogs();
+    tsmousebuttons = 0;
+    tsmousewheel = 0;
+    return;
+  }
 
   // Retro interface: the classic text screen fills the window (also while a
   // classic dialog runs on it), with the dialogs on top

@@ -18,6 +18,8 @@ void macmenu_setstate(int record, int follow);
 // Tells the menus whether the retro interface is used (it has no panels to
 // show or hide)
 void macmenu_setretro(int retro);
+// Tells the menus whether the instrument designer is shown (check mark)
+void macmenu_setdesigner(int on);
 #ifdef __cplusplus
 }
 #endif
@@ -25,6 +27,7 @@ void macmenu_setretro(int retro);
 #define macmenu_init()
 #define macmenu_setstate(record, follow)
 #define macmenu_setretro(retro)
+#define macmenu_setdesigner(on)
 #endif
 
 #endif

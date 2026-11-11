@@ -88,7 +88,8 @@ void retro_printstatus(void)
   }
   else
   {
-    printtext(0, 0, 15+16, " PLAY | PLAYPOS | PLAYPATT | STOP | LOAD | SAVE | PACK/RL | HELP | CLEAR | QUIT | A- | A+ | FULL |");
+    // C64 = the instrument designer
+    printtext(0, 0, 15+16, " PLAY | PLAYPOS | PLAYPATT | STOP | LOAD | SAVE | PACK/RL | HELP | CLEAR | QUIT | A- A+ | FULL | C64");
   }
 
   // Following the playback is done by followplayback() in the main loop
@@ -793,12 +794,14 @@ void retro_mousecommands(void)
         gui_askclear();
       if ((mousex >= 74) && (mousex <= 79))
         gui_askquit();
-      if ((mousex >= 81) && (mousex <= 84))
+      if ((mousex >= 81) && (mousex <= 83))
         changetextsize(-1);
-      if ((mousex >= 86) && (mousex <= 89))
+      if ((mousex >= 84) && (mousex <= 87))
         changetextsize(1);
-      if ((mousex >= 91) && (mousex <= 96))
+      if ((mousex >= 89) && (mousex <= 94))
         togglefullscreen();
+      if (mousex >= 96)
+        cmd_post(GTCMD_DESIGNER);
     }
   }
 }

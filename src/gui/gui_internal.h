@@ -87,7 +87,8 @@ namespace gui
   enum Icon
   {
     ICON_REWIND, ICON_PLAY, ICON_PLAYPOS, ICON_PLAYPATTERN, ICON_STOP, ICON_RECORD,
-    ICON_FOLLOW, ICON_PREV, ICON_NEXT, ICON_UP, ICON_DOWN, ICON_PLUS, ICON_MINUS, ICON_SPEAKER, ICON_GOTO
+    ICON_FOLLOW, ICON_PREV, ICON_NEXT, ICON_UP, ICON_DOWN, ICON_PLUS, ICON_MINUS, ICON_SPEAKER, ICON_GOTO,
+    ICON_DESIGNER
   };
   bool iconbutton(const char *id, Icon icon, bool active, ImU32 activecol, ImVec2 size, const char *tooltip);
   void drawicon(ImDrawList *dl, Icon icon, ImVec2 center, float size, ImU32 col);
@@ -125,6 +126,21 @@ namespace gui
   void retrofitcell(int maxx, int maxy, int *w, int *h);
   // Color 0-15 of the classic palette
   ImU32 retrocolor(int index);
+
+  // The instrument designer (gui_designer.cpp), a full-window mode that looks
+  // like a C64 screen. designerwanted() tells whether it is to be drawn this
+  // frame (it is not drawn over a classic full-screen dialog)
+  extern bool showdesigner;
+  void opendesigner(void);
+  void closedesigner(void);
+  bool designerwanted(int textscreen);
+  void drawdesigner(SDL_Renderer *renderer);
+  // Key presses and releases, typed characters while it is shown
+  void designerkey(const SDL_KeyboardEvent &k, bool down);
+  void designertext(int ch);
+
+  // The settings folder (ends with a path separator)
+  const char *configdirectory(void);
 
   // The startup window asking for the modern or the retro interface.
   // selected is the highlighted choice, remember the "Don't ask again"

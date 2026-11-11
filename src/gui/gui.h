@@ -43,9 +43,14 @@ int gui_textscreenmousewheel(void);
 void gui_changetextsize(int dir);
 void gui_togglefullscreen(void);
 
-// Handles the view commands (GTCMD_HELP, GTCMD_ZOOMIN...). Returns 0 if the
-// command is not a view command
+// Handles the view commands (GTCMD_HELP, GTCMD_ZOOMIN, GTCMD_DESIGNER...).
+// Returns 0 if the command is not a view command
 int gui_command(int cmd);
+
+// Nonzero while the instrument designer is shown. MIDI notes go to it then
+// (noteon / noteoff as midinoteon / midinoteoff)
+int gui_designeractive(void);
+void gui_designermidi(int noteon, int noteoff);
 
 // Shows a message in the status bar for a few seconds
 void gui_message(const char *fmt, ...);

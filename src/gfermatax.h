@@ -16,10 +16,14 @@
 //   262      clock (985248 PAL, 1022727 NTSC)
 //
 // Each oscillator that is on becomes an instrument with a wavetable
-// (waveform, coarse tune), pulsetable (pulse width) and filtertable (when
-// routed to the filter). The first goes into the given slot, the others into
-// the next empty slots. Step sequencers, modulators, effects, fine tune and
-// voice settings can't be expressed as an instrument and are left out.
+// (waveform, coarse tune) and pulsetable (pulse width). The first goes into
+// the given slot, the others into the next empty slots. With more than one
+// oscillator they are named "NAME:1".."NAME:3" after the oscillators, which
+// makes them one patch in the instrument designer (oscillator n played on SID
+// voice n). chipsynth has one filter for all oscillators: the first filtered
+// oscillator's instrument gets the filtertable, routing the voices of all
+// the filtered oscillators. Step sequencers, modulators, effects, fine tune
+// and voice settings can't be expressed as an instrument and are left out.
 
 #ifdef __cplusplus
 extern "C" {

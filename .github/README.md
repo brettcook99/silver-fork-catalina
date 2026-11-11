@@ -47,6 +47,18 @@ This fork is based on the official above version of Goat Tracker. See [readme.tx
 - F10 in the instrument editor also loads chipsynth C64 `.fermatax` patches.
 - The app is now called **GoatTracker Ultimate** (menu bar, window title, `GoatTracker Ultimate.app`). Settings stay in `~/.goattrk/`.
 
+### Instrument designer
+
+A full-window instrument editor that looks like a Commodore 64 screen (80x50 characters in the C64's font style, colors and border, `READY.` and a blinking cursor) and is laid out like the patch page of Plogue's chipsynth C64.
+
+- **Open it from anywhere** with CMD+D (CTRL+D on Windows / Linux) or ALT/OPTION+numpad 5, the rainbow button in the control bar, View > Instrument Designer, *Open in Instrument Designer* in the Library's right-click menu or the Inspector, or *C64* in the retro interface's right-click menu bar. ESC (RUN/STOP), the *TRACKER* tab or the same keys go back; the tracker is left on the instrument you designed.
+- **A patch has up to three oscillators**, each a GoatTracker instrument played on SID voice 1, 2 or 3 at the same time, so sync and ring modulation between oscillators work as in chipsynth. The oscillators of the patch `BASS` are the instruments named `BASS:1`, `BASS:2` and `BASS:3`; an instrument without such a name is a one-oscillator patch. Click an oscillator's light to add it (a copy of the first, in the next empty instrument) or to mute it while playing.
+- **PATCH page**: per oscillator the waveforms, FILT / SYNC / RING / TEST, hard restart and legato, pulse width and ADSR bars, transpose or fixed pitch, vibrato and gate timer; the filter's cutoff, resonance, type and voices, a chip display (click to switch 6581 / 8580, PAL / NTSC) and a graph of the cutoff sweep.
+- **WAVE, PULSE and FILTER pages**: the table rows as steps — waveform bits and arpeggio notes per step, pulse width and filter sweeps with a graph of what the player will do, the loop point, wave presets (arpeggios, drums) and sweep makers. A *SHARED* table part can be given its own copy.
+- **EMU page**: SID chip, clock, player speed, hard restart ADSR, reSID mode, a live view of the SID registers in machine-language-monitor style and the voices.
+- A clickable keyboard plays the patch; so do the note keys and a MIDI keyboard. F1-F4 play and stop the song, CMD/CTRL+Z undoes. Every change is an ordinary instrument / table edit, so it saves with the song and shows in the tracker.
+- The characters are built in (not Commodore's ROM). A C64 character ROM file named `chargen` (e.g. from VICE) in the settings folder is used instead.
+
 ### New user interface
 
 The 100x37 text screen has been replaced by a modern interface in the style of a DAW like Logic Pro (Dear ImGui on SDL2). Every keyboard command still works as before.
@@ -63,7 +75,7 @@ The 100x37 text screen has been replaced by a modern interface in the style of a
 - Text size: CMD + = / - / 0. Full screen: CTRL+CMD+F or ALT+ENTER.
 - Help (F12, CMD+?) is a searchable window.
 - **SID import**: File > Import > SID File (CMD+SHIFT+I), or drop / double-click a .sid file. A dialog shows the tune's title, author, subtunes and chip. SIDs exported by GoatTracker are turned back into their song exactly (all subtunes, patterns, instruments and tables; only instrument names and unused data are lost). Any other SID is played on an emulated C64 and its notes and sounds are written into a new song: a starting point for editing, not an exact copy. The command line tool `sid2sng` does the same (`sid2sng tune.sid tune.sng [-exact|-approx] [-sN subtune] [-tSECONDS]`).
-- **chipsynth C64 presets**: File > Import > chipsynth C64 Patch, or drop / double-click a .fermatax file. Each oscillator that makes a sound becomes an instrument (the first in the current slot, the others in the next empty ones): ADSR, waveform with sync and ring, coarse tune (wavetable), pulse width (pulsetable) and the filter type, resonance and cutoff when the oscillator goes through the filter (filtertable). Step sequencers, modulators, effects and fine tune have no GoatTracker equivalent and are left out; a report says what was skipped. CMD+Z undoes the import.
+- **chipsynth C64 presets**: File > Import > chipsynth C64 Patch, or drop / double-click a .fermatax file. Each oscillator that makes a sound becomes an instrument (the first in the current slot, the others in the next empty ones, named `NAME:1`..`NAME:3` so that they form one patch in the instrument designer): ADSR, waveform with sync and ring, coarse tune (wavetable) and pulse width (pulsetable). chipsynth's one filter (type, resonance, cutoff) becomes a filtertable on the first filtered oscillator's instrument, routing the voices of all filtered oscillators (oscillator n plays on voice n). Step sequencers, modulators, effects and fine tune have no GoatTracker equivalent and are left out; a report says what was skipped. CMD+Z undoes the import.
 
 Earlier changes in this fork:
 

@@ -91,6 +91,14 @@ void gui::drawcontrolbar(float height)
     }
     else cmd_post(GTCMD_FOLLOW);
   }
+  x += bw + 4.0f;
+  ImGui::SetCursorScreenPos(ImVec2(x, y));
+#ifdef __APPLE__
+  if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "Instrument designer: a C64 screen laid out like chipsynth C64 (CMD+D, OPTION+numpad 5)"))
+#else
+  if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "Instrument designer: a C64 screen laid out like chipsynth C64 (CTRL+D, ALT+numpad 5)"))
+#endif
+    cmd_post(GTCMD_DESIGNER);
   x += bw + 16.0f;
 
   // The display
@@ -399,6 +407,8 @@ void gui::drawmenubar(void)
   }
   if (ImGui::BeginMenu("View"))
   {
+    if (ImGui::MenuItem("Instrument Designer", "CTRL+D")) cmd_post(GTCMD_DESIGNER);
+    ImGui::Separator();
     ImGui::MenuItem("Library", NULL, &showlibrary);
     ImGui::MenuItem("Inspector", NULL, &showinspector);
     ImGui::MenuItem("Arrangement", NULL, &showtracks);

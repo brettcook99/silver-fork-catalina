@@ -347,6 +347,25 @@ void gui::drawicon(ImDrawList *dl, Icon icon, ImVec2 c, float s, ImU32 col)
     dl->AddLine(ImVec2(c.x - h * 0.8f, c.y), ImVec2(c.x + h * 0.5f, c.y), col, 1.8f);
     dl->AddTriangleFilled(ImVec2(c.x + h * 0.1f, c.y - h * 0.55f), ImVec2(c.x + h * 0.1f, c.y + h * 0.55f), ImVec2(c.x + h * 0.9f, c.y), col);
     break;
+
+    case ICON_DESIGNER:
+    {
+      // The C64's rainbow stripes: the instrument designer
+      static const ImU32 stripes[5] =
+      {
+        IM_COL32(214, 72, 64, 255), IM_COL32(232, 140, 56, 255), IM_COL32(226, 204, 78, 255),
+        IM_COL32(112, 186, 92, 255), IM_COL32(96, 150, 220, 255)
+      };
+      float sh = h * 2.0f / 5.0f;
+      int n;
+      for (n = 0; n < 5; n++)
+      {
+        float y0 = c.y - h + n * sh;
+        dl->AddRectFilled(ImVec2(c.x - h * 1.1f, y0 + sh * 0.12f), ImVec2(c.x + h * 1.1f, y0 + sh * 0.88f), stripes[n], 1.0f);
+      }
+      (void)col;
+    }
+    break;
   }
 }
 

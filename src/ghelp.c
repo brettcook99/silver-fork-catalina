@@ -42,6 +42,9 @@ void onlinehelp(int standalone,int context)
     "CTRL/CMD + 0  Default size",
     "ALT/OPTION+ENTER Fullscreen",
     "Right-click top bar: A- A+",
+    "CTRL/CMD+D, ALT+NUMPAD 5 or",
+    "right-click top bar, C64:",
+    "  Instrument designer (ESC: back)",
     NULL
   };
 
