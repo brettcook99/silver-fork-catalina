@@ -57,6 +57,7 @@ void sid2sng_defaults(SID2SNG_OPTIONS *opt)
   opt->rowsperbeat = 0;
   opt->tempo = 0;
   opt->patternlength = 64;
+  opt->loops = 1;
 }
 
 //
@@ -698,7 +699,7 @@ static int unpackpattern(const unsigned char *mem, unsigned adr, unsigned end, u
   return pos;
 }
 
-static int exactconvert(const SIDFILE *sf, SNGDATA *sng, char *report, int reportsize)
+static int exactconvert(const SIDFILE *sf, SNGDATA *sng, SID2SNG_PLAYBACK *pb, char *report, int reportsize)
 {
   unsigned char *mem;
   SCAN sc;
@@ -965,10 +966,13 @@ static int exactconvert(const SIDFILE *sf, SNGDATA *sng, char *report, int repor
 
   setreport(report, reportsize, "Exact: GoatTracker 2 song, %d subtune%s, %d patterns, %d instruments",
     gp.numsongs, (gp.numsongs > 1) ? "s" : "", gp.numpatt, gp.numinstr);
-  if (gp.multiplier > 1) addreport(report, reportsize, ", %dx speed (set the speed multiplier)", gp.multiplier);
-  if (gp.multiplier == 0) addreport(report, reportsize, ", 25Hz (set the speed multiplier to 0)");
+  if (gp.multiplier > 1) addreport(report, reportsize, ", %dx speed", gp.multiplier);
+  if (gp.multiplier == 0) addreport(report, reportsize, ", 25Hz (speed multiplier 0)");
   if ((gp.hrcode) && (gp.adparam != 0x0f00)) addreport(report, reportsize, ", hardrestart ADSR %04X", gp.adparam);
   if (sf->info.clock == 2) addreport(report, reportsize, ", NTSC");
+  // How it plays: no speed code in the player is 1x
+  pb->multiplier = (gp.multiplier < 0) ? 1 : ((gp.multiplier > 16) ? -1 : gp.multiplier);
+  pb->adparam = gp.hrcode ? (int)gp.adparam : -1;
   ok = 1;
 
 done:
@@ -993,8 +997,10 @@ done:
 #define RUNMIN 4                  // Frames a new pitch must last to be a new note
 #define STICKY 0.35               // Extra semitones before the pitch changes note
 #define MAXPULSEROWS 8
-#define NUMLEVELS 7
-#define STABLEPROG 12              // Longer programs: pitch drift is left out
+#define NUMLEVELS 11
+#define STABLEPROG 12             // Longer programs: pitch drift is left out
+#define STOPPEDSECS 2              // No change for this long at the end: the tune has stopped
+#define LOOPSECS 600               // Recorded at least this long to find the loop
 
 typedef struct
 {
@@ -1011,13 +1017,35 @@ typedef struct
 
 typedef struct
 {
+  const SFRAME *fr;
+  int numticks;
+  int *pn[MAX_CHN];               // Pitch (sticky note) per tick, -1 = none
+} RECORDING;
+
+typedef struct
+{
+  const RECORDING *rec;           // The subtune's recording
+  int sub;                        // The subtune (index of the ones converted)
   int voice;
   int start, end;                 // Ticks: [start, end)
   int gateoff;                    // Tick when the gate went off (<= end)
   int legato;                     // Started by a pitch change, no new attack
   int tied;                       // The next note follows without a keyoff
+  int shortgate;                  // The gate goes off before the next row: the
+                                  // program turns it off and plays the release
   int base;                       // Note 0-NUMNOTES-1
   int gatetimer;                  // Instrument gatetimer (with HR/legato bits)
+  int gtflags;                    // How the note starts: 0 hardrestart, $80 no
+                                  // hardrestart, $40 legato, -1 any (after a rest)
+  // When the gate goes off: the player reads the next row (a keyoff or the
+  // next note) the gatetimer of ticks before it. In the player's time (its
+  // gate goes on at the start of the note's row):
+  int offtick;                    // Tick to turn the gate off at, -1 = no matter
+  int offfirst, offlast;          // Rows it may read for that (offlast: the
+                                  // next note's, no keyoff needed)
+  int offwant;                    // The gatetimer for it, recorded ticks
+  int gtwant;                     // The same in the song's ticks, 0 = any
+  int gtmax;                      // Longest gatetimer the song's tempo allows
   int firstwave;
   int pstart, plen;               // Frames for the instrument program
   int pulsecont;                  // The pulse goes on from the previous note
@@ -1033,6 +1061,7 @@ typedef struct
   unsigned char wl[PROGMAX], wr[PROGMAX];
   int plen;                       // Pulse program rows (0 = no pulse)
   unsigned char pl[MAXPULSEROWS + 1], pr[MAXPULSEROWS + 1];
+  int gateoff;                    // The wave program turns the gate off
   int firstuse;
   int number;
 } AINSTR;
@@ -1043,26 +1072,28 @@ typedef struct
   int pulsetol;                   // Allowed pulse difference
   int maxruns;                    // Pulse modulation steps
   int p0quant;                    // Start pulse rounding
-  int adsrflex;                   // 1 = SR, 2 = AD & SR may differ (set by commands)
+  int adsrflex;                   // 1 = SR may differ, 2 = AD or SR (not both:
+                                  // a pattern command sets the one that differs)
+  int gttol;                      // Ticks the gate may go off early/late
 } LEVEL;
 
+// Less detail step by step until the instruments fit: the pulse first, then
+// when the gate goes off, then the length of the wave program, the ADSR last
+// (it's most of the sound)
 static const LEVEL levels[NUMLEVELS] =
 {
-  {PROGMAX, 0x40, 4, 0x10, 0},
-  {16, 0x80, 2, 0x40, 0},
-  {16, 0x100, 2, 0x80, 1},
-  {8, 0x200, 1, 0x100, 1},
-  {4, 0x1000, 0, 0x100, 2},
-  {2, 0x1000, 0, 0x400, 2},
-  {1, 0x1000, 0, 0x800, 2}
+  {PROGMAX, 0x40, 4, 0x10, 0, 0},
+  {PROGMAX, 0x100, 2, 0x40, 0, 0},
+  {PROGMAX, 0x200, 1, 0x80, 0, 1},
+  {16, 0x200, 1, 0x100, 0, 1},
+  {16, 0x1000, 0, 0x100, 0, 1},
+  {16, 0x1000, 0, 0x100, 0, 0x3f},
+  {8, 0x1000, 0, 0x100, 1, 0x3f},
+  {4, 0x1000, 0, 0x100, 1, 0x3f},
+  {4, 0x1000, 0, 0x100, 2, 0x3f},
+  {2, 0x1000, 0, 0x100, 2, 0x3f},
+  {1, 0x1000, 0, 0x100, 2, 0x3f}
 };
-
-typedef struct
-{
-  const SFRAME *fr;
-  int numticks;
-  int *pn[MAX_CHN];               // Pitch (sticky note) per tick, -1 = none
-} RECORDING;
 
 // Runs a routine. irqmode 0 = called with JSR, 1 = KERNAL IRQ ($0314)
 // handler, 2 = hardware IRQ ($FFFE) handler. Returns 1 when done, -1 on a
@@ -1111,8 +1142,11 @@ static int runroutine(CPU6502 *cpu, unsigned adr, int a, int irqmode, unsigned m
   return (n >= maxinstr) ? -2 : 1;
 }
 
-// Records the SID registers after every play call
-static SFRAME *record(const SIDFILE *sf, int subtune, int seconds, int *numticks, double *rateout, char *err, int errsize)
+// Records the SID registers after every play call. Returns 1 on success,
+// 0 if the subtune can't be recorded (the reason in err), -1 if out of
+// memory
+static int record(const SIDFILE *sf, int subtune, int seconds, SFRAME **framesout, int *numticks, double *rateout,
+  char *err, int errsize)
 {
   CPU6502 *cpu;
   SFRAME *frames = NULL;
@@ -1124,13 +1158,10 @@ static SFRAME *record(const SIDFILE *sf, int subtune, int seconds, int *numticks
   int framecycles = ntsc ? NTSC_FRAMECYCLES : PAL_FRAMECYCLES;
   double rate = 1.0, acc = 0.0;
   int maxticks, ticks = 0, frame, r, speedbit;
+  int result = 0;
 
   cpu = (CPU6502 *)calloc(1, sizeof(CPU6502));
-  if (!cpu)
-  {
-    setreport(err, errsize, "Out of memory");
-    return NULL;
-  }
+  if (!cpu) return -1;
   memcpy(cpu->mem + i->loadaddress, sf->data, i->datasize);
   cpu->mem[0x01] = 0x37;
   cpu->mem[0xd41b] = 0x03;
@@ -1179,7 +1210,7 @@ static SFRAME *record(const SIDFILE *sf, int subtune, int seconds, int *numticks
   frames = (SFRAME *)calloc(maxticks, sizeof(SFRAME));
   if (!frames)
   {
-    setreport(err, errsize, "Out of memory");
+    result = -1;
     goto fail;
   }
 
@@ -1220,13 +1251,14 @@ static SFRAME *record(const SIDFILE *sf, int subtune, int seconds, int *numticks
     }
   }
   free(cpu);
+  *framesout = frames;
   *numticks = ticks;
-  return frames;
+  return 1;
 
 fail:
   free(frames);
   free(cpu);
-  return NULL;
+  return result;
 }
 
 static double clockhz = PAL_CLOCK;
@@ -1248,23 +1280,40 @@ static int nearestnote(unsigned freq)
   return clampint((int)floor(notesemis(freq) + 0.5), 0, MAX_NOTES - 1);
 }
 
-// Wavetable entry for a recorded frame
-static void frameentry(const SFRAME *f, int v, int note, int base, unsigned char *wl, unsigned char *wr)
+// Wavetable entry for a recorded frame. gate 0: the program turns the gate
+// off (both players write the waveform ANDed with the gate mask). tonal: the
+// note is mostly a tone, its noise is an attack that follows the pitch
+static void frameentry(const SFRAME *f, int v, int note, int base, int gate, int tonal, unsigned char *wl, unsigned char *wr)
 {
-  unsigned char c = f->ctrl[v] | 0x01;   // The gate is the player's business
+  unsigned char c = f->ctrl[v] | 0x01;   // Else the gate is the player's business
+  int rel;
 
+  if (!gate) c &= 0xfe;
   if (!(c & 0xf0)) *wl = WAVESILENT | (c & 0x0f);
   else if (c >= WAVESILENT) *wl = 0x80 | (c & 0x0f);
   else *wl = c;
 
-  if (!f->freq[v]) *wr = 0x80;
-  else if ((c & 0x80) || (note < 0)) *wr = 0x80 | clampint(nearestnote(f->freq[v]), 1, MAX_NOTES - 1);
-  else
+  if (!f->freq[v])
   {
-    int rel = note - base;
-    if ((rel >= -0x20) && (rel <= 0x5f)) *wr = rel & 0x7f;
-    else *wr = 0x80 | clampint(note, 1, MAX_NOTES - 1);
+    *wr = 0x80;
+    return;
   }
+  if (note < 0)
+  {
+    *wr = 0x80 | clampint(nearestnote(f->freq[v]), 1, MAX_NOTES - 1);
+    return;
+  }
+  if (c & 0x80)
+  {
+    // Noise follows the note in a tone, or when it's the note's pitch (or
+    // octaves of it); else it's a fixed pitch (drums)
+    note = nearestnote(f->freq[v]);
+    rel = note - base;
+    if ((!tonal) && (rel % 12)) rel = 0x100;
+  }
+  else rel = note - base;
+  if ((rel >= -0x20) && (rel <= 0x5f)) *wr = rel & 0x7f;
+  else *wr = 0x80 | clampint(note, 1, MAX_NOTES - 1);
 }
 
 // Shortest "start + loop" that gives the entries. Returns the rows, the
@@ -1410,8 +1459,15 @@ static int notecmp_len(const void *a, const void *b)
   const ANOTE *na = *(const ANOTE * const *)a;
   const ANOTE *nb = *(const ANOTE * const *)b;
   if (na->plen != nb->plen) return nb->plen - na->plen;
+  if (na->sub != nb->sub) return na->sub - nb->sub;
   if (na->start != nb->start) return na->start - nb->start;
   return na->voice - nb->voice;
+}
+
+// When a note plays, over all the subtunes (for numbering in order of use)
+static int notetime(const ANOTE *n)
+{
+  return n->sub * (MAXTICKS + 1) + n->start;
 }
 
 static int notecmp_start(const void *a, const void *b)
@@ -1425,12 +1481,20 @@ static int notecmp_start(const void *a, const void *b)
 // The program entries of a note
 static int noteentries(const RECORDING *rec, const ANOTE *n, int cap, unsigned char *wl, unsigned char *wr, int *pv)
 {
-  int f, len = n->plen;
+  int f, len = n->plen, tones = 0;
   int keep = (n->start > 0);
   for (f = 0; f < len; f++)
   {
+    unsigned char c = rec->fr[n->pstart + f].ctrl[n->voice];
+    if ((c & 0xf0) && (!(c & 0x80))) tones++;
+  }
+  for (f = 0; f < len; f++)
+  {
     int t = n->pstart + f;
-    frameentry(&rec->fr[t], n->voice, rec->pn[n->voice][t], n->base, &wl[f], &wr[f]);
+    // (The player's gate goes on a frame before the program, with the
+    // first waveform: the gate is on as many frames as in the recording)
+    frameentry(&rec->fr[t], n->voice, rec->pn[n->voice][t], n->base, (!n->shortgate) || (t - n->pstart + 1 < n->gateoff - n->start),
+      tones * 2 >= len, &wl[f], &wr[f]);
     pv[f] = rec->fr[t].pulse[n->voice];
     // Leading frames still on the previous note's frequency
     if ((keep) && (rec->fr[t].freq[n->voice] == rec->fr[n->start - 1].freq[n->voice]))
@@ -1492,9 +1556,17 @@ static int instrmatches(const AINSTR *in, const ANOTE *n, const SFRAME *f0, cons
   const int *pv, int len, int pulse, const LEVEL *lv)
 {
   int f;
-  if ((in->firstwave != n->firstwave) || (in->gatetimer != n->gatetimer)) return 0;
-  if ((lv->adsrflex < 2) && (in->ad != f0->ad[n->voice])) return 0;
-  if ((lv->adsrflex < 1) && (in->sr != f0->sr[n->voice])) return 0;
+  int adok = (in->ad == f0->ad[n->voice]), srok = (in->sr == f0->sr[n->voice]);
+  int gt = in->gatetimer & 0x3f;
+  if (in->firstwave != n->firstwave) return 0;
+  // How the note starts (after a rest: any way but legato)
+  if ((n->gtflags >= 0) ? ((in->gatetimer & 0xc0) != n->gtflags) : (in->gatetimer & 0x40)) return 0;
+  // When the gate goes off before the next row
+  if (gt > n->gtmax) return 0;
+  if ((n->gtwant) && (abs(gt - n->gtwant) > lv->gttol)) return 0;
+  if ((!adok) && (lv->adsrflex < 2)) return 0;
+  if ((!srok) && (lv->adsrflex < 1)) return 0;
+  if ((!adok) && (!srok)) return 0;
   for (f = 0; f < len; f++)
   {
     int row = f;
@@ -1517,7 +1589,7 @@ static int instrmatches(const AINSTR *in, const ANOTE *n, const SFRAME *f0, cons
 // Gives every note an instrument at a level of detail. Returns the number
 // of instruments, or -1 if they don't fit (instruments or table rows) and
 // force isn't set
-static int assigninstruments(const RECORDING *rec, ANOTE **order, int numnotes, AINSTR *ins, int maxins, int levelnum, int force)
+static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxins, int levelnum, int force)
 {
   const LEVEL *lv = &levels[levelnum];
   int numins = 0, c, d;
@@ -1526,11 +1598,12 @@ static int assigninstruments(const RECORDING *rec, ANOTE **order, int numnotes, 
   for (c = 0; c < numnotes; c++)
   {
     ANOTE *n = order[c];
-    const SFRAME *f0 = &rec->fr[n->start];
+    const SFRAME *f0 = &n->rec->fr[n->start];
     unsigned char wl[PROGMAX], wr[PROGMAX];
     int pv[PROGMAX];
-    int len = noteentries(rec, n, lv->wcap, wl, wr, pv);
+    int len = noteentries(n->rec, n, lv->wcap, wl, wr, pv);
     int pulse = usespulse(wl, len) && (!n->pulsecont);
+    int time = notetime(n);
     AINSTR *in;
 
     for (d = 0; d < numins; d++)
@@ -1540,21 +1613,23 @@ static int assigninstruments(const RECORDING *rec, ANOTE **order, int numnotes, 
     if (d < numins)
     {
       n->instr = d;
-      if (n->start < ins[d].firstuse) ins[d].firstuse = n->start;
+      if (time < ins[d].firstuse) ins[d].firstuse = time;
       continue;
     }
     if (numins >= maxins)
     {
       int best = 0, bestscore = -1;
       if (!force) return -1;
-      // Out of instruments: the most alike
+      // Out of instruments: the most alike, the ADSR first (a command can
+      // set one of AD/SR)
       for (d = 0; d < numins; d++)
       {
         int score = 0;
+        if (ins[d].ad == f0->ad[n->voice]) score += 16;
+        if (ins[d].sr == f0->sr[n->voice]) score += 16;
+        if (ins[d].gateoff == n->shortgate) score += 8;
         if ((ins[d].wl[0] & 0xf0) == (wl[0] & 0xf0)) score += 8;
         if ((ins[d].plen > 0) == (pulse > 0)) score += 4;
-        if (ins[d].ad == f0->ad[n->voice]) score += 2;
-        if (ins[d].sr == f0->sr[n->voice]) score += 2;
         if (ins[d].gatetimer == n->gatetimer) score += 1;
         if (score > bestscore)
         {
@@ -1563,7 +1638,7 @@ static int assigninstruments(const RECORDING *rec, ANOTE **order, int numnotes, 
         }
       }
       n->instr = best;
-      if (n->start < ins[best].firstuse) ins[best].firstuse = n->start;
+      if (time < ins[best].firstuse) ins[best].firstuse = time;
       continue;
     }
     in = &ins[numins];
@@ -1575,13 +1650,18 @@ static int assigninstruments(const RECORDING *rec, ANOTE **order, int numnotes, 
     in->wlen = findloop(wl, wr, len, &in->wloop);
     memcpy(in->wl, wl, in->wlen);
     memcpy(in->wr, wr, in->wlen);
+    for (d = 0; d < in->wlen; d++)
+    {
+      if (!(in->wl[d] & 0x01)) in->gateoff = 1;
+    }
     if (pulse) makepulse(in, pv, len, lv);
-    in->firstuse = n->start;
+    in->firstuse = time;
 #ifdef SID2SNG_DEBUG
     if ((getenv("SID2SNG_INSDUMP")) && (atoi(getenv("SID2SNG_INSDUMP")) == levelnum))
     {
       int e;
-      fprintf(stderr, "v%d t%d len %d: %02X %02X fw %02X gt %02X |", n->voice, n->start, len, in->ad, in->sr, in->firstwave, in->gatetimer);
+      fprintf(stderr, "s%d v%d t%d len %d: %02X %02X fw %02X gt %02X%s |", n->sub, n->voice, n->start, len, in->ad, in->sr,
+        in->firstwave, in->gatetimer, in->gateoff ? " gateoff" : "");
       for (e = 0; e < in->wlen; e++) fprintf(stderr, " %02X:%02X", in->wl[e], in->wr[e]);
       fprintf(stderr, " loop %d | pulse", in->wloop);
       for (e = 0; e < in->plen; e++) fprintf(stderr, " %02X:%02X", in->pl[e], in->pr[e]);
@@ -1589,8 +1669,18 @@ static int assigninstruments(const RECORDING *rec, ANOTE **order, int numnotes, 
     }
 #endif
     n->instr = numins;
-    waverows += in->wlen + 1;
-    pulserows += in->plen;
+    // The table has each program once (addprogram() finds it again)
+    for (d = 0; d < numins; d++)
+    {
+      if ((ins[d].wlen == in->wlen) && (ins[d].wloop == in->wloop) && (!memcmp(ins[d].wl, in->wl, in->wlen)) &&
+        (!memcmp(ins[d].wr, in->wr, in->wlen))) break;
+    }
+    if (d == numins) waverows += in->wlen + 1;
+    for (d = 0; d < numins; d++)
+    {
+      if ((ins[d].plen == in->plen) && (!memcmp(ins[d].pl, in->pl, in->plen)) && (!memcmp(ins[d].pr, in->pr, in->plen))) break;
+    }
+    if (d == numins) pulserows += in->plen;
     numins++;
     if ((!force) && ((waverows > MAX_TABLELEN) || (pulserows > MAX_TABLELEN))) return -1;
   }
@@ -1671,66 +1761,168 @@ static int growtonotes(ANOTE **notes, int *maxnotes, int numnotes)
   return 1;
 }
 
+// The tick when a note can't be heard any more after its gate went off (the
+// release has died down, at the release rate of each frame's SR), at most
+// its end. tickms: milliseconds per tick
+static int audibleend(const SFRAME *fr, const ANOTE *n, double tickms)
+{
+  static const int releasems[16] = {6, 24, 48, 72, 114, 168, 204, 240, 300, 750, 1500, 2400, 3000, 9000, 15000, 24000};
+  double level = 1.0;
+  int t;
+  for (t = n->gateoff; t < n->end; t++)
+  {
+    level -= tickms / releasems[fr[t].sr[n->voice] & 0x0f];
+    if (level <= 0.0) break;
+  }
+  return t;
+}
+
 static int timetorow(int t, int phase, int tempo)
 {
   int r = (int)floor((double)(t - phase) / tempo + 0.5);
   return (r < 0) ? 0 : r;
 }
 
-static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA *sng, char *report, int reportsize)
+// The first tick that timetorow() puts on a row
+static int firsttick(int row, int phase, int tempo)
 {
+  return phase + row * tempo - tempo / 2;
+}
+
+// One subtune of the conversion
+typedef struct
+{
+  int subtune;                    // 1-n
+  int ok;                         // Recorded, has notes
+  char err[256];                  // Else why not
   RECORDING rec;
-  SFRAME *fr = NULL;
-  ANOTE *notes = NULL, **order = NULL;
-  AINSTR *ins = NULL;
-  unsigned char *grid[MAX_CHN] = {NULL, NULL, NULL};
-  int *owner[MAX_CHN] = {NULL, NULL, NULL};
-  int *onsets = NULL;
-  int numticks = 0, numnotes = 0, maxnotes = 0, numins = 0, numgated = 0;
-  int subtune, seconds, patternlength;
-  int tempo = 6, phase = 0, level = 0, totalrows, allocrows, songlen = 0;
-  int dropped = 0, truncated = 0, numlegato = 0;
-  double rate = 1.0;
-  int ok = 0, v, c, d, t;
+  SFRAME *fr;
+  int numticks;
+  double rate;
+  ANOTE *notes;
+  int numnotes;
+  int tempo, phase;
+  int looprow, endrow;            // Loop: rows [looprow, endrow) repeat (-1 = no loop)
+  int totalrows;                  // Rows in the grid
+  unsigned char *grid[MAX_CHN];   // The rows, 4 bytes each
+  int songlen;                    // Orderlist positions
+  int restart;                    // Orderlist restart position
+  int *chunkrow, *chunklen;       // First row & rows of each orderlist position
+  int *chunk[MAX_CHN];            // Pattern (UPATT index) at each orderlist position
+  int usednotes, dropped, truncated;
+  int gttempo, gtfunk;            // Tempo in the song; gtfunk: funktempo with this second value (0 = none)
+  double tickratio;               // Song player ticks per play call of the SID (1 = the same speed)
+  double pitchdist[2];            // How far the notes are from the frequency table, played PAL/NTSC (semitones)
+} ASUB;
 
-  memset(&rec, 0, sizeof rec);
-  subtune = opt->subtune ? opt->subtune : sf->info.startsong;
-  if ((subtune < 1) || (subtune > sf->info.songs))
+static void freesub(ASUB *s)
+{
+  int v;
+  for (v = 0; v < MAX_CHN; v++)
   {
-    setreport(report, reportsize, "There is no subtune %d (the SID has %d)", subtune, sf->info.songs);
-    return 0;
+    free(s->grid[v]);
+    free(s->chunk[v]);
+    free(s->rec.pn[v]);
   }
-  seconds = clampint(opt->seconds, 1, 1800);
-  patternlength = clampint(opt->patternlength, 16, MAX_PATTROWS);
+  free(s->chunkrow);
+  free(s->chunklen);
+  free(s->notes);
+  free(s->fr);
+}
 
-  if ((sf->info.rsid) && (!sf->info.playaddress))
+// Frames alike for finding the loop. The pulse width is left out: a pulse
+// sweep often runs on through the loop (and the song's pulse comes from the
+// instruments anyway)
+static int sameframe(const SFRAME *a, const SFRAME *b)
+{
+  return (!memcmp(a->freq, b->freq, sizeof a->freq)) && (!memcmp(a->ctrl, b->ctrl, MAX_CHN)) &&
+    (!memcmp(a->ad, b->ad, MAX_CHN)) && (!memcmp(a->sr, b->sr, MAX_CHN)) &&
+    (a->dip == b->dip) && (a->cutoff == b->cutoff) && (a->resfilt == b->resfilt) && (a->modevol == b->modevol);
+}
+
+static unsigned framehash(const SFRAME *f)
+{
+  unsigned h = 2166136261u;
+  int v;
+  for (v = 0; v < MAX_CHN; v++)
   {
-    setreport(report, reportsize, "This is an RSID tune: it runs from its own interrupts and needs a real C64, "
-      "so it can't be recorded. A PSID version of the tune may work");
-    return 0;
+    h = (h ^ f->freq[v]) * 16777619u;
+    h = (h ^ (f->ctrl[v] | (f->ad[v] << 8) | (f->sr[v] << 16))) * 16777619u;
   }
+  return (h ^ (f->dip | (f->cutoff << 8) | (f->resfilt << 16) | ((unsigned)f->modevol << 24))) * 16777619u;
+}
 
-  clockhz = (sf->info.clock == 2) ? NTSC_CLOCK : PAL_CLOCK;
-  fr = record(sf, subtune, seconds, &numticks, &rate, report, reportsize);
-  if (!fr) return 0;
-  rec.fr = fr;
-  rec.numticks = numticks;
+// Where a subtune starts repeating: a start and a period (a multiple of
+// step ticks) after which the recording only repeats itself, to its end.
+// Of those, the one that leaves out the most of the recording, at least
+// minsave ticks, with notes starting in the period. Returns 1 if found, 0
+// if not, -1 if out of memory
+static int findrepeat(const SFRAME *fr, int numticks, const int *onsetsum, int step, int minsave, int stopped,
+  int *startout, int *periodout)
+{
+  unsigned *h;
+  int p, t, found = 0, bestsave = minsave - 1;
+
+  // Nothing changing at the end: the tune has stopped, it doesn't loop
+  for (t = numticks - 1; (t > 0) && (sameframe(&fr[t], &fr[t-1])); t--);
+  if (numticks - t >= stopped) return 0;
+
+  h = (unsigned *)malloc((numticks + 1) * sizeof(unsigned));
+  if (!h) return -1;
+  for (t = 0; t < numticks; t++) h[t] = framehash(&fr[t]);
+  // (A longer period can't leave out more than the best one so far)
+  for (p = step; numticks - p > bestsave; p += step)
+  {
+    int s, save;
+    for (t = numticks - p - 1; (t >= 0) && (h[t] == h[t+p]) && (sameframe(&fr[t], &fr[t+p])); t--);
+    s = t + 1;
+    save = numticks - p - s;
+    if ((save <= bestsave) || (onsetsum[s + p] == onsetsum[s])) continue;
+    found = 1;
+    bestsave = save;
+    *startout = s;
+    *periodout = p;
+  }
+  free(h);
+  return found;
+}
+
+// Records a subtune and finds its notes, its rhythm, the frames of each
+// note's sound and (findloop set) where it starts repeating. Returns 1 on
+// success, 0 if the subtune can't be used (the reason in s->err), -1 if
+// out of memory
+static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds, int findloop, ASUB *s)
+{
+  const SFRAME *fr;
+  ANOTE *notes = NULL;
+  int *onsets = NULL, *onsetsum = NULL;
+  int numticks = 0, numnotes = 0, maxnotes = 0;
+  int tempo = 6, phase = 0;
+  int result = -1, v, c, d, t;
+
+  result = record(sf, s->subtune, seconds, &s->fr, &s->numticks, &s->rate, s->err, sizeof s->err);
+  if (result <= 0) return result;
+  result = -1;
+  fr = s->fr;
+  numticks = s->numticks;
+  s->rec.fr = fr;
+  s->rec.numticks = numticks;
 
   // Pitch of every tick, sticking to the previous note through vibrato
   for (v = 0; v < MAX_CHN; v++)
   {
     int prev = -1;
-    rec.pn[v] = (int *)malloc((numticks + 1) * sizeof(int));
-    if (!rec.pn[v]) goto oom;
+    s->rec.pn[v] = (int *)malloc((numticks + 1) * sizeof(int));
+    if (!s->rec.pn[v]) goto done;
     for (t = 0; t < numticks; t++)
     {
       unsigned freq = fr[t].freq[v];
-      if (!freq) rec.pn[v][t] = -1;
+      if (!freq) s->rec.pn[v][t] = -1;
       else
       {
-        double s = notesemis(freq);
-        if ((prev < 0) || (fabs(s - prev) >= 0.5 + STICKY)) prev = clampint((int)floor(s + 0.5), 0, MAX_NOTES - 1);
-        rec.pn[v][t] = prev;
+        double st = notesemis(freq);
+        if ((prev < 0) || (fabs(st - prev) >= 0.5 + STICKY)) prev = clampint((int)floor(st + 0.5), 0, MAX_NOTES - 1);
+        s->rec.pn[v][t] = prev;
       }
     }
   }
@@ -1744,7 +1936,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
       int gate = fr[t].ctrl[v] & 1;
       if ((gate) && ((!prevgate) || ((fr[t].dip >> v) & 1)))
       {
-        if (!growtonotes(&notes, &maxnotes, numnotes)) goto oom;
+        if (!growtonotes(&notes, &maxnotes, numnotes)) goto done;
         if (cur >= 0)
         {
           notes[cur].end = t;
@@ -1776,7 +1968,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
 
       for (t = notes[c].start; t < notes[cur].gateoff; t++)
       {
-        int note = rec.pn[v][t];
+        int note = s->rec.pn[v][t];
         if ((note < 0) || (fr[t].ctrl[v] & 0x80) || (!(fr[t].ctrl[v] & 0xf0)))
         {
           runnote = -1;
@@ -1810,7 +2002,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
             from = refend + 1;
             if (frames >= 2) glide = diff / (frames - 1);
           }
-          if (!growtonotes(&notes, &maxnotes, numnotes)) goto oom;
+          if (!growtonotes(&notes, &maxnotes, numnotes)) goto done;
           li = numnotes++;
           notes[li] = notes[cur];
           notes[li].start = from;
@@ -1825,7 +2017,6 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
           cur = li;
           ref = note;
           refend = t;
-          numlegato++;
         }
       }
       // No stable pitch: the most common one
@@ -1837,7 +2028,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
         memset(counts, 0, sizeof counts);
         for (t = n->start; (t < n->gateoff) && (t < n->start + PROGMAX); t++)
         {
-          int note = rec.pn[v][t];
+          int note = s->rec.pn[v][t];
           if ((note >= 0) && (!(fr[t].ctrl[v] & 0x80))) counts[note]++;
         }
         for (d = 0; d < MAX_NOTES; d++)
@@ -1852,22 +2043,51 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     for (c = 0; c < numnotes; c++) notes[c].base = clampint(notes[c].base, 0, NUMNOTES - 1);
   }
 
+  // How well the notes fit GoatTracker's frequency table played PAL or
+  // NTSC (a tune is tuned for its own C64's clock, or for the other one)
+  {
+    double srcclock = (sf->info.clock == 2) ? NTSC_CLOCK : PAL_CLOCK;
+    int k, count = 0;
+    s->pitchdist[0] = s->pitchdist[1] = 0.0;
+    for (c = 0; c < numnotes; c++)
+    {
+      int t = (notes[c].start + 2 < numticks) ? notes[c].start + 2 : notes[c].start;
+      unsigned freq = fr[t].freq[notes[c].voice];
+      if (freq < 0x100) continue;
+      for (k = 0; k < 2; k++)
+      {
+        double semi = 12.0 * log(freq * srcclock * PAL_CLOCK / (k ? NTSC_CLOCK : PAL_CLOCK) / 16777216.0 / 440.0) / log(2.0);
+        s->pitchdist[k] += fabs(semi - floor(semi + 0.5));
+      }
+      count++;
+    }
+    if (count)
+    {
+      s->pitchdist[0] /= count;
+      s->pitchdist[1] /= count;
+    }
+  }
+
   if (!numnotes)
   {
-    setreport(report, reportsize, "No notes found in subtune %d (silent, or it doesn't play)", subtune);
+    setreport(s->err, sizeof s->err, "No notes found in subtune %d (silent, or it doesn't play)", s->subtune);
+    result = 0;
     goto done;
   }
 
-  // Rhythm: the most common time between notes, split into rows
+  // Rhythm: the most common time between notes, split into rows. From the
+  // length asked for (a longer recording to find the loop gives the same)
   onsets = (int *)malloc(numnotes * sizeof(int));
-  if (!onsets) goto oom;
+  if (!onsets) goto done;
   {
+    int fps = (sf->info.clock == 2) ? 60 : 50;
+    int rhythmend = (int)(clampint(opt->seconds, 1, 1800) * fps * s->rate) + 1;
     int hist[256];
-    int common = 0;
+    int common = 0, numon = 0;
     memset(hist, 0, sizeof hist);
     for (c = 0; c + 1 < numnotes; c++)
     {
-      if (notes[c].voice == notes[c+1].voice)
+      if ((notes[c].voice == notes[c+1].voice) && (notes[c+1].start < rhythmend))
       {
         int diff = notes[c+1].start - notes[c].start;
         if ((diff >= 2) && (diff < 256)) hist[diff]++;
@@ -1875,8 +2095,9 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     }
     for (d = 2; d < 256; d++) if (hist[d] > hist[common]) common = d;
     if (!common) common = 6;
-    for (c = 0; c < numnotes; c++) onsets[c] = notes[c].start;
-    qsort(onsets, numnotes, sizeof(int), cmpint);
+    for (c = 0; c < numnotes; c++) if (notes[c].start < rhythmend) onsets[numon++] = notes[c].start;
+    if (!numon) onsets[numon++] = notes[0].start;
+    qsort(onsets, numon, sizeof(int), cmpint);
 
     if (opt->tempo) tempo = opt->tempo;
     else if (opt->rowsperbeat > 0) tempo = (common + opt->rowsperbeat / 2) / opt->rowsperbeat;
@@ -1894,10 +2115,10 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
         for (p = 0; p < tt; p++)
         {
           int h = 0;
-          for (c = 0; c < numnotes; c++) if ((onsets[c] - p) % tt == 0) h++;
+          for (c = 0; c < numon; c++) if ((onsets[c] - p) % tt == 0) h++;
           if (h > hits) hits = h;
         }
-        score = (double)hits / numnotes;
+        score = (double)hits / numon;
         if (score >= 0.8)
         {
           bestt = tt;
@@ -1920,7 +2141,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
       for (d = 0; d < tempo; d++)
       {
         int h = 0;
-        for (c = 0; c < numnotes; c++) if ((onsets[c] >= d) && ((onsets[c] - d) % tempo == 0)) h++;
+        for (c = 0; c < numon; c++) if ((onsets[c] >= d) && ((onsets[c] - d) % tempo == 0)) h++;
         if (h > hits)
         {
           hits = h;
@@ -1931,22 +2152,23 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   }
   for (c = 0; c < numnotes; c++) notes[c].row = timetorow(notes[c].start, phase, tempo);
 
-  // Gateoff timer & hardrestart from the gap before each note; first
-  // waveform & the frames for the instrument
+  // Hardrestart (or not) from the gap before each note: a short gap is the
+  // previous note's gate going off before this one (tied, its gatetimer
+  // then); first waveform & the frames for the instrument
   for (c = 0; c < numnotes; c++)
   {
     ANOTE *n = &notes[c];
     ANOTE *p = ((c) && (notes[c-1].voice == n->voice)) ? &notes[c-1] : NULL;
     v = n->voice;
-    n->gatetimer = 2;
-    if (n->legato) n->gatetimer = 0x40 | 2;
+    n->gtflags = -1;
+    if (n->legato) n->gtflags = 0x40;
     else if (p)
     {
       int gap = n->start - p->gateoff;
       if (gap <= 0)
       {
         // Gate off & on within one call
-        n->gatetimer = 0x80 | 1;
+        n->gtflags = 0x80;
         p->tied = 1;
       }
       else if (gap <= 3)
@@ -1956,8 +2178,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
         {
           if ((fr[t].ad[v] != fr[p->start].ad[v]) || (fr[t].sr[v] != fr[p->start].sr[v])) hr = 1;
         }
-        n->gatetimer = (gap < tempo) ? gap : tempo - 1;
-        if (!hr) n->gatetimer |= 0x80;
+        n->gtflags = hr ? 0 : 0x80;
         p->tied = 1;
       }
     }
@@ -1984,132 +2205,270 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     }
     if (n->pstart >= numticks) n->pstart = n->start;
   }
+  {
+    double tickms = 1000.0 / (((sf->info.clock == 2) ? 60 : 50) * s->rate);
+    for (c = 0; c < numnotes; c++)
+    {
+      ANOTE *n = &notes[c];
+      int t0 = n->pstart;
+      v = n->voice;
+      // A pulse sweep going on smoothly through the note start wasn't reset:
+      // the instrument leaves the pulse program running
+      if (n->legato) n->pulsecont = 1;
+      else if ((t0 >= 2) && (t0 + 1 < numticks))
+      {
+        int d0 = pulsedelta(fr[t0-1].pulse[v], fr[t0-2].pulse[v]);
+        int d1 = pulsedelta(fr[t0].pulse[v], fr[t0-1].pulse[v]);
+        int d2 = pulsedelta(fr[t0+1].pulse[v], fr[t0].pulse[v]);
+        if ((abs(d1 - d0) <= 2) && (abs(d2 - d0) <= 2)) n->pulsecont = 1;
+        else if (t0 >= 3)
+        {
+          // Also when the sweep pauses or turns around on the first frame
+          // (Rob Hubbard's players): no jump bigger than its steps
+          int step = abs(pulsedelta(fr[t0-2].pulse[v], fr[t0-3].pulse[v]));
+          if (abs(d0) > step) step = abs(d0);
+          if ((step) && (abs(d1) <= step + 2) && (abs(d2) <= step + 2)) n->pulsecont = 1;
+        }
+      }
+      // The gate goes off before the next row (a keyoff can't be that
+      // early): the program turns it off and goes on into the release, where
+      // the sound still changes (drum noise, arpeggios). The frames after the
+      // gate goes off are in the program only while the release is heard
+      n->shortgate = (!n->tied) && (!n->legato) && (n->gateoff < n->end) && (timetorow(n->gateoff, phase, tempo) <= n->row);
+      if ((n->tied) || (n->shortgate)) d = audibleend(fr, n, tickms);
+      else d = n->gateoff;
+      if (d > numticks) d = numticks;
+      n->plen = clampint(d - n->pstart, 1, PROGMAX);
+    }
+  }
+
+  // When the gate goes off: the player reads the next row (a keyoff, or the
+  // next note when tied) the gatetimer of ticks before it, so the gatetimer
+  // picks the tick within the row. The gate stays on as many ticks as in the
+  // recording (it goes on at the start of the note's row), through the
+  // legato notes that follow
   for (c = 0; c < numnotes; c++)
   {
     ANOTE *n = &notes[c];
-    int t0 = n->pstart;
-    v = n->voice;
-    // A pulse sweep going on smoothly through the note start wasn't reset:
-    // the instrument leaves the pulse program running
-    if (n->legato) n->pulsecont = 1;
-    else if ((t0 >= 2) && (t0 + 1 < numticks))
-    {
-      int d0 = pulsedelta(fr[t0-1].pulse[v], fr[t0-2].pulse[v]);
-      int d1 = pulsedelta(fr[t0].pulse[v], fr[t0-1].pulse[v]);
-      int d2 = pulsedelta(fr[t0+1].pulse[v], fr[t0].pulse[v]);
-      if ((abs(d1 - d0) <= 2) && (abs(d2 - d0) <= 2)) n->pulsecont = 1;
-    }
-    d = n->tied ? n->end : n->gateoff;
-    if (d > numticks) d = numticks;
-    n->plen = clampint(d - n->pstart, 1, PROGMAX);
+    int e = c, next, rb, want;
+    n->offtick = -1;
+    n->offwant = 0;
+    if (n->legato) continue;
+    while ((e + 1 < numnotes) && (notes[e+1].voice == n->voice) && (notes[e+1].legato)) e++;
+    next = ((e + 1 < numnotes) && (notes[e+1].voice == n->voice)) ? e + 1 : -1;
+    // (Tied: usually the next note's row, but a keyoff when that note is
+    // off the grid, further than a gatetimer can reach)
+    n->offlast = (next >= 0) ? notes[next].row : 0x7fffffff;
+    n->offfirst = notes[e].row + 1;
+    if (n->offfirst > n->offlast) n->offfirst = n->offlast;
+    // The program turns the gate off, or it stays on
+    if ((n->shortgate) || (notes[e].gateoff >= numticks)) continue;
+    n->offtick = phase + n->row * tempo + notes[e].gateoff - n->start;
+    // The first row after it (1-tempo ticks), or 1 tick early when it's on
+    // a row's start (a gatetimer is 1 to tempo-1)
+    rb = (int)floor((double)(n->offtick - phase) / tempo) + 1;
+    if (rb < n->offfirst) rb = n->offfirst;
+    if (rb > n->offlast) rb = n->offlast;
+    want = phase + rb * tempo - n->offtick;
+    if ((want >= tempo) && (rb - 1 >= n->offfirst)) want -= tempo - 1;
+    n->offwant = clampint(want, 1, tempo - 1);
   }
+  s->tempo = tempo;
+  s->phase = phase;
 
-  // Instruments: notes that play alike share one. Long notes first, they
-  // show more of the sound. Less detail until it all fits
-  order = (ANOTE **)malloc(numnotes * sizeof(ANOTE *));
-  ins = (AINSTR *)malloc(MAX_INSTR * sizeof(AINSTR));
-  if ((!order) || (!ins)) goto oom;
-  numgated = 0;
-  for (c = 0; c < numnotes; c++)
+  // The loop: where the tune starts repeating, on whole rows (the period a
+  // whole number of rows, the loop starting on the first frame of a row).
+  // It has to leave out at least a pattern of rows
+  s->looprow = -1;
+  if (findloop)
   {
-    notes[c].instr = -1;
-    if (!notes[c].legato) order[numgated++] = &notes[c];
-  }
-  qsort(order, numgated, sizeof(ANOTE *), notecmp_len);
-  for (level = 0; level < NUMLEVELS; level++)
-  {
-#ifdef SID2SNG_DEBUG
-    if (getenv("SID2SNG_NOTES"))
+    int fps = (sf->info.clock == 2) ? 60 : 50;
+    int stopped = (int)(STOPPEDSECS * fps * s->rate) + 1;
+    int minsave = clampint(opt->patternlength, 16, MAX_PATTROWS) * tempo;
+    int start = 0, period = 0, r;
+
+    onsetsum = (int *)calloc(numticks + 1, sizeof(int));
+    if (!onsetsum) goto done;
+    for (c = 0; c < numnotes; c++) onsetsum[notes[c].start + 1]++;
+    for (t = 0; t < numticks; t++) onsetsum[t + 1] += onsetsum[t];
+    r = findrepeat(fr, numticks, onsetsum, tempo, minsave, stopped, &start, &period);
+    if (r < 0) goto done;
+    if (r)
     {
-      AINSTR *all = (AINSTR *)malloc(numnotes * sizeof(AINSTR));
-      if (all)
+      int row = timetorow(start, phase, tempo);
+      if (firsttick(row, phase, tempo) < start) row++;
+      if ((firsttick(row, phase, tempo) + period <= numticks) && (row + period / tempo <= MAX_SONGLEN * MAX_PATTROWS))
       {
-        fprintf(stderr, "level %d: %d instruments needed\n", level, assigninstruments(&rec, order, numgated, all, numgated, level, 1));
-        free(all);
+        // The recording after the loop (and what its notes' sound needs)
+        // isn't needed
+        int keep = firsttick(row, phase, tempo) + period + PROGMAX + 2;
+        s->looprow = row;
+        s->endrow = row + period / tempo;
+        if (keep < numticks)
+        {
+          SFRAME *newfr = (SFRAME *)realloc(s->fr, keep * sizeof(SFRAME));
+          if (newfr) s->fr = newfr;
+          for (v = 0; v < MAX_CHN; v++)
+          {
+            int *newpn = (int *)realloc(s->rec.pn[v], (keep + 1) * sizeof(int));
+            if (newpn) s->rec.pn[v] = newpn;
+          }
+          s->numticks = s->rec.numticks = keep;
+          s->rec.fr = s->fr;
+        }
       }
     }
-#endif
-    numins = assigninstruments(&rec, order, numgated, ins, MAX_INSTR - 1, level, level == NUMLEVELS - 1);
-    if (numins >= 0) break;
   }
-#ifdef SID2SNG_DEBUG
-  if (getenv("SID2SNG_NOTES"))
+  result = 1;
+
+done:
+  s->notes = notes;
+  s->numnotes = numnotes;
+  free(onsets);
+  free(onsetsum);
+  return result;
+}
+
+// The speed multiplier for play calls per frame: 1-16, 0 = 25Hz, -1 = none
+static int ratemultiplier(double rate)
+{
+  if ((rate >= 1.0) && (rate <= 16.0) && (rate == floor(rate))) return (int)rate;
+  if (fabs(rate - 0.5) < 0.02) return 0;
+  return -1;
+}
+
+// The song's tempo for rows of exact ticks: one tempo, or (*funk set) a
+// funktempo pair alternating tempo and *funk, half a tick finer. Returns the
+// tempo, *err the relative difference
+static int fittempo(double exact, int *funk, double *err)
+{
+  int t = clampint((int)floor(exact + 0.5), 3, 0x7f);
+  int a = clampint((int)floor(exact), 3, 0x7e);
+  double terr = fabs(t / exact - 1.0), ferr = fabs((a + 0.5) / exact - 1.0);
+  if (ferr < terr - 1e-9)
   {
-    FILE *df = fopen(getenv("SID2SNG_NOTES"), "w");
-    if (df)
+    *funk = a + 1;
+    *err = ferr;
+    return a;
+  }
+  *funk = 0;
+  *err = terr;
+  return t;
+}
+
+// Play calls per second
+static double callhz(double rate, int ntsc)
+{
+  return rate * (ntsc ? 60.0 : 50.0);
+}
+
+// A tune that plays at another rate than GoatTracker can (0.5 or 1-16
+// calls per frame, PAL or NTSC): the speed for it. Each subtune's rows get
+// the tempo that lasts as long; the instruments' programs run per call, so
+// they get faster or slower. Chosen: the tempos as close as can be, the
+// programs' speed as little off as can be, the SID's own PAL/NTSC if alike
+static void choosespeed(const ASUB *subs, int numsubs, int srcntsc, int *ntsc, int *multiplier)
+{
+  double best = 1e9;
+  int n, m, s;
+
+  *ntsc = srcntsc;
+  *multiplier = 1;
+  for (n = 0; n < 2; n++)
+  {
+    for (m = 0; m <= 16; m++)
     {
-      fprintf(df, "tempo %d phase %d level %d ticks %d\n", tempo, phase, level, numticks);
-      for (c = 0; c < numnotes; c++)
-        fprintf(df, "%d %d %d %d %d %d\n", notes[c].voice, notes[c].start, notes[c].base, notes[c].legato, notes[c].gateoff, notes[c].instr);
-      fclose(df);
+      double gthz = callhz(m ? m : 0.5, n);
+      double maxerr = 0.0, programs = 0.0, pitch = 0.0, cost;
+      int count = 0;
+      for (s = 0; s < numsubs; s++)
+      {
+        double ratio, err;
+        int funk;
+        if (!subs[s].ok) continue;
+        ratio = gthz / callhz(subs[s].rate, srcntsc);
+        fittempo(subs[s].tempo * ratio, &funk, &err);
+        if (err > maxerr) maxerr = err;
+        programs += fabs(log(ratio) / log(2.0));
+        pitch += subs[s].pitchdist[n];
+        count++;
+      }
+      if (!count) return;
+      // (A tune a third of a semitone off counts about as a tempo 2% off)
+      cost = maxerr + 0.1 * programs / count + 0.06 * pitch / count + ((n != srcntsc) ? 0.002 : 0.0);
+      if (cost < best - 1e-12)
+      {
+        best = cost;
+        *ntsc = n;
+        *multiplier = m;
+      }
     }
   }
-#endif
-  // Numbered in order of first use
-  for (c = 0; c < numins; c++)
-  {
-    int num = 1;
-    for (d = 0; d < numins; d++)
-    {
-      if ((ins[d].firstuse < ins[c].firstuse) || ((ins[d].firstuse == ins[c].firstuse) && (d < c))) num++;
-    }
-    ins[c].number = num;
-  }
+}
 
-  // The song
-  sngdata_clear(sng);
-  sngtexts(sng, &sf->info);
-  sng->numinstr = numins;
-  for (c = 0; c < numins; c++)
-  {
-    AINSTR *a = &ins[c];
-    INSTR *in = &sng->instr[a->number];
-    unsigned char wl[PROGMAX + 1], wr[PROGMAX + 1];
-    char name[MAX_INSTRNAMELEN + 1];
-
-    memcpy(wl, a->wl, a->wlen);
-    memcpy(wr, a->wr, a->wlen);
-    wl[a->wlen] = 0xff;
-    wr[a->wlen] = (a->wloop >= 0) ? a->wloop + 1 : 0;
-    in->ad = a->ad;
-    in->sr = a->sr;
-    in->ptr[WTBL] = addprogram(sng, WTBL, wl, wr, a->wlen + 1);
-    if (a->plen) in->ptr[PTBL] = addprogram(sng, PTBL, a->pl, a->pr, a->plen);
-    in->gatetimer = a->gatetimer;
-    in->firstwave = a->firstwave;
-    memset(name, 0, sizeof name);
-    snprintf(name, sizeof name, "%s %02X", wavename(a->wl[0]), a->number);
-    memcpy(in->name, name, MAX_INSTRNAMELEN);
-  }
-
-  // Put the notes on the rows
-  totalrows = 1;
-  for (c = 0; c < numnotes; c++)
-  {
-    int offrow = timetorow(notes[c].gateoff, phase, tempo);
-    if (notes[c].row + 2 > totalrows) totalrows = notes[c].row + 2;
-    if (offrow + 1 > totalrows) totalrows = offrow + 1;
-  }
-  if (totalrows > MAX_SONGLEN * MAX_PATTROWS)
-  {
-    totalrows = MAX_SONGLEN * MAX_PATTROWS;
-    truncated = 1;
-  }
-  allocrows = ((totalrows + patternlength - 1) / patternlength) * patternlength + MAX_PATTROWS;
+// Empty rows for a subtune (with room to round up to whole patterns).
+// Returns 0 if out of memory
+static int allocgrid(ASUB *s, int totalrows)
+{
+  int allocrows = totalrows + 2 * MAX_PATTROWS;
+  int v, d;
   for (v = 0; v < MAX_CHN; v++)
   {
-    grid[v] = (unsigned char *)malloc(allocrows * 4);
-    owner[v] = (int *)malloc(allocrows * sizeof(int));
-    if ((!grid[v]) || (!owner[v])) goto oom;
+    s->grid[v] = (unsigned char *)malloc(allocrows * 4);
+    if (!s->grid[v]) return 0;
     for (d = 0; d < allocrows; d++)
     {
-      grid[v][d*4] = REST;
-      grid[v][d*4+1] = 0;
-      grid[v][d*4+2] = 0;
-      grid[v][d*4+3] = 0;
-      owner[v][d] = -1;
+      s->grid[v][d*4] = REST;
+      s->grid[v][d*4+1] = 0;
+      s->grid[v][d*4+2] = 0;
+      s->grid[v][d*4+3] = 0;
     }
   }
+  s->totalrows = totalrows;
+  return 1;
+}
+
+// Puts a subtune's notes on the rows, with the tempo, filter & volume
+// commands (for the song played at the speed multiplier given, -1 = not
+// known). Returns 0 if out of memory
+static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
+{
+  const SFRAME *fr = s->fr;
+  ANOTE *notes = s->notes;
+  unsigned char **grid = s->grid;
+  int *owner[MAX_CHN] = {NULL, NULL, NULL};
+  int numnotes = s->numnotes, numticks = s->numticks;
+  int tempo = s->tempo, phase = s->phase;
+  int totalrows = 1, ok = 0, v, c, d, t;
+
+  if (s->looprow >= 0)
+  {
+    // Up to the end of the loop: after it the tune repeats
+    totalrows = s->endrow;
+  }
+  else
+  {
+    for (c = 0; c < numnotes; c++)
+    {
+      int offrow = timetorow(notes[c].gateoff, phase, tempo);
+      if (notes[c].row + 2 > totalrows) totalrows = notes[c].row + 2;
+      if (offrow + 1 > totalrows) totalrows = offrow + 1;
+    }
+    if (totalrows > MAX_SONGLEN * MAX_PATTROWS)
+    {
+      totalrows = MAX_SONGLEN * MAX_PATTROWS;
+      s->truncated = 1;
+    }
+  }
+  if (!allocgrid(s, totalrows)) goto done;
+  for (c = 0; c < numnotes; c++) if (notes[c].row < totalrows) s->usednotes++;
+  for (v = 0; v < MAX_CHN; v++)
+  {
+    owner[v] = (int *)malloc(totalrows * sizeof(int));
+    if (!owner[v]) goto done;
+    for (d = 0; d < totalrows; d++) owner[v][d] = -1;
+  }
+
   for (c = 0; c < numnotes; c++)
   {
     ANOTE *n = &notes[c];
@@ -2119,7 +2478,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     {
       // Two notes on one row: the longer one stays
       ANOTE *o = &notes[owner[n->voice][r]];
-      dropped++;
+      s->dropped++;
       if (o->end - o->start >= n->end - n->start) continue;
     }
     owner[n->voice][r] = c;
@@ -2131,7 +2490,8 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
       // Legato: toneportamento to the note, speed 0 = right away
       grid[n->voice][r*4+1] = 0;
       grid[n->voice][r*4+2] = CMD_TONEPORTA;
-      grid[n->voice][r*4+3] = speedrow(sng, n->glide);
+      // (Per player call: on another speed, per call of the song's)
+      grid[n->voice][r*4+3] = speedrow(sng, (int)(n->glide / s->tickratio + 0.5));
       continue;
     }
     grid[n->voice][r*4+1] = ins[n->instr].number;
@@ -2147,17 +2507,40 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
       grid[n->voice][r*4+3] = fr[n->start].ad[n->voice];
     }
   }
-  // Keyoffs where the gate goes off (not when the next note's gateoff
-  // timer does it)
+  // Keyoffs: on the row (before the next note's) that the instrument's
+  // gatetimer turns the gate off nearest to when it went off. Not when the
+  // next note's row does it, or the instrument's program
   for (c = 0; c < numnotes; c++)
   {
     ANOTE *n = &notes[c];
-    int offrow, nextrow;
-    if ((n->tied) || (n->gateoff >= n->end) || (n->row >= totalrows) || (owner[n->voice][n->row] != c)) continue;
-    offrow = timetorow(n->gateoff, phase, tempo);
-    nextrow = ((c + 1 < numnotes) && (notes[c+1].voice == n->voice)) ? notes[c+1].row : totalrows;
-    if (offrow <= n->row) offrow = n->row + 1;
-    if ((offrow < nextrow) && (offrow < totalrows) && (grid[n->voice][offrow*4] == REST))
+    int offrow, last, r;
+    if ((n->legato) || (n->instr < 0) || (n->row >= totalrows) || (owner[n->voice][n->row] != c)) continue;
+    if (n->offtick < 0)
+    {
+      // A short gate the instrument's program doesn't turn off (simplified):
+      // the first row after
+      if ((!n->shortgate) || (ins[n->instr].gateoff)) continue;
+      offrow = n->row + 1;
+      last = ((c + 1 < numnotes) && (notes[c+1].voice == n->voice)) ? notes[c+1].row : totalrows;
+    }
+    else
+    {
+      double gt = clampint(ins[n->instr].gatetimer & 0x3f, 1, n->gtmax) / s->tickratio;
+      double best = 1e9;
+      last = (n->offlast < totalrows) ? n->offlast : totalrows;
+      offrow = last;
+      for (r = n->offfirst; r <= last; r++)
+      {
+        double err = fabs(phase + r * tempo - gt - n->offtick);
+        if (err < best)
+        {
+          best = err;
+          offrow = r;
+        }
+        if (phase + r * tempo - gt > n->offtick) break;
+      }
+    }
+    if ((offrow < last) && (offrow < totalrows) && (grid[n->voice][offrow*4] == REST))
       grid[n->voice][offrow*4] = KEYOFF;
   }
 
@@ -2165,12 +2548,25 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   {
     int curtype = 0, curres = 0, curcut = -1, curvol = 15;
     int r;
-    if (tempo != 6)
+    // The song's tempo (fitted to its speed, see choosespeed()), or a
+    // funktempo pair from the speedtable. (The default tempo is 6 at 1x
+    // speed, 6 per multiple otherwise)
+    if ((s->gttempo != 6) || (s->gtfunk) || (multiplier != 1))
     {
+      unsigned char fl = s->gttempo, fr2 = s->gtfunk;
+      int funkrow = s->gtfunk ? addprogram(sng, STBL, &fl, &fr2, 1) : 0;
       for (v = 0; (v < MAX_CHN) && (grid[v][2]); v++);
       if (v == MAX_CHN) v = 0;
-      grid[v][2] = CMD_SETTEMPO;
-      grid[v][3] = tempo;
+      if (funkrow)
+      {
+        grid[v][2] = CMD_FUNKTEMPO;
+        grid[v][3] = funkrow;
+      }
+      else
+      {
+        grid[v][2] = CMD_SETTEMPO;
+        grid[v][3] = s->gttempo;
+      }
     }
     for (r = 0; r < totalrows; r++)
     {
@@ -2227,93 +2623,612 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     }
   }
 
-  // Patterns: cut the rows up, same patterns only once. If there are too
-  // many, try the longest patterns, then leave out the end
+  // The loop goes on after its end (the rows after the grid), so that it
+  // can start a bit later, on a pattern boundary
+  if (s->looprow >= 0)
   {
-    int rows = totalrows;
-    for (;;)
+    int len = s->endrow - s->looprow;
+    for (v = 0; v < MAX_CHN; v++)
     {
-      int pattbytes = patternlength * 4;
-      int toomany = 0;
-      totalrows = ((rows + patternlength - 1) / patternlength) * patternlength;
-      songlen = totalrows / patternlength;
-      sng->numpatterns = 0;
-      if (songlen > MAX_SONGLEN) toomany = 1;
-      for (v = 0; (v < MAX_CHN) && (!toomany); v++)
-      {
-        for (d = 0; d < songlen; d++)
-        {
-          const unsigned char *src = &grid[v][d * pattbytes];
-          int e;
-          for (e = 0; e < sng->numpatterns; e++)
-          {
-            if (!memcmp(sng->pattern[e], src, pattbytes)) break;
-          }
-          if (e == sng->numpatterns)
-          {
-            if (e >= MAX_PATT)
-            {
-              toomany = 1;
-              break;
-            }
-            memcpy(sng->pattern[e], src, pattbytes);
-            sng->pattlen[e] = patternlength;
-            sng->numpatterns++;
-          }
-          sng->songorder[0][v][d] = e;
-        }
-      }
-      if (!toomany) break;
-      if (patternlength < MAX_PATTROWS)
-      {
-        patternlength = MAX_PATTROWS;
-        continue;
-      }
-      if (rows <= patternlength) break;
-      rows -= patternlength;
-      truncated = 1;
+      for (d = totalrows; d < totalrows + 2 * MAX_PATTROWS; d++)
+        memcpy(&grid[v][d*4], &grid[v][(s->looprow + (d - s->looprow) % len) * 4], 4);
     }
   }
-  sng->numsongs = 1;
+  ok = 1;
+
+done:
+  for (v = 0; v < MAX_CHN; v++) free(owner[v]);
+  return ok;
+}
+
+// A different pattern
+typedef struct
+{
+  const unsigned char *data;
+  int len;                        // Rows
+  unsigned hash;
+  int refs;                       // Orderlist positions that use it
+  int number;                     // In the song, -1 = not numbered yet
+} UPATT;
+
+static unsigned patthash(const unsigned char *p, int len)
+{
+  unsigned h = 2166136261u;
+  int c;
+  for (c = 0; c < len; c++) h = (h ^ p[c]) * 16777619u;
+  return h;
+}
+
+// Orderlist positions of patternlength rows (the last one filled up with
+// empty rows). With a loop (loopstart >= 0) the rows before it and the loop
+// are cut separately, the last pattern of each shorter if need be (the
+// loop must be exact). Sets s->chunkrow/chunklen/songlen/restart
+static void layoutsub(ASUB *s, int loopstart, int patternlength)
+{
+  int bounds[3], numseg, seg, r, n = 0;
+
+  bounds[0] = 0;
+  if (loopstart >= 0)
+  {
+    bounds[1] = loopstart;
+    bounds[2] = loopstart + s->endrow - s->looprow;
+    numseg = 2;
+  }
+  else
+  {
+    bounds[1] = s->totalrows;
+    numseg = 1;
+  }
+  s->restart = 0;
+  for (seg = 0; seg < numseg; seg++)
+  {
+    if (seg) s->restart = n;
+    for (r = bounds[seg]; r < bounds[seg+1]; r += patternlength)
+    {
+      s->chunkrow[n] = r;
+      s->chunklen[n] = ((numseg > 1) && (bounds[seg+1] - r < patternlength)) ? bounds[seg+1] - r : patternlength;
+      n++;
+    }
+  }
+  s->songlen = n;
+}
+
+// Room for a subtune's orderlist positions, laid out with the loop where it
+// was found. Returns 0 if out of memory
+static int cutsub(ASUB *s, int patternlength)
+{
+  int maxlen = (s->totalrows + patternlength - 1) / patternlength + 2;
+  int v;
+
+  free(s->chunkrow);
+  free(s->chunklen);
+  s->chunkrow = (int *)malloc(maxlen * sizeof(int));
+  s->chunklen = (int *)malloc(maxlen * sizeof(int));
+  if ((!s->chunkrow) || (!s->chunklen)) return 0;
   for (v = 0; v < MAX_CHN; v++)
   {
-    sng->songlen[0][v] = songlen;
-    sng->songorder[0][v][songlen] = LOOPSONG;
-    sng->songorder[0][v][songlen + 1] = 0;
+    free(s->chunk[v]);
+    s->chunk[v] = (int *)malloc(maxlen * sizeof(int));
+    if (!s->chunk[v]) return 0;
+  }
+  layoutsub(s, s->looprow, patternlength);
+  return 1;
+}
+
+// Finds the different patterns in all the subtunes' orderlist positions
+// (into *uout, the positions' chunk[] numbered). Returns how many, -1 if
+// out of memory
+static int findpatterns(ASUB *subs, int numsubs, UPATT **uout)
+{
+  UPATT *u;
+  int *table;
+  int maxchunks = 0, tablesize, numunique = 0, s, v, d, e;
+
+  for (s = 0; s < numsubs; s++) maxchunks += subs[s].songlen * MAX_CHN;
+  for (tablesize = 1; tablesize < maxchunks * 2; tablesize <<= 1);
+  free(*uout);
+  u = *uout = (UPATT *)malloc(maxchunks * sizeof(UPATT));
+  table = (int *)malloc(tablesize * sizeof(int));
+  if ((!u) || (!table))
+  {
+    free(table);
+    return -1;
+  }
+  for (d = 0; d < tablesize; d++) table[d] = -1;
+
+  for (s = 0; s < numsubs; s++)
+  {
+    for (v = 0; v < MAX_CHN; v++)
+    {
+      for (d = 0; d < subs[s].songlen; d++)
+      {
+        int len = subs[s].chunklen[d];
+        const unsigned char *src = &subs[s].grid[v][subs[s].chunkrow[d] * 4];
+        unsigned h = patthash(src, len * 4) + len * 0x9e3779b9u;
+        int slot = h & (tablesize - 1);
+        while ((e = table[slot]) >= 0)
+        {
+          if ((u[e].hash == h) && (u[e].len == len) && (!memcmp(u[e].data, src, len * 4))) break;
+          slot = (slot + 1) & (tablesize - 1);
+        }
+        if (e < 0)
+        {
+          e = numunique++;
+          table[slot] = e;
+          u[e].data = src;
+          u[e].len = len;
+          u[e].hash = h;
+          u[e].refs = 0;
+          u[e].number = -1;
+        }
+        u[e].refs++;
+        subs[s].chunk[v][d] = e;
+      }
+    }
+  }
+  free(table);
+  return numunique;
+}
+
+// Cuts the subtunes' rows into patterns, the same ones only once, and makes
+// the orderlists. If there are too many patterns, longer ones are tried,
+// then the end of the longest subtune is left out, a pattern at a time.
+// Returns 0 if out of memory
+static int makepatterns(ASUB *subs, int numsubs, SNGDATA *sng, int patternlength)
+{
+  UPATT *u = NULL;
+  int numunique = 0, ok = 0, s, v, d, e;
+
+  for (;;)
+  {
+    int toolong = 0;
+
+    for (s = 0; s < numsubs; s++)
+    {
+      if (!cutsub(&subs[s], patternlength)) goto done;
+      if (subs[s].songlen > MAX_SONGLEN) toolong = 1;
+    }
+    numunique = findpatterns(subs, numsubs, &u);
+    if (numunique < 0) goto done;
+
+    // A loop goes round, so it can start later: on the pattern boundary
+    // after it, where that makes fewer patterns (a tune built in patterns
+    // counted from its start, not from the loop)
+    for (s = 0; s < numsubs; s++)
+    {
+      int n;
+      if ((subs[s].looprow < 0) || (!(subs[s].looprow % patternlength))) continue;
+      layoutsub(&subs[s], (subs[s].looprow + patternlength - 1) / patternlength * patternlength, patternlength);
+      n = findpatterns(subs, numsubs, &u);
+      if (n < 0) goto done;
+      if (n < numunique)
+      {
+        numunique = n;
+        if (subs[s].songlen > MAX_SONGLEN) toolong = 1;
+        continue;
+      }
+      layoutsub(&subs[s], subs[s].looprow, patternlength);
+      numunique = findpatterns(subs, numsubs, &u);
+      if (numunique < 0) goto done;
+    }
+
+    if ((!toolong) && (numunique <= MAX_PATT)) break;
+    if (patternlength >= MAX_PATTROWS) break;
+    patternlength = MAX_PATTROWS;
   }
 
-  setreport(report, reportsize, "Approximate: subtune %d, %d notes, %d instruments, tempo %d, %d patterns",
-    subtune, numnotes - dropped, numins, tempo, sng->numpatterns);
-  if ((rate > 1.0) && (rate == floor(rate))) addreport(report, reportsize, ", %dx speed (set the speed multiplier)", (int)rate);
-  else if (rate != 1.0) addreport(report, reportsize, ", %.2f play calls per frame", rate);
-  if (sf->info.clock == 2) addreport(report, reportsize, ", NTSC");
+  // Still too many: the longest subtunes get shorter
+  for (;;)
+  {
+    int longest = 0;
+    for (s = 1; s < numsubs; s++) if (subs[s].songlen > subs[longest].songlen) longest = s;
+    if ((numunique <= MAX_PATT) && (subs[longest].songlen <= MAX_SONGLEN)) break;
+    // (Can't happen: one pattern per channel & subtune always fits)
+    if (subs[longest].songlen <= 1) break;
+    d = --subs[longest].songlen;
+    for (v = 0; v < MAX_CHN; v++)
+    {
+      if (!--u[subs[longest].chunk[v][d]].refs) numunique--;
+    }
+    if (subs[longest].restart >= subs[longest].songlen) subs[longest].restart = 0;
+    subs[longest].truncated = 1;
+  }
+
+  // Numbered in order of use
+  sng->numpatterns = 0;
+  sng->numsongs = numsubs;
+  for (s = 0; s < numsubs; s++)
+  {
+    for (v = 0; v < MAX_CHN; v++)
+    {
+      for (d = 0; d < subs[s].songlen; d++)
+      {
+        e = subs[s].chunk[v][d];
+        if (u[e].number < 0)
+        {
+          if (sng->numpatterns >= MAX_PATT) goto done;
+          u[e].number = sng->numpatterns++;
+          memcpy(sng->pattern[u[e].number], u[e].data, u[e].len * 4);
+          sng->pattlen[u[e].number] = u[e].len;
+        }
+        sng->songorder[s][v][d] = u[e].number;
+      }
+      sng->songlen[s][v] = subs[s].songlen;
+      sng->songorder[s][v][subs[s].songlen] = LOOPSONG;
+      sng->songorder[s][v][subs[s].songlen + 1] = subs[s].restart;
+    }
+  }
+  ok = 1;
+
+done:
+  free(u);
+  return ok;
+}
+
+static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA *sng, SID2SNG_PLAYBACK *pb,
+  char *report, int reportsize)
+{
+  ASUB *subs = NULL;
+  ANOTE **order = NULL;
+  AINSTR *ins = NULL;
+  int numsubs, first, seconds, patternlength;
+  int numins = 0, numgated = 0, numok = 0, totalnotes = 0;
+  int usednotes = 0, dropped = 0, truncated = 0, empty = 0, looped = 0, samerate = 1;
+  int srcntsc = (sf->info.clock == 2), gtntsc = (sf->info.clock == 2), multiplier = 1, scaled = 0;
+  int insmintempo[MAX_INSTR];
+  int level = 0, ok = 0, pass, s, c, d, r;
+  double rate = 1.0, maxtempoerr = 0.0, minratio = 1e9, maxratio = 0.0;
+
+  // One subtune, or all of them (as many as a song can have)
+  if (opt->subtune)
+  {
+    if ((opt->subtune < 1) || (opt->subtune > sf->info.songs))
+    {
+      setreport(report, reportsize, "There is no subtune %d (the SID has %d)", opt->subtune, sf->info.songs);
+      return 0;
+    }
+    first = opt->subtune;
+    numsubs = 1;
+  }
+  else
+  {
+    first = 1;
+    numsubs = (sf->info.songs < MAX_SONGS) ? sf->info.songs : MAX_SONGS;
+  }
+  seconds = clampint(opt->seconds, 1, 1800);
+  patternlength = clampint(opt->patternlength, 16, MAX_PATTROWS);
+
+  if ((sf->info.rsid) && (!sf->info.playaddress))
+  {
+    setreport(report, reportsize, "This is an RSID tune: it runs from its own interrupts and needs a real C64, "
+      "so it can't be recorded. A PSID version of the tune may work");
+    return 0;
+  }
+
+  // Notes from the register values as GoatTracker's frequency table has
+  // them. It is for PAL; an NTSC tune is to be played in NTSC mode (the same
+  // table on the faster clock), so it comes out at its own pitch
+  clockhz = PAL_CLOCK;
+  subs = (ASUB *)calloc(numsubs, sizeof(ASUB));
+  if (!subs) goto oom;
+  for (pass = 0; ; pass++)
+  {
+    numok = 0;
+    totalnotes = 0;
+    for (s = 0; s < numsubs; s++)
+    {
+      // Looking for the loop, it is recorded longer. Without one, the length
+      // asked for (recorded again, so that it comes out the same)
+      int loopsecs = (seconds > LOOPSECS) ? seconds : LOOPSECS;
+      subs[s].subtune = first + s;
+      subs[s].looprow = -1;
+      r = opt->loops ? analysesub(sf, opt, loopsecs, 1, &subs[s]) : 0;
+      if (r < 0) goto oom;
+      if ((r == 0) || (subs[s].looprow < 0))
+      {
+        freesub(&subs[s]);
+        memset(&subs[s], 0, sizeof(ASUB));
+        subs[s].subtune = first + s;
+        subs[s].looprow = -1;
+        r = analysesub(sf, opt, seconds, 0, &subs[s]);
+        if (r < 0) goto oom;
+      }
+      if (!r) continue;
+      subs[s].ok = 1;
+      numok++;
+      totalnotes += subs[s].numnotes;
+    }
+    if (!numok) break;
+
+    // The speed it plays at: the SID's, when GoatTracker has it. Else the
+    // one that fits best, the tempos fitted to it
+    for (s = 0; (s < numsubs) && (!subs[s].ok); s++);
+    rate = subs[s].rate;
+    for (; s < numsubs; s++) if ((subs[s].ok) && (subs[s].rate != rate)) samerate = 0;
+    if (pass) break;
+    gtntsc = srcntsc;
+    if ((samerate) && (ratemultiplier(rate) >= 0)) multiplier = ratemultiplier(rate);
+    else
+    {
+      scaled = 1;
+      choosespeed(subs, numsubs, srcntsc, &gtntsc, &multiplier);
+    }
+    // On the other PAL/NTSC the SID's clock differs: the notes again, from
+    // the pitches they are to sound at
+    if (gtntsc == srcntsc) break;
+    for (s = 0; s < numsubs; s++)
+    {
+      freesub(&subs[s]);
+      memset(&subs[s], 0, sizeof(ASUB));
+    }
+    samerate = 1;
+    clockhz = (srcntsc ? NTSC_CLOCK : PAL_CLOCK) * PAL_CLOCK / (gtntsc ? NTSC_CLOCK : PAL_CLOCK);
+  }
+  if (!numok)
+  {
+    // Why the start song didn't work (the others usually alike)
+    s = ((numsubs > 1) && (sf->info.startsong <= numsubs)) ? sf->info.startsong - 1 : 0;
+    setreport(report, reportsize, "%s", subs[s].err);
+    goto done;
+  }
+  pb->multiplier = multiplier;
+  pb->ntsc = gtntsc;
+  for (s = 0; s < numsubs; s++)
+  {
+    ASUB *a = &subs[s];
+    a->gttempo = a->tempo;
+    a->gtfunk = 0;
+    a->tickratio = 1.0;
+    if ((!a->ok) || (!scaled)) continue;
+    {
+      double err;
+      a->tickratio = callhz(multiplier ? multiplier : 0.5, gtntsc) / callhz(a->rate, srcntsc);
+      a->gttempo = fittempo(a->tempo * a->tickratio, &a->gtfunk, &err);
+      if (err > maxtempoerr) maxtempoerr = err;
+      if (a->tickratio < minratio) minratio = a->tickratio;
+      if (a->tickratio > maxratio) maxratio = a->tickratio;
+    }
+  }
+  // The gatetimers in the song's ticks (shorter than its rows)
+  for (s = 0; s < numsubs; s++)
+  {
+    ASUB *a = &subs[s];
+    int gtmax = ((a->gtfunk) && (a->gtfunk < a->gttempo)) ? a->gtfunk - 1 : a->gttempo - 1;
+    if (!a->ok) continue;
+    if (gtmax < 1) gtmax = 1;
+    for (c = 0; c < a->numnotes; c++)
+    {
+      ANOTE *n = &a->notes[c];
+      n->gtmax = gtmax;
+      n->gtwant = (n->offtick >= 0) ? clampint((int)(n->offwant * a->tickratio + 0.5), 1, gtmax) : 0;
+      n->gatetimer = ((n->gtflags >= 0) ? n->gtflags : 0) | (n->gtwant ? n->gtwant : clampint(2, 1, gtmax));
+    }
+  }
+
+  // Instruments: notes that play alike share one, in all the subtunes. Long
+  // notes first, they show more of the sound. Less detail until it all fits
+  order = (ANOTE **)malloc(totalnotes * sizeof(ANOTE *));
+  ins = (AINSTR *)malloc(MAX_INSTR * sizeof(AINSTR));
+  if ((!order) || (!ins)) goto oom;
+  for (s = 0; s < numsubs; s++)
+  {
+    if (!subs[s].ok) continue;
+    for (c = 0; c < subs[s].numnotes; c++)
+    {
+      ANOTE *n = &subs[s].notes[c];
+      n->instr = -1;
+      n->sub = s;
+      n->rec = &subs[s].rec;
+      // After the loop the notes only repeat: they aren't used
+      if ((subs[s].looprow >= 0) && (n->row >= subs[s].endrow)) continue;
+      if (!n->legato) order[numgated++] = n;
+    }
+  }
+  qsort(order, numgated, sizeof(ANOTE *), notecmp_len);
+  for (level = 0; level < NUMLEVELS; level++)
+  {
+#ifdef SID2SNG_DEBUG
+    if (getenv("SID2SNG_NOTES"))
+    {
+      AINSTR *all = (AINSTR *)malloc((numgated + 1) * sizeof(AINSTR));
+      if (all)
+      {
+        fprintf(stderr, "level %d: %d instruments needed\n", level, assigninstruments(order, numgated, all, numgated, level, 1));
+        free(all);
+      }
+    }
+#endif
+    numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, level, level == NUMLEVELS - 1);
+    if (numins >= 0) break;
+  }
+#ifdef SID2SNG_DEBUG
+  if (getenv("SID2SNG_NOTES"))
+  {
+    FILE *df = fopen(getenv("SID2SNG_NOTES"), "w");
+    if (df)
+    {
+      for (s = 0; s < numsubs; s++)
+      {
+        ASUB *a = &subs[s];
+        if (!a->ok) continue;
+        fprintf(df, "subtune %d tempo %d phase %d level %d ticks %d loop rows %d-%d rate %.6f\n", a->subtune, a->tempo,
+          a->phase, level, a->numticks, a->looprow, a->endrow, a->rate);
+        for (c = 0; c < a->numnotes; c++)
+          fprintf(df, "%d %d %d %d %d %d\n", a->notes[c].voice, a->notes[c].start, a->notes[c].base, a->notes[c].legato,
+            a->notes[c].gateoff, a->notes[c].instr);
+      }
+      fclose(df);
+    }
+  }
+#endif
+  // Numbered in order of first use
+  for (c = 0; c < numins; c++)
+  {
+    int num = 1;
+    for (d = 0; d < numins; d++)
+    {
+      if ((ins[d].firstuse < ins[c].firstuse) || ((ins[d].firstuse == ins[c].firstuse) && (d < c))) num++;
+    }
+    ins[c].number = num;
+  }
+
+  // The fastest tempo each instrument plays in
+  for (c = 0; c < MAX_INSTR; c++) insmintempo[c] = 0x7f;
+  for (s = 0; s < numsubs; s++)
+  {
+    if (!subs[s].ok) continue;
+    for (c = 0; c < subs[s].numnotes; c++)
+    {
+      int i = subs[s].notes[c].instr;
+      if ((i >= 0) && (i < MAX_INSTR) && (subs[s].gttempo < insmintempo[i])) insmintempo[i] = subs[s].gttempo;
+    }
+  }
+
+  // The song
+  sngdata_clear(sng);
+  sngtexts(sng, &sf->info);
+  sng->numinstr = numins;
+  for (c = 0; c < numins; c++)
+  {
+    AINSTR *a = &ins[c];
+    INSTR *in = &sng->instr[a->number];
+    unsigned char wl[PROGMAX + 1], wr[PROGMAX + 1];
+    char name[MAX_INSTRNAMELEN + 1];
+
+    memcpy(wl, a->wl, a->wlen);
+    memcpy(wr, a->wr, a->wlen);
+    wl[a->wlen] = 0xff;
+    wr[a->wlen] = (a->wloop >= 0) ? a->wloop + 1 : 0;
+    in->ad = a->ad;
+    in->sr = a->sr;
+    in->ptr[WTBL] = addprogram(sng, WTBL, wl, wr, a->wlen + 1);
+    if (a->plen) in->ptr[PTBL] = addprogram(sng, PTBL, a->pl, a->pr, a->plen);
+    in->gatetimer = a->gatetimer;
+    // The gate goes off within the row before the note: the player stops
+    // the song if the timer is longer than the tempo. (Tempos fitted to
+    // another speed can be shorter, and an instrument shared with a slower
+    // subtune may come from there)
+    if ((a->gatetimer & 0x3f) > insmintempo[c] - 1) in->gatetimer = (a->gatetimer & 0xc0) | (insmintempo[c] - 1);
+    in->firstwave = a->firstwave;
+    memset(name, 0, sizeof name);
+    snprintf(name, sizeof name, "%s %02X", wavename(a->wl[0]), a->number);
+    memcpy(in->name, name, MAX_INSTRNAMELEN);
+  }
+
+  // The rows of each subtune (an empty pattern for the ones that don't
+  // play, so the subtunes keep their numbers), then the patterns
+  for (s = 0; s < numsubs; s++)
+  {
+    if (subs[s].ok)
+    {
+      if (!buildgrid(&subs[s], ins, sng, pb->multiplier)) goto oom;
+    }
+    else if (!allocgrid(&subs[s], 1)) goto oom;
+  }
+  if (!makepatterns(subs, numsubs, sng, patternlength)) goto oom;
+
+  for (s = 0; s < numsubs; s++)
+  {
+    usednotes += subs[s].usednotes;
+    dropped += subs[s].dropped;
+    if (subs[s].truncated) truncated++;
+    if (!subs[s].ok) empty++;
+    if ((subs[s].ok) && (subs[s].looprow >= 0)) looped++;
+  }
+
+  if (numsubs == 1)
+  {
+    setreport(report, reportsize, "Approximate: subtune %d, %d notes, %d instruments, tempo %d",
+      subs[0].subtune, usednotes - dropped, numins, subs[0].gttempo);
+    if (subs[0].gtfunk) addreport(report, reportsize, "/%d (funktempo)", subs[0].gtfunk);
+    addreport(report, reportsize, ", %d patterns", sng->numpatterns);
+    if (looped) addreport(report, reportsize, ", loops where it repeats");
+  }
+  else
+  {
+    int mintempo = 0x7f, maxtempo = 0;
+    for (s = 0; s < numsubs; s++)
+    {
+      int top;
+      if (!subs[s].ok) continue;
+      top = subs[s].gtfunk ? subs[s].gtfunk : subs[s].gttempo;
+      if (subs[s].gttempo < mintempo) mintempo = subs[s].gttempo;
+      if (top > maxtempo) maxtempo = top;
+    }
+    setreport(report, reportsize, "Approximate: %d subtunes, %d notes, %d instruments, tempo %d",
+      numsubs, usednotes - dropped, numins, mintempo);
+    if (maxtempo != mintempo) addreport(report, reportsize, "-%d", maxtempo);
+    addreport(report, reportsize, ", %d patterns", sng->numpatterns);
+    if (looped) addreport(report, reportsize, ", %d loop%s where %s", looped, (looped > 1) ? "" : "s",
+      (looped > 1) ? "they repeat" : "it repeats");
+  }
+  if (scaled)
+  {
+    // Played at another speed than the SID's: the tempos fitted, the
+    // instruments' programs (per call) faster or slower
+    if (multiplier) addreport(report, reportsize, ", played at %dx", multiplier);
+    else addreport(report, reportsize, ", played at 25Hz");
+    addreport(report, reportsize, " %s", gtntsc ? "NTSC" : "PAL");
+    if (samerate) addreport(report, reportsize, " for its %.1f Hz player", callhz(rate, srcntsc));
+    else addreport(report, reportsize, " for its players of different speeds");
+    addreport(report, reportsize, " (tempos within %.1f%%", maxtempoerr * 100.0);
+    if (maxratio > 1.03) addreport(report, reportsize, ", effects up to %d%% faster", (int)((maxratio - 1.0) * 100.0 + 0.5));
+    if (minratio < 0.97) addreport(report, reportsize, ", effects up to %d%% slower", (int)((1.0 - minratio) * 100.0 + 0.5));
+    addreport(report, reportsize, ")");
+  }
+  else
+  {
+    if (pb->multiplier > 1) addreport(report, reportsize, ", %dx speed", pb->multiplier);
+    else if (pb->multiplier == 0) addreport(report, reportsize, ", 25Hz (speed multiplier 0)");
+    if (pb->ntsc) addreport(report, reportsize, ", NTSC");
+  }
   if (dropped) addreport(report, reportsize, ", %d notes too close together left out", dropped);
   if (level) addreport(report, reportsize, ", instruments simplified to fit");
-  if (truncated) addreport(report, reportsize, ", the end left out (too long)");
+  if (truncated)
+  {
+    if (numsubs == 1) addreport(report, reportsize, ", the end left out (too long)");
+    else if (truncated == numsubs) addreport(report, reportsize, ", the ends left out (too long to fit)");
+    else addreport(report, reportsize, ", the end of %d subtune%s left out (too long to fit)", truncated, (truncated > 1) ? "s" : "");
+  }
+  if (empty)
+  {
+    addreport(report, reportsize, ", subtune%s", (empty > 1) ? "s" : "");
+    for (s = 0, c = 0; s < numsubs; s++)
+    {
+      if (subs[s].ok) continue;
+      addreport(report, reportsize, "%s %d", c ? "," : "", subs[s].subtune);
+      c++;
+    }
+    addreport(report, reportsize, " left empty (no notes, or %s)", (empty > 1) ? "they don't play" : "it doesn't play");
+  }
+  if ((!opt->subtune) && (sf->info.songs > numsubs))
+    addreport(report, reportsize, ", subtunes %d-%d left out (a song has at most %d)", numsubs + 1, sf->info.songs, MAX_SONGS);
   ok = 1;
   goto done;
 
 oom:
   setreport(report, reportsize, "Out of memory");
 done:
-  for (v = 0; v < MAX_CHN; v++)
+  if (subs)
   {
-    free(grid[v]);
-    free(owner[v]);
-    free(rec.pn[v]);
+    for (s = 0; s < numsubs; s++) freesub(&subs[s]);
+    free(subs);
   }
-  free(onsets);
   free(order);
   free(ins);
-  free(notes);
-  free(fr);
-  (void)numlegato;
   return ok;
 }
 
 int sid2sng(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt, char *report, int reportsize)
 {
+  return sid2sng_play(sidpath, sngpath, opt, NULL, report, reportsize);
+}
+
+int sid2sng_play(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt, SID2SNG_PLAYBACK *playback,
+  char *report, int reportsize)
+{
   SID2SNG_OPTIONS o;
+  SID2SNG_PLAYBACK pb;
   SIDFILE sf;
   SNGDATA *sng = NULL;
   unsigned char *buf;
@@ -2323,6 +3238,9 @@ int sid2sng(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt
 
   if (opt) o = *opt;
   else sid2sng_defaults(&o);
+  pb.multiplier = -1;
+  pb.ntsc = 0;
+  pb.adparam = -1;
 
   buf = readfile(sidpath, &size);
   if (!buf)
@@ -2331,6 +3249,7 @@ int sid2sng(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt
     return 0;
   }
   if (!parsesid(buf, size, &sf, report, reportsize)) goto done;
+  pb.ntsc = (sf.info.clock == 2);
   sng = sngdata_alloc();
   if (!sng)
   {
@@ -2341,7 +3260,7 @@ int sid2sng(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt
   exacterr[0] = 0;
   if (o.mode != SID2SNG_APPROX)
   {
-    ok = exactconvert(&sf, sng, exacterr, sizeof exacterr);
+    ok = exactconvert(&sf, sng, &pb, exacterr, sizeof exacterr);
     if (ok) setreport(report, reportsize, "%s", exacterr);
     else if (o.mode == SID2SNG_EXACT)
     {
@@ -2349,7 +3268,7 @@ int sid2sng(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt
       goto done;
     }
   }
-  if (!ok) ok = approxconvert(&sf, &o, sng, report, reportsize);
+  if (!ok) ok = approxconvert(&sf, &o, sng, &pb, report, reportsize);
   if (!ok) goto done;
 
   if (!sngwrite(sngpath, sng))
@@ -2357,6 +3276,7 @@ int sid2sng(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS *opt
     setreport(report, reportsize, "Could not write the song file");
     ok = 0;
   }
+  if ((ok) && (playback)) *playback = pb;
 
 done:
   free(sng);

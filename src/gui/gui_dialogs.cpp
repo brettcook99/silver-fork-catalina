@@ -492,13 +492,15 @@ static void sidimportdialog(void)
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
     if (songs < 1) songs = 1;
     if (o->subtune > songs) o->subtune = 0;
-    ImGui::SliderInt("##subtune", &o->subtune, 0, songs, o->subtune ? "%d" : "default");
+    ImGui::SliderInt("##subtune", &o->subtune, 0, songs, o->subtune ? "%d" : "all");
+    if (ImGui::IsItemHovered()) tooltip("All: every subtune of the SID becomes a subtune of the song (up to 32). A number: only that one");
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Length");
     ImGui::SameLine(labelw);
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
     ImGui::SliderInt("##seconds", &o->seconds, 10, 600, "%d seconds");
+    if (ImGui::IsItemHovered()) tooltip("How much of each subtune is recorded, when it doesn't loop");
 
     ImGui::AlignTextToFramePadding();
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Rhythm grid");
@@ -511,6 +513,14 @@ static void sidimportdialog(void)
     ImGui::SameLine(labelw);
     ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
     ImGui::SliderInt("##plen", &o->patternlength, 16, MAX_PATTROWS, "%d rows");
+
+    {
+      bool loops = o->loops != 0;
+      ImGui::SetCursorPosX(labelw);
+      if (ImGui::Checkbox("Loop where the tune repeats", &loops)) o->loops = loops ? 1 : 0;
+      if (ImGui::IsItemHovered())
+        tooltip("Each subtune is played up to 10 minutes to find where it starts over. It then ends there and loops back, like the original: the whole tune, in fewer patterns");
+    }
   }
 
   {

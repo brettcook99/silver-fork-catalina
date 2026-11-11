@@ -313,17 +313,8 @@ void gui::drawstatusbar(float height)
     x += ImGui::CalcTextSize("Tables unlocked").x + 18.0f;
   }
 
-  // Message (fades out)
-  {
-    double age = ImGui::GetTime() - statusmessagetime;
-    if ((statusmessage[0]) && (age < 8.0))
-    {
-      float a = (age < 6.0) ? 1.0f : (float)(1.0 - (age - 6.0) / 2.0);
-      dl->AddText(ImVec2(x, ty), alpha(theme.text, a), statusmessage);
-    }
-  }
-
   // File name on the right
+  float namex;
   {
     const char *name = loadedsongfilename[0] ? gt_basename(loadedsongfilename) : "Untitled";
     float tw;
@@ -334,8 +325,31 @@ void gui::drawstatusbar(float height)
     else
       snprintf(text, sizeof text, "%s%s", name, modified ? "  (edited)" : "");
     tw = ImGui::CalcTextSize(text).x;
+    namex = origin.x + w - tw - 12.0f - (modified ? 10.0f : 0.0f);
     if (modified) dl->AddCircleFilled(ImVec2(origin.x + w - tw - 22.0f, ty + fs * 0.5f), 3.5f, theme.text, 12);
     dl->AddText(ImVec2(origin.x + w - tw - 12.0f, ty), theme.textdim, text);
+  }
+
+  // Message (fades out) in the room left, cut short with "..." (all of it
+  // when hovered)
+  {
+    double age = ImGui::GetTime() - statusmessagetime;
+    float room = namex - 24.0f - x;
+    if ((statusmessage[0]) && (age < 8.0) && (room > 0.0f))
+    {
+      float a = (age < 6.0) ? 1.0f : (float)(1.0 - (age - 6.0) / 2.0);
+      const char *end = statusmessage + strlen(statusmessage);
+      if (ImGui::CalcTextSize(statusmessage).x > room)
+      {
+        char shortmsg[sizeof statusmessage + 4];
+        const char *cut = end;
+        ImGui::GetFont()->CalcTextSizeA(fs, room - ImGui::CalcTextSize("...").x, 0.0f, statusmessage, end, &cut);
+        snprintf(shortmsg, sizeof shortmsg, "%.*s...", (int)(cut - statusmessage), statusmessage);
+        dl->AddText(ImVec2(x, ty), alpha(theme.text, a), shortmsg);
+        if (ImGui::IsMouseHoveringRect(ImVec2(x, origin.y), ImVec2(x + room, origin.y + height))) tooltip(statusmessage);
+      }
+      else dl->AddText(ImVec2(x, ty), alpha(theme.text, a), statusmessage);
+    }
   }
 }
 

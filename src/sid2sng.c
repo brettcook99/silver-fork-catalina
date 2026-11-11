@@ -15,18 +15,23 @@ static void usage(void)
          "Options:\n"
          "-exact   Only the exact conversion (SIDs made with GoatTracker 2)\n"
          "-approx  Only the approximate conversion (any SID, by playing it)\n"
-         "-sxx     Subtune to record with -approx (1-n) DEFAULT=the SID's start song\n"
-         "-txx     Seconds to record with -approx (1-1800) DEFAULT=180\n"
+         "-sxx     Only this subtune with -approx (1-n) DEFAULT=all (up to 32)\n"
+         "-txx     Seconds of each subtune with -approx, when it doesn't loop (1-1800)\n"
+         "         DEFAULT=180\n"
          "-rxx     Rows per most common note length with -approx DEFAULT=automatic\n"
          "-fxx     Frames per row (tempo) with -approx (3-127) DEFAULT=automatic\n"
          "-lxx     Pattern length in rows with -approx (16-128) DEFAULT=64\n"
+         "-noloop  With -approx, don't look for loops: keep -t seconds of each\n"
+         "         subtune (by default each one is played up to 10 minutes to\n"
+         "         find where it starts over; it then ends there and loops back)\n"
          "-i       Only show the SID file's information\n"
          "\n"
          "By default the exact conversion is tried first: it gives back the\n"
          "original song (all subtunes, patterns, instruments and tables) of a\n"
          "SID made with GoatTracker 2's packer. Other SIDs are played on an\n"
-         "emulated C64 and the notes & sounds are turned into a song that\n"
-         "sounds roughly alike, as a starting point for editing.\n");
+         "emulated C64, subtune by subtune, and the notes & sounds are turned\n"
+         "into a song that sounds roughly alike, as a starting point for\n"
+         "editing.\n");
 }
 
 static void showinfo(const char *name, const SIDINFO *i)
@@ -48,6 +53,7 @@ static void showinfo(const char *name, const SIDINFO *i)
 int main(int argc, char **argv)
 {
   SID2SNG_OPTIONS opt;
+  SID2SNG_PLAYBACK pb;
   char report[512];
   const char *in = NULL, *out = NULL;
   int infoonly = 0;
@@ -63,6 +69,7 @@ int main(int argc, char **argv)
       if (!strcmp(a, "-exact")) opt.mode = SID2SNG_EXACT;
       else if (!strcmp(a, "-approx")) opt.mode = SID2SNG_APPROX;
       else if (!strcmp(a, "-i")) infoonly = 1;
+      else if (!strcmp(a, "-noloop")) opt.loops = 0;
       else
       {
         switch (a[1])
@@ -115,11 +122,19 @@ int main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  if (!sid2sng(in, out, &opt, report, sizeof report))
+  if (!sid2sng_play(in, out, &opt, &pb, report, sizeof report))
   {
     printf("Error: %s\n", report);
     return EXIT_FAILURE;
   }
   printf("Converted successfully: %s\n", report);
+  // The editor settings the song needs (not stored in it)
+  printf("Play with:  ");
+  if (pb.multiplier > 0) printf("speed multiplier %d", pb.multiplier);
+  else if (!pb.multiplier) printf("speed multiplier 0 (25Hz)");
+  else printf("speed multiplier: none fits");
+  printf(", %s", pb.ntsc ? "NTSC" : "PAL");
+  if (pb.adparam >= 0) printf(", hardrestart ADSR %04X", pb.adparam);
+  printf("\n");
   return EXIT_SUCCESS;
 }

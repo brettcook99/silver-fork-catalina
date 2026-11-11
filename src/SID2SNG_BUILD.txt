@@ -24,19 +24,51 @@ API (gsidimport.h)
   int sidinfo_read(const char *sidpath, SIDINFO *info);
   int sid2sng(const char *sidpath, const char *sngpath,
               const SID2SNG_OPTIONS *opt, char *report, int reportsize);
+  int sid2sng_play(const char *sidpath, const char *sngpath,
+                   const SID2SNG_OPTIONS *opt, SID2SNG_PLAYBACK *playback,
+                   char *report, int reportsize);
 
-SID2SNG_OPTIONS: mode (SID2SNG_AUTO/EXACT/APPROX), subtune (0 = start song),
-seconds (180), rowsperbeat (0 = auto), tempo (0 = auto), patternlength (64).
+SID2SNG_OPTIONS: mode (SID2SNG_AUTO/EXACT/APPROX), subtune (0 = all, up to 32),
+seconds (180), rowsperbeat (0 = auto), tempo (0 = auto), patternlength (64),
+loops (1 = end each subtune where it starts over and loop back).
 SIDINFO: title, author, released, rsid, version, songs, startsong, clock
 (0 unknown/1 PAL/2 NTSC/3 both), model (0/1 6581/2 8580/3 both), load/init/
 play address, data size, speed flags.
 
 sid2sng() returns 1/0; report gets e.g. "Exact: GoatTracker 2 song, 4
-subtunes, 41 patterns, 13 instruments" or "Approximate: subtune 1, 2088
-notes, 40 instruments, tempo 6, 35 patterns, ..." or the error. Things the
-user has to set in the editor are in the report: speed multiplier ("2x
-speed (set the speed multiplier)"), NTSC, a non-default hardrestart ADSR.
-After a successful sid2sng() load the .sng with loadsong().
+subtunes, 41 patterns, 13 instruments" or "Approximate: 11 subtunes, 3845
+notes, 59 instruments, tempo 4-16, 84 patterns, 2 loop where they repeat,
+..." or the error. How the song is to be played is not in the .sng: the
+editor settings speed multiplier, NTSC and hardrestart ADSR. sid2sng_play()
+gives them in SID2SNG_PLAYBACK (multiplier 1-16, 0 = 25Hz, -1 = none fits;
+ntsc; adparam, -1 = not known) and the report mentions them ("2x speed",
+"25Hz", "NTSC", "hardrestart ADSR 0000"). After a successful conversion load
+the .sng with loadsong() and set editorInfo.multiplier/ntsc/adparam (the
+tracker's SID import does, then do_sound_init()). NTSC tunes are converted
+for NTSC mode: APPROX takes the notes from the register values with the PAL
+frequency table, which NTSC mode plays at the NTSC clock.
+
+APPROX speed: a player that runs at a rate GoatTracker can't (a CIA timer
+that isn't a whole multiple of the frame rate, e.g. Ultima IV's 34.7 Hz, or
+a 60 Hz timer on PAL) can't be played as recorded. The song keeps its rows
+(and loops); choosespeed() tries PAL/NTSC x 25Hz/1-16x and takes the one
+with the least: worst tempo error over the subtunes, plus 0.1 x how much
+faster/slower the instruments' programs run (log2), plus 0.06 x how far the
+notes are from the frequency table on that clock. Each subtune then gets the
+tempo, or a funktempo pair (speedtable row, half-step averages), whose rows
+last as long as the source's (fittempo()); glide speeds are scaled the same.
+On the other PAL/NTSC the notes are analysed again for that clock. Gate
+timers are kept below each instrument's fastest tempo (the player stops the
+song otherwise). Whole-multiple rates keep the old path (same output).
+Resampling the registers onto GoatTracker's ticks instead was tried: timing
+exact in ticks, but source rows aren't whole ticks long, so notes land
+unevenly on rows, and the resampled recording never repeats exactly (no
+loops: Ultima IV went from 13 looping subtunes to none, 8 cut short).
+Results: Ultima IV 1x PAL, rows/s within 3.8% for all 13 subtunes (it was
+73% fast at 1x NTSC), on pitch (its table is for NTSC: on the PAL table at
+the NTSC clock it is 0.35 semitones off); dojo with a 60 Hz CIA timer on PAL
+1x NTSC within 0.2%; the app plays the Ultima IV import at the computed
+5.88 rows/s.
 
 The importer allocates its big buffers (SNGDATA ~140K, CPU6502 64K, the
 register recording up to a few MB) on the heap and frees them; it keeps no
@@ -117,7 +149,7 @@ instrument numbers in a pattern, R0 (repeat 16) orderlist commands, set-
 mastervolume timing marks (without author info), the low nybble of filter
 "set" rows, wavetable silent waveform $E0 without wave delays (becomes $00:
 the same in the player). The editor-only settings (speed multiplier, NTSC,
-hardrestart ADSR) come in the report. A tempo other than the default comes
+hardrestart ADSR) come in SID2SNG_PLAYBACK and the report. A tempo other than the default comes
 back as instrument $3F's AD (the tracker's "tempo instrument" convention).
 
 APPROX smoke test (sid2sng -approx on the 14 packed examples and
@@ -129,3 +161,61 @@ dojo, transylvanian, tempo2test, wavecmdtest, consultant, everlasting;
 50-75% for sixpack, Beyond, hyperspace, funktest, sanction (funk tempo,
 channel tempos and lots of slides, which a fixed tempo grid & instrument
 programs only approximate).
+
+APPROX instruments (2026-11-11, from examples/sid/diff, Rob Hubbard's
+Commando): his players keep the gate on for one frame and play the sound
+(noise burst, octave arpeggio) in the release, and their pulse sweeps pause
+on each note's first frame. The importer used to see every note as a new
+sound, ran out of instruments and fell back to merging them with any ADSR
+(74% of the notes got the wrong AD/SR, start pulse rounded to $800). Now:
+  - a pulse sweep that pauses or turns around on the first frame goes on
+    (no pulse program for the note)
+  - gate off before the next row: the wave program turns the gate off and
+    goes on while the release is heard (linear model of the SID release
+    times); no keyoff for those notes. Tied notes' programs also stop when
+    the release has died down (the hardrestart gap is silent)
+  - noise rows follow the note in a tone or at the note's pitch/octaves,
+    else they are absolute (fixed-pitch drums)
+  - detail levels: pulse first, then program length, ADSR last; AD and SR
+    never both different from the note (one command sets the other); the
+    start pulse is rounded to $100 at most; identical programs count once
+    against the 255 table rows; out of instruments, the most alike by ADSR
+Measured by emulating the original and the packed result and comparing the
+registers note by note (ADSR at the attack, waveform+gate over the audible
+frames, pulse): Commando subtune 1 ADSR 10-40% -> 100%, waveforms 0-51% ->
+100% per voice; subtune 2 (all 11 imported) ADSR 0-33% -> 100%, waveforms
+with gate 0-66% -> 100%; Ghosts'n Goblins subtune 2 ADSR 40/84% -> 100%;
+Rambo subtune 1, Ultima IV, Hypa-Ball unchanged. EXACT round trip: 462
+byte-identical repacks, 70 structurally same, 0 failures.
+Building the harness with llvm-mingw clang needs -U__WIN32__ (greloc.c
+otherwise expects gt2reloc's STDOUT/STDERR variables).
+
+APPROX gate lengths (same day; Hypa-Ball, Ghosts'n Goblins): sustained notes
+released 2-3 frames early. The player reads the next row (a keyoff, or the
+next note with its hardrestart) the current instrument's gatetimer of ticks
+before the row, and the importer used to put the keyoff on the row where
+the gate went off, with gatetimer 2, and took a note's gatetimer from the
+gap before it (in the player it times the note's own gate-off). Now:
+  - the gatetimer bits are split: $80/$40 (no hardrestart / legato) from
+    how the note starts, the timer from when its own gate goes off (through
+    the legato notes that follow it). The gate stays on as many ticks as in
+    the recording, counted from the start of the note's row (where the
+    player turns it on with the first waveform); the timer picks the tick
+    within the row, the keyoff (or the next note's row) the row. A gate
+    going off on a row's start comes 1 tick early (the timer is 1 to
+    tempo-1). Converted to the song's ticks when the speed is fitted
+  - the keyoff row is chosen with the instrument's actual gatetimer; a
+    tied note whose next note is off the grid gets a keyoff when the next
+    row is too far for a gatetimer
+  - short-gate programs count the player's first-wave frame (gate on there)
+  - detail levels: exact gate timing at the first two, +-1 tick for three,
+    then any (before the wave programs get shorter)
+Gate length from the gate-on edge, original vs packed result, notes whose
+gate goes off before the next one: Commando subtune 1 43/0/75% exact ->
+100/100/100%, subtune 2 (all imported) 0/0/0% -> 100% exact; Hypa-Ball
+33/73/75% within 1 tick -> 100% (all 1 tick: gates ending on a row's start);
+Ghosts'n Goblins subtune 2 0/13/0% within 1 -> 100%; Rambo subtune 1
+22/5/20% -> 100/99/100% within 1 (voice 0 100% exact). ADSR and waveforms
+unchanged, the same detail levels as before (Rambo with all 23 subtunes is
+at the lowest either way; it doesn't pack yet: "pattern too complex").
+EXACT round trip unchanged.

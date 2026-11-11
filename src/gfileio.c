@@ -17,7 +17,7 @@ static int sidimportoptionsset = 0;
 // Set by gt_openfile_direct(): SID files are converted without the dialog
 static int sidimportdirect = 0;
 
-static int importsid(const char *path, const SID2SNG_OPTIONS *opt, int quiet);
+static int importsid(const char *path, const SID2SNG_OPTIONS *opt);
 
 /*
  * Path helpers
@@ -357,27 +357,31 @@ int gt_importsid(const char *path)
   }
   // Opened from the Finder or the command line: convert at once with the
   // options last used
-  if (sidimportdirect) return importsid(path, &sidimportoptions, 1);
+  if (sidimportdirect) return importsid(path, &sidimportoptions);
   gui_opensidimport(path);
   return 1;
 }
 
 int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt)
 {
-  return importsid(path, opt, 0);
+  return importsid(path, opt);
 }
 
-// Converts and loads a SID file. quiet: no box telling how it went when the
-// conversion worked (only the status message)
-static int importsid(const char *path, const SID2SNG_OPTIONS *opt, int quiet)
+// Converts and loads a SID file, and sets the editor to play it as the SID
+// does: speed multiplier, PAL/NTSC, hardrestart ADSR (these are editor
+// settings, they stay for the songs after). How it went is shown in the
+// status bar (a box only when it fails)
+static int importsid(const char *path, const SID2SNG_OPTIONS *opt)
 {
   char temppath[MAX_PATHNAME];
   char report[1024];
+  char speed[64];
+  SID2SNG_PLAYBACK pb;
 
   stopsong();
   tempfilename("goattrk2-sid.sng", temppath, MAX_PATHNAME);
   report[0] = 0;
-  if (!sid2sng(path, temppath, opt, report, sizeof report))
+  if (!sid2sng_play(path, temppath, opt, &pb, report, sizeof report))
   {
     gui_alert("SID import failed", report);
     return 0;
@@ -387,8 +391,15 @@ static int importsid(const char *path, const SID2SNG_OPTIONS *opt, int quiet)
     gui_alert("SID import failed", "Could not load the converted song");
     return 0;
   }
-  if (!quiet) gui_alert("SID file imported", report);
-  gui_message("Imported %s", gt_basename(path));
+
+  editorInfo.ntsc = pb.ntsc;
+  if (pb.multiplier >= 0) editorInfo.multiplier = pb.multiplier;
+  if (pb.adparam >= 0) editorInfo.adparam = pb.adparam;
+  do_sound_init();
+  if (editorInfo.multiplier) snprintf(speed, sizeof speed, "%dx", editorInfo.multiplier);
+  else snprintf(speed, sizeof speed, "25Hz");
+  gui_message("Imported %s, playing at %s %s%s: %s", gt_basename(path), speed, editorInfo.ntsc ? "NTSC" : "PAL",
+    (pb.multiplier < 0) ? " (no speed fits)" : "", report);
   return 1;
 }
 
