@@ -80,7 +80,7 @@ static void channelheader(int c, ImVec2 p, float w, float h, bool focused)
   {
     float x = p.x + 12.0f + fs * 1.2f;
     ImGui::SetCursorScreenPos(ImVec2(x, p.y + 4.0f));
-    if (iconbutton("##prev", ICON_PREV, false, 0, ImVec2(bh * 0.8f, bh), "Previous pattern (<)"))
+    if (iconbutton("##prev", ICON_PREV, false, 0, ImVec2(bh * 0.8f, bh), "Previous pattern ([)"))
     {
       editorInfo.epchn = c;
       prevpattern();
@@ -92,7 +92,7 @@ static void channelheader(int c, ImVec2 p, float w, float h, bool focused)
     x += ImGui::CalcTextSize("00").x + 4.0f;
     ImGui::PopFont();
     ImGui::SetCursorScreenPos(ImVec2(x, p.y + 4.0f));
-    if (iconbutton("##next", ICON_NEXT, false, 0, ImVec2(bh * 0.8f, bh), "Next pattern (>)"))
+    if (iconbutton("##next", ICON_NEXT, false, 0, ImVec2(bh * 0.8f, bh), "Next pattern (])"))
     {
       editorInfo.epchn = c;
       nextpattern();

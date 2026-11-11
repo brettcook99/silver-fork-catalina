@@ -204,7 +204,7 @@ may want. For example "goattrk2 dojo.sng -s1 -e1" to set 1x-speed mode and SID
 model 8580 and to load "dojo.sng" on startup.
 
 -Axx Set hard restart ADSR parameter in hex. DEFAULT=0F00
--Bxx Set sound buffer length in milliseconds DEFAULT=100
+-Bxx Set sound buffer length in milliseconds DEFAULT=25
 -Cxx Use CatWeasel MK3 PCI SID (0 = off, 1 = on)
 -Dxx Pattern row display (0 = decimal, 1 = hex, 2 = decimal w/dots, 3 = hex w/dots)
 -Exx Set emulated SID model (0 = 6581 1 = 8580) DEFAULT=6581
@@ -262,7 +262,10 @@ with the import options used last. A file dropped on the window is only
 loaded.
 
 Try the command line options if there are any problems. For example, if you
-experience choppy audio you can increase audio buffering with -B option. SDL
+experience choppy audio you can increase audio buffering with -B option (the
+default is 25 ms, so that notes played on the keyboard or a MIDI keyboard are
+heard right away; it used to be 100 ms, and a config file still holding 100 gets
+25). SDL
 seems to have trouble with some soundcards under Windows; you might want to
 try even a 500ms buffer, or tweak the hardware acceleration level of the
 soundcard (from Control Panel). Also, reSID interpolation will take remarkably
@@ -336,8 +339,9 @@ parameter to zero to achieve the maximum stability (less accurate GUI).
 This program is mainly operated on keyboard. For a list of keyboard commands
 press F12 (online help) in the tracker or see the table below:
 
-NOTE: SHIFT & CTRL are interchangeable in the commands. You can also use [ ]
-or ( ) instead of < >.
+NOTE: SHIFT & CTRL are interchangeable in the commands. In the song edit mode
+you can also use [ ] or ( ) instead of < >. In the pattern edit mode < > select
+the instrument and [ ] the pattern.
 
 2.3.1 General keys
 ------------------
@@ -379,9 +383,9 @@ CTRL+NUMPAD 1,2,3 Put the cursor on track (channel) 1, 2 or 3 in the pattern
 2.3.2 Pattern edit mode
 -----------------------
 
-- +         Select instrument
+- + or < >  Select instrument
 / *         Select octave
-< >         Select pattern
+[ ]         Select pattern
 BACKQUOTE   Select channel
 0-9 & A-F   Enter parameters
 SPACE       Switch between jam/editmode
@@ -416,6 +420,14 @@ SHIFT+E,R   Copy,paste commands
 SHIFT+Z     Cycle autoadvance-mode
 NUMPAD 1-8  Go to row 0, 8, 16, 24, 32, 40, 48 or 56
 Mouse wheel Scroll the pattern
+
+A MIDI keyboard enters notes like the note keys. For chords, set INPUT (at
+the bottom of the retro screen; CHORD in the control bar of the modern
+interface) to 2 or 3 PATTERNS by clicking it (right-click: back) or with the
+mouse wheel: the notes held down together then go to that many channels, the
+first to the cursor's channel and the others to the next channels, all on one
+row, and the cursor advances once per chord. Keys beyond the last channel are
+left out. With 1 PATTERN every note goes to the cursor's channel.
 
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and
@@ -602,6 +614,13 @@ clicking. Doubleclick outside the selector to cancel.
 
 The mouse wheel scrolls the pattern editor. While the song plays, the view
 then stops following the playback until playback is started again.
+
+In the retro interface the mouse wheel over a value changes it (wheel up =
+bigger): the instrument number and parameters (over the left digit in steps
+of $10; the attack, decay, sustain and release digits each on their own), the
+pattern numbers in the orderlist (the channel's pattern editor then shows the
+pattern), the PATT. numbers above the patterns, the subtune, the octave and
+INPUT. Each step can be undone.
 
 
 3. Song data

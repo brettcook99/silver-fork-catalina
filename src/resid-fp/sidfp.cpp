@@ -716,8 +716,16 @@ int SIDFP::clock_resample_interpolate(cycle_count& delta_t, short* buf, int n,
     float next_sample_offset = sample_offset + cycles_per_sample;
     /* full clocks left to next sample */
     int delta_t_sample = static_cast<int>(next_sample_offset);
-    if (delta_t_sample > delta_t || s >= n)
+    if (delta_t_sample > delta_t)
       break;
+    /* The buffer is full: the cycles left (in delta_t) are for the next
+     * call, as in reSID and clock_interpolate(). Clocking them below made
+     * sample_offset negative, by more than a sample now and then, and the
+     * next call then read before the FIR tables: GoatTracker crashed now and
+     * then while playing (with reSID-fp, the default), more often with short
+     * sound buffers, which split the output into more pieces */
+    if (s >= n)
+      return s;
 
     /* clock forward delta_t_sample samples */
     for (int i = 0; i < delta_t_sample; i++) {

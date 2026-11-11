@@ -32,10 +32,27 @@ static void retromainloop(void);
 static int chooseinterface(void);
 static void presskey(int newrawkey, int newkey, int shift);
 static void startplay(int mode);
+static void midichordassign(void);
 
 int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
 int recordmode = 1;
+
+// MIDI chord input: with 2 or 3, the notes of a chord (keys held down
+// together on the MIDI keyboard) go to that many channels: the first note to
+// the cursor's channel, the next ones to the following channels (after
+// channel 3 comes channel 1), all on the row of the first note. Keys beyond
+// the last of these channels are left out. 1 = the usual input: every note
+// goes to the cursor's channel
+int midichord = 1;
+// Where the current MIDI note-on goes (set by midichordassign()): the
+// channel (-1 = left out) and the row. The first note of a chord works
+// exactly like a note key
+int midichordchn = 0;
+int midichordrow = 0;
+int midichordfirst = 1;
+// The channel of the chord's first note
+int midichordbase = 0;
 int followplay = 0;
 int followmode = 1;
 int hexnybble = -1;
@@ -107,7 +124,7 @@ char* usage[] = {
 	"Usage: goattrk2 [songname] [options]",
 	"Options:",
 	"-Axx Set ADSR parameter for hardrestart in hex. DEFAULT=0F00",
-	"-Bxx Set sound buffer length in milliseconds DEFAULT=100",
+	"-Bxx Set sound buffer length in milliseconds DEFAULT=25",
 	"-Cxx Use CatWeasel MK3 PCI SID (0 = off, 1 = on)",
 	"-Dxx Pattern row display (0 = decimal, 1 = hex, 2 = decimal w/dots, 3 = hex w/dots)",
 	"-Exx Set emulated SID model (0 = 6581 1 = 8580) DEFAULT=8580",
@@ -235,6 +252,10 @@ int main(int argc, char **argv)
 		getparam(configfile, &textsizepercent);
 		getparam(configfile, &uimode);
 		fclose(configfile);
+
+		// A config file saved with the old default sound buffer gets the
+		// new, shorter one (a length set by hand stays)
+		if (b == OLDDEFAULTBUF) b = DEFAULTBUF;
 	}
 
 	// Init pathnames
@@ -749,8 +770,31 @@ static void retromainloop(void)
 
 		if ((input) && (!exitprogram))
 		{
+			int midi = (midinoteon) || (midinoteoff);
+
 			converthex();
 			docommand();
+
+			// More MIDI notes waiting (the rest of a chord) are handled now,
+			// not one per frame. The mouse has been handled already
+			if (midi)
+			{
+				int mb = mouseb, pmb = prevmouseb, mw = mousewheel;
+
+				mouseb = 0;
+				prevmouseb = 0;
+				mousewheel = 0;
+				while ((!exitprogram) && (input_nextmidi()))
+				{
+					key = 0;
+					rawkey = 0;
+					hexnybble = -1;
+					docommand();
+				}
+				mouseb = mb;
+				prevmouseb = pmb;
+				mousewheel = mw;
+			}
 		}
 
 		// Menus, drag & drop, commands from the dialogs
@@ -857,6 +901,9 @@ void toggle_interpolation_mode() {
 
 void docommand(void)
 {
+	// Where a MIDI note goes (MIDI chord input)
+	if (midinoteon) midichordassign();
+
 	// Menu bar & CMD key commands
 	if (menucommands()) return;
 
@@ -903,6 +950,12 @@ void docommand(void)
 			undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST, i + (editorInfo.esnum*MAX_CHN), UNDO_AREA_DIRTY_CHECK);
 		}
 		undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST_LEN, 0, UNDO_AREA_DIRTY_CHECK);
+		// The notes of a MIDI chord go to the other channels' patterns too
+		if ((midinoteon) && (midichord > 1))
+		{
+			for (int i = 0;i < MAX_CHN;i++)
+				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[i].epnum, UNDO_AREA_DIRTY_CHECK);
+		}
 
 		patterncommands();
 		break;
@@ -1020,35 +1073,108 @@ int numpadcommands(void)
 	return 0;
 }
 
+// MIDI keys held down: the channel each plays on + 1 (-1 = left out of the
+// chord, 0 = not held)
+static int midiheldchn[LASTNOTE + 1];
+static int midiheldcount = 0;
+// The MIDI note each channel plays (0 = none)
+static int midichnnote[MAX_CHN];
+// The chord being played: notes so far, row of the first note
+static int chordnotes = 0;
+static int chordrow = 0;
+
+// Sets the number of channels MIDI chords go to (1-3, see midichord). The
+// notes still sounding from the MIDI keyboard are released, and the keys
+// still held forgotten (so that a lost note-off can't block chords for good)
+void setmidichord(int channels)
+{
+	int c;
+
+	if (channels < 1) channels = 1;
+	if (channels > MAX_CHN) channels = MAX_CHN;
+	midichord = channels;
+
+	for (c = 0; c < MAX_CHN; c++)
+	{
+		if ((midichnnote[c]) && (!gui_designeractive())) releasenote(c);
+		midichnnote[c] = 0;
+	}
+	memset(midiheldchn, 0, sizeof midiheldchn);
+	midiheldcount = 0;
+
+	if (midichord > 1)
+		gui_message("MIDI chords: held notes go to %d channels", midichord);
+	else
+		gui_message("MIDI input: notes go to the cursor's channel");
+}
+
+// Decides where the MIDI note-on midinoteon goes. A note played while no
+// other key is held starts a chord and goes to the cursor (like a note key);
+// the others go to the next channels, on the chord's row
+static void midichordassign(void)
+{
+	int note = midinoteon;
+
+	if ((note < 0) || (note > LASTNOTE)) return;
+
+	if ((midichord <= 1) || (!midiheldcount))
+	{
+		midichordfirst = 1;
+		midichordchn = editorInfo.epchn;
+		midichordrow = editorInfo.eppos;
+		midichordbase = editorInfo.epchn;
+		chordrow = editorInfo.eppos;
+		chordnotes = 1;
+	}
+	else
+	{
+		midichordfirst = 0;
+		midichordrow = chordrow;
+		if (chordnotes < midichord)
+		{
+			midichordchn = (midichordbase + chordnotes) % MAX_CHN;
+			chordnotes++;
+		}
+		else midichordchn = -1;
+	}
+
+	// A key that sends note-on twice is counted once
+	if (!midiheldchn[note]) midiheldcount++;
+	midiheldchn[note] = (midichordchn >= 0) ? midichordchn + 1 : -1;
+	if (midichordchn >= 0) midichnnote[midichordchn] = note;
+}
+
 void midicommands(void)
 {
-	// Last note played from the MIDI keyboard, and the channel it plays on
-	static int lastnote = 0;
-	static int lastchn = 0;
+	int designer = gui_designeractive();
 
 	// The instrument designer plays its whole patch
-	if (gui_designeractive())
+	if (designer)
 	{
 		if ((midinoteon) || (midinoteoff)) gui_designermidi(midinoteon, midinoteoff);
-		return;
 	}
-
-	if (midinoteon)
+	else if ((midinoteon) && (midichordchn >= 0))
 	{
 		// The pattern editor enters & plays the note like a note key does.
-		// Elsewhere (except the songname editor) the note is just played
+		// Elsewhere (except the songname editor) the note is just played,
+		// the notes of a chord on their channels
 		if ((editorInfo.editmode != EDIT_PATTERN) && (editorInfo.editmode != EDIT_NAMES))
-			playtestnote(midinoteon, editorInfo.einum, editorInfo.epchn);
-		lastnote = midinoteon;
-		lastchn = editorInfo.epchn;
+			playtestnote(midinoteon, editorInfo.einum, midichordchn);
 	}
 
-	// Releasing the key that played last releases the note, like on a
-	// synth. Releasing a key that is no longer sounding does nothing
-	if ((midinoteoff) && (midinoteoff == lastnote))
+	// Releasing a key releases its note, like on a synth, unless another
+	// key has taken the channel meanwhile
+	if ((midinoteoff > 0) && (midinoteoff <= LASTNOTE) && (midiheldchn[midinoteoff]))
 	{
-		releasenote(lastchn);
-		lastnote = 0;
+		int c = midiheldchn[midinoteoff] - 1;
+
+		midiheldchn[midinoteoff] = 0;
+		if (midiheldcount > 0) midiheldcount--;
+		if ((c >= 0) && (midichnnote[c] == midinoteoff))
+		{
+			if (!designer) releasenote(c);
+			midichnnote[c] = 0;
+		}
 	}
 }
 
@@ -1096,13 +1222,17 @@ void generalcommands(void)
 		}
 		break;
 
+	// < > select the instrument in the instrument & table editors and the
+	// pattern editor (where [ ] select the pattern)
 	case '<':
-		if (((editorInfo.editmode == EDIT_INSTRUMENT) && (editorInfo.eipos != 9)) || (editorInfo.editmode == EDIT_TABLES))
+		if (((editorInfo.editmode == EDIT_INSTRUMENT) && (editorInfo.eipos != 9)) || (editorInfo.editmode == EDIT_TABLES) ||
+			(editorInfo.editmode == EDIT_PATTERN))
 			previnstr();
 		break;
 
 	case '>':
-		if (((editorInfo.editmode == EDIT_INSTRUMENT) && (editorInfo.eipos != 9)) || (editorInfo.editmode == EDIT_TABLES))
+		if (((editorInfo.editmode == EDIT_INSTRUMENT) && (editorInfo.eipos != 9)) || (editorInfo.editmode == EDIT_TABLES) ||
+			(editorInfo.editmode == EDIT_PATTERN))
 			nextinstr();
 		break;
 

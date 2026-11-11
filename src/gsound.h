@@ -18,7 +18,12 @@
 #define MAXMIXRATE 48000
 #define MINBUF 20
 #define MAXBUF 2000
-#define DEFAULTBUF 100
+// 25 ms = 1024 samples at 44.1 / 48 kHz (the length is rounded down to a
+// power of two). The old default, 100 ms, became 4096 samples: notes played
+// from the keyboard or MIDI were heard up to 0.2 s late
+#define DEFAULTBUF 25
+// The default before, still in old config files
+#define OLDDEFAULTBUF 100
 #define DEFAULTMIXRATE 44100
 
 #define PALFRAMERATE 50

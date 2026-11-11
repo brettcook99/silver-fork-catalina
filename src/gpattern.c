@@ -5,6 +5,7 @@
 #define GPATTERN_C
 
 #include "goattrk2.h"
+#include "gui/gui.h"
 
 EDITOR_INFO editorInfo;
 
@@ -80,18 +81,50 @@ int notekeytonote(int key)
   return newnote;
 }
 
+// A note of a MIDI chord after the first (see midichord): in edit mode it is
+// entered on its channel, on the row of the chord's first note, and it is
+// played on that channel. Keys beyond the chord's channels do nothing
+static void midichordnote(int note)
+{
+  int c = midichordchn;
+  int p, i, slot;
+
+  if ((c < 0) || (c >= MAX_CHN)) return;
+  p = editorUndoInfo.editorInfo[c].epnum;
+  if ((recordmode) && (midichordrow >= 0) && (midichordrow < pattlen[p]))
+  {
+    // Not over an earlier note of the chord: a channel before this one in
+    // the chord may show the same pattern
+    int shared = -1;
+    slot = (c - midichordbase + MAX_CHN) % MAX_CHN;
+    for (i = 0; i < slot; i++)
+    {
+      int c2 = (midichordbase + i) % MAX_CHN;
+      if (editorUndoInfo.editorInfo[c2].epnum == p) shared = c2;
+    }
+    if (shared < 0)
+    {
+      pattern[p][midichordrow*4] = note;
+      pattern[p][midichordrow*4+1] = editorInfo.einum;
+    }
+    else
+      gui_message("Chord note not entered: channels %d and %d show the same pattern", shared + 1, c + 1);
+  }
+  playtestnote(note, editorInfo.einum, c);
+}
+
 void patterncommands(void)
 {
   int c, scrrep;
 
+  // [ ] select the pattern. < > select the instrument here too (as in the
+  // instrument editor), see generalcommands()
   switch(key)
   {
-    case '<':
     case '[':
     prevpattern();
     break;
 
-    case '>':
     case ']':
     nextpattern();
     break;
@@ -149,8 +182,13 @@ void patterncommands(void)
     }
 
     if (newnote > LASTNOTE) newnote = -1;
-    // A note from a MIDI keyboard works like a note key, in any column
-    if (midinoteon) newnote = midinoteon;
+    // A note from a MIDI keyboard works like a note key, in any column. The
+    // other notes of a chord (MIDI chord input) go to the next channels
+    if (midinoteon)
+    {
+      if (midichordfirst) newnote = midinoteon;
+      else midichordnote(midinoteon);
+    }
     if ((rawkey == 0x08) && (!editorInfo.epcolumn)) newnote = REST;
     if ((rawkey == 0x14) && (!editorInfo.epcolumn)) newnote = KEYOFF;
     if (rawkey == KEY_ENTER)

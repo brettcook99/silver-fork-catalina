@@ -12,6 +12,10 @@
 
 static char timechar[] = {':', ' '};
 
+// The message area on the bottom two rows, right of the INPUT setting
+#define MSGCOLUMN 29
+#define MSGWIDTH 48
+
 // Starts playing like F1-F3 (SHIFT: the other follow way)
 static void retroplay(int mode)
 {
@@ -437,6 +441,15 @@ void retro_printstatus(void)
 
   if (isplaying()) printtext(10, 35, CTITLE, "PLAYING");
   else printtext(10, 35, CTITLE, "STOPPED");
+
+  // MIDI chord input: how many patterns (channels) the notes of a chord
+  // played on the MIDI keyboard go to. Click or wheel to change
+  printtext(18, 35, CTITLE, "INPUT");
+  if (midichord > 1)
+    sprintf(textbuffer, "%d PATTERNS", midichord);
+  else
+    sprintf(textbuffer, "%d PATTERN ", midichord);
+  printtext(18, 36, CEDIT, textbuffer);
   if (editorInfo.multiplier)
   {
     if (!editorInfo.ntsc)
@@ -454,16 +467,33 @@ void retro_printstatus(void)
 
   printtext(10, 36, CEDIT, textbuffer);
 
-  // Messages (file opened, saved, imported...) where the credits used to be
-  printblankc(20, 35, CNORMAL, 57);
-  printblankc(20, 36, CNORMAL, 57);
+  // Messages (file opened, saved, imported...) where the credits used to be.
+  // A long one goes on two lines
+  printblankc(MSGCOLUMN, 35, CNORMAL, MSGWIDTH);
+  printblankc(MSGCOLUMN, 36, CNORMAL, MSGWIDTH);
   {
     const char *msg = gui_currentmessage();
     if (msg)
     {
-      char line[58];
-      snprintf(line, sizeof line, "%s", msg);
-      printtext(20, 36, CTITLE, line);
+      char line[MSGWIDTH + 1];
+      int len = (int)strlen(msg);
+
+      if (len <= MSGWIDTH)
+      {
+        snprintf(line, sizeof line, "%s", msg);
+        printtext(MSGCOLUMN, 36, CTITLE, line);
+      }
+      else
+      {
+        int cut = MSGWIDTH;
+        while ((cut > MSGWIDTH / 2) && (msg[cut] != ' ')) cut--;
+        if (msg[cut] != ' ') cut = MSGWIDTH;
+        snprintf(line, sizeof line, "%.*s", cut, msg);
+        printtext(MSGCOLUMN, 35, CTITLE, line);
+        while (msg[cut] == ' ') cut++;
+        snprintf(line, sizeof line, "%s", msg + cut);
+        printtext(MSGCOLUMN, 36, CTITLE, line);
+      }
     }
   }
 
@@ -486,14 +516,150 @@ void retro_printstatus(void)
     else printtext(78, 36, CTITLE, "U");
 }
 
+static int clampvalue(int value, int min, int max)
+{
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+// Mouse wheel over a value changes it (up = bigger): the values that the
+// mouse buttons change (pattern, subtune & instrument numbers, octave, MIDI
+// input), the instrument parameters and the pattern numbers in the
+// orderlist. Returns nonzero if the wheel was over one of them
+static int retrowheel(void)
+{
+  int d = -mousewheel;
+  int c;
+
+  // Pattern number of a channel ("PATT.xx")
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if ((mousey == 2) && (mousex >= 8 + c * 15) && (mousex <= 14 + c * 15))
+    {
+      int chn = editorInfo.epchn;
+      editorInfo.epchn = c;
+      for (; d > 0; d--) nextpattern();
+      for (; d < 0; d++) prevpattern();
+      editorInfo.epchn = chn;
+      if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
+        editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+      return 1;
+    }
+  }
+
+  // Subtune number
+  if ((mousey == 2) && (mousex >= 63 + 10) && (mousex <= 64 + 10))
+  {
+    for (; d > 0; d--) nextsong();
+    for (; d < 0; d++) prevsong();
+    return 1;
+  }
+
+  // Pattern numbers in the orderlist. The channel's pattern editor shows the
+  // pattern chosen (as RETURN on it does)
+  if ((mousey >= 3) && (mousey < 3 + MAX_CHN) && (mousex >= 44 + 10) && (mousex < 44 + 10 + VISIBLEORDERLIST * 3))
+  {
+    int chn = mousey - 3;
+    int pos = editorInfo.esview + (mousex - 44 - 10) / 3;
+    unsigned char *entry;
+    int patt;
+
+    if ((pos < 0) || (pos >= songlen[editorInfo.esnum][chn])) return 1;
+    entry = &songorder[editorInfo.esnum][chn][pos];
+    if (*entry >= MAX_PATT) return 1;
+
+    patt = clampvalue(*entry + d, 0, MAX_PATT - 1);
+    *entry = (unsigned char)patt;
+    undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST, chn + editorInfo.esnum * MAX_CHN, UNDO_AREA_DIRTY_CHECK);
+
+    editorUndoInfo.editorInfo[chn].epnum = patt;
+    if ((editorInfo.epchn == chn) && (editorInfo.eppos > pattlen[patt])) editorInfo.eppos = pattlen[patt];
+    if (editorInfo.epmarkchn == chn) editorInfo.epmarkchn = -1;
+    return 1;
+  }
+
+  // Instrument number
+  if ((mousey == 7) && (mousex >= 40 + 10) && (mousex <= 57 + 10))
+  {
+    for (; d > 0; d--) nextinstr();
+    for (; d < 0; d++) previnstr();
+    return 1;
+  }
+
+  // Instrument parameters. Over the left digit in steps of $10. In the
+  // attack/decay and sustain/release the digits are values of their own
+  {
+    int param = -1;
+    int high = 0;
+
+    if ((mousey >= 8) && (mousey <= 12) && (mousex >= 40 + 10) && (mousex <= 57 + 10))
+    {
+      param = mousey - 8;
+      high = (mousex == 56 + 10);
+    }
+    if ((mousey >= 8) && (mousey <= 11) && (mousex >= 60 + 10) && (mousex <= 77 + 10))
+    {
+      param = mousey - 8 + 5;
+      high = (mousex == 76 + 10);
+    }
+    if (param >= 0)
+    {
+      // Instrument 0 is "no instrument" and can't be edited
+      if (editorInfo.einum)
+      {
+        INSTR *iptr = &instr[editorInfo.einum];
+        unsigned char *ptr = &iptr->ad + param;
+        int v = *ptr;
+
+        if (param < 2)
+        {
+          int hi = v >> 4;
+          int lo = v & 0x0f;
+          if (high) hi = clampvalue(hi + d, 0, 15);
+          else lo = clampvalue(lo + d, 0, 15);
+          v = (hi << 4) | lo;
+        }
+        else v = clampvalue(v + d * (high ? 0x10 : 1), 0, 0xff);
+        *ptr = (unsigned char)v;
+        // As when typing: the gate timer can't be 0
+        if (!(iptr->gatetimer & 0x3f)) iptr->gatetimer |= 1;
+        undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, editorInfo.einum, UNDO_AREA_DIRTY_CHECK);
+
+        // The line of the value changed is highlighted
+        editorInfo.eipos = param;
+        editorInfo.eicolumn = high ? 0 : 1;
+      }
+      return 1;
+    }
+  }
+
+  // Octave
+  if ((mousey == 35) && (mousex <= 7))
+  {
+    editorInfo.epoctave = clampvalue(editorInfo.epoctave + d, 0, 7);
+    return 1;
+  }
+
+  // MIDI input (chords on 1-3 patterns)
+  if ((mousey >= 35) && (mousex >= 18) && (mousex <= 27))
+  {
+    setmidichord(clampvalue(midichord + d, 1, MAX_CHN));
+    return 1;
+  }
+
+  return 0;
+}
+
 void retro_mousecommands(void)
 {
   int c;
 
-  // Mouse wheel over the patterns scrolls the pattern editor. While the song
-  // plays, the view then stops following the playback (as in the modern
-  // interface) until playback is started again or stops
-  if ((mousewheel) && (mousey >= 2) && (mousey <= 2 + VISIBLEPATTROWS + 1) && (mousex < MAX_CHN * 15))
+  // Mouse wheel over a value changes it. Over the patterns it scrolls the
+  // pattern editor. While the song plays, the view then stops following the
+  // playback (as in the modern interface) until playback is started again
+  // or stops
+  if ((mousewheel) && (!retrowheel()) && (mousey >= 2) && (mousey <= 2 + VISIBLEPATTROWS + 1) && (mousex < MAX_CHN * 15))
   {
     if ((isplaying()) && (followplay)) followsuspended = 1;
     patternscroll(mousewheel);
@@ -693,6 +859,12 @@ void retro_mousecommands(void)
   if ((!prevmouseb) && (mousex <= 7) && (mousey == 24 + 3 + 9))
   {
     recordmode ^= 1;
+  }
+  // MIDI input (chords on 1-3 patterns): left button = more, right = fewer
+  if ((!prevmouseb) && (mousex >= 18) && (mousex <= 27) && (mousey >= 23 + 3 + 9))
+  {
+    if (mouseb & MOUSEB_LEFT) setmidichord(midichord < MAX_CHN ? midichord + 1 : 1);
+    if (mouseb & MOUSEB_RIGHT) setmidichord(midichord > 1 ? midichord - 1 : MAX_CHN);
   }
   for (c = 0; c < MAX_CHN; c++)
   {

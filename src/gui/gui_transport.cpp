@@ -99,7 +99,21 @@ void gui::drawcontrolbar(float height)
   if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "Instrument designer: a C64 screen laid out like chipsynth C64 (CTRL+D, ALT+numpad 5)"))
 #endif
     cmd_post(GTCMD_DESIGNER);
-  x += bw + 16.0f;
+  x += bw + 12.0f;
+
+  // MIDI chord input: notes held together on the MIDI keyboard go to 1-3
+  // tracks. Click = more, right-click = fewer
+  ImGui::SetCursorScreenPos(ImVec2(x, y + (bh - (fs + 4.0f)) * 0.5f));
+  snprintf(text, sizeof text, "CHORD %d##midichord", midichord);
+  if (togglechip(text, midichord > 1,
+    midichord > 1 ? "MIDI chords: the notes you hold down together on the MIDI keyboard go to this many tracks, "
+                    "starting at the cursor's track, all on one row. Click for more, right-click for fewer" :
+                    "MIDI chords off: every MIDI note goes to the cursor's track. Click to send the notes of a chord "
+                    "to 2 or 3 tracks, right-click for fewer"))
+    setmidichord(midichord < MAX_CHN ? midichord + 1 : 1);
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+    setmidichord(midichord > 1 ? midichord - 1 : MAX_CHN);
+  x += ImGui::GetItemRectSize().x + 16.0f;
 
   // The display
   {
