@@ -13,13 +13,28 @@
 //        names, unused patterns/instruments/table rows, and the original
 //        numbering (instruments come in hardrestart/no-HR/legato order).
 //
-// APPROX For any SID with a play routine. Each subtune (all of them, up to
-//        the 32 a song can have, or the one chosen) is run on an emulated
-//        6502 for a while and the SID registers are recorded every call.
+// APPROX For any SID. Each subtune (all of them, up to the 32 a song can
+//        have, or the one chosen) is played on an emulated C64 for a while
+//        and the SID registers are recorded every call of its player: a
+//        PSID's play routine; an RSID runs from its own interrupts (CIA
+//        timers, VIC-II raster interrupt, the KERNAL's interrupt entry &
+//        exit emulated) and the one that plays the music is recorded.
+//        Voice 3's oscillator & envelope run (ported from reSID), so
+//        players reading OSC3/ENV3 get what a C64 gives; voice 3 switched
+//        off ($D418 bit 7) is left out. Digitized sound (samples played
+//        through the volume register) isn't notes and is left out.
 //        Notes come from gate-on edges (and big pitch changes), instruments
 //        from the ADSR, waveform/pitch sequence (wavetable) and pulse
-//        sweep (pulsetable) of the notes, the filter from the filter
-//        registers (filtertable programs & commands). A note whose gate
+//        sweep (pulsetable) of the notes (a sweep going on through the
+//        notes after: in the first one's pulse program), vibrato as the
+//        instruments' vibrato (fitted to GoatTracker's). A note that differs
+//        from an instrument in one thing (AD, SR, its wave or pulse program:
+//        an arpeggio of its own) shares it, a command on its row sets that.
+//        The filter becomes filtertable programs (set, sweeps, loops) that
+//        are started where the one running stops giving the recorded
+//        filter. The notes are on the frequency table of the base pitch
+//        that fits them (GoatTracker's own, or one for a tune tuned
+//        otherwise: an NTSC tune in NTSC mode, say). A note whose gate
 //        goes off before the next row (drums, plucks) keeps the release in
 //        its instrument: the wave program turns the gate off itself and
 //        plays on while the release is heard. Other notes keep their gate
@@ -29,14 +44,21 @@
 //        when the gate went off on a row's start). When the instruments
 //        don't fit, the pulse is simplified first, then the gate timing,
 //        then the program length, the ADSR last. The rhythm is put on
-//        a grid of rows with a fixed tempo. The result is a starting point
-//        for editing, not a faithful copy: vibrato, slides and anything
-//        changing between rows is simplified. Where a subtune starts
+//        a grid of rows with a fixed tempo (where the tune's timing shifts
+//        a frame or two against it now and then, those frames are left
+//        out). The result is a starting point
+//        for editing, not a faithful copy: slides and anything changing
+//        between rows is simplified. Where a subtune starts
 //        over (the registers repeat to the end of a recording of up to 10
 //        minutes, pulse widths aside), it ends and its orderlists loop
-//        back, so the whole tune fits in few patterns. The subtunes share
-//        the instruments, tables and patterns; when there would be too
-//        many patterns, the ends of the longest subtunes are left out.
+//        back, so the whole tune fits in few patterns; a subtune that stops
+//        (a jingle, a sound effect) ends on empty rows. Each channel is cut
+//        into patterns its own way, the same ones (also transposed: the
+//        orderlist transposes them) only once, patterns that always come
+//        together joined; shorter ones where that makes fewer. A pattern too
+//        big for the player (256 bytes packed) is cut in two. The subtunes
+//        share the instruments, tables and patterns; when there would still
+//        be too many patterns, the ends of the longest subtunes are left out.
 //        A player GoatTracker can't run at the same rate (a CIA timer
 //        that isn't a whole multiple of the frame rate) gets the speed
 //        that fits best, PAL or NTSC, and each subtune the tempo (or
@@ -92,7 +114,18 @@ typedef struct
   int multiplier;         // Speed multiplier 1-16, 0 = 25Hz, -1 = none fits
                           // (EXACT only: APPROX fits the tempos to one)
   int ntsc;               // 1 = NTSC, 0 = PAL
-  int adparam;            // Hardrestart ADSR $0000-$FFFF, -1 = not known
+  int adparam;            // Hardrestart ADSR $0000-$FFFF (APPROX: the one the
+                          // tune uses most, $0F00 if none), -1 = not known
+  int optimizepulse;      // Player optimizations (editor/packer settings):
+  int optimizerealtime;   // 1 on, 0 off, -1 = not known (APPROX: both off,
+                          // so pulse sweeps and effects run every frame)
+  double basepitch;       // Tuning: the base pitch (A-4 in Hz on the PAL
+                          // clock, as the tracker's setting) whose frequency
+                          // table (12 notes an octave) has the notes; 0 =
+                          // GoatTracker's own table, -1 = not known (another
+                          // tuning: a Scala file, other divisions). APPROX:
+                          // the one the tune's notes fit, e.g. 423.87 for an
+                          // NTSC tune played in NTSC mode
 } SID2SNG_PLAYBACK;
 
 void sid2sng_defaults(SID2SNG_OPTIONS *opt);

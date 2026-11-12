@@ -142,6 +142,7 @@ void nextmultiplier(void);
 // The classic online help screen (ghelp.c), used by the retro interface
 void onlinehelp(int standalone, int context);
 void calculatefreqtable(void);
+void setbasepitch(float pitch);
 void setspecialnotenames(void);
 void readscalatuningfile(void);
 

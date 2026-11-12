@@ -1,9 +1,10 @@
 // Test harness: command line packer built from the unmodified greloc.c
 // (GT2RELOC mode). Options as gt2reloc, without its option parsing quirks:
 //   relocharness in.sng out.sid [-Axxxx] [-B1] [-C1] [-D1] [-E1] [-H1] [-I0]
-//     [-J1] [-N] [-Sn] [-Wxx] [-Zxx] [-O0] [-R0] [-Lxxxx]
+//     [-J1] [-N] [-Sn] [-Wxx] [-Zxx] [-O0] [-R0] [-Lxxxx] [-Gbasepitch]
 #include "goattrk2.h"
 #include <sys/stat.h>
+#include <math.h>
 
 EDITOR_INFO editorInfo;
 INSTR instr[MAX_INSTR];
@@ -49,6 +50,22 @@ unsigned char freqtblhi[] = {
   0x8b,0x93,0x9c,0xa5,0xaf,0xb9,0xc4,0xd0,0xdd,0xea,0xf8,0xff};
 
 void stopsong(void) {}
+
+// The frequency table for a base pitch (A-4 in Hz, PAL), as the tracker's
+// calculatefreqtable() makes it (12 notes an octave)
+static void setbasepitch(float basepitch)
+{
+  double basefreq = (double)basepitch * (16777216.0 / 985248.0) * pow(2.0, 0.25) / 32.0;
+  int c;
+  for (c = 0; c < 8 * 12; c++)
+  {
+    double freq = basefreq * pow(2.0, c / 12.0);
+    int intfreq = freq + 0.5;
+    if (intfreq > 0xffff) intfreq = 0xffff;
+    freqtbllo[c] = intfreq & 0xff;
+    freqtblhi[c] = intfreq >> 8;
+  }
+}
 
 // From gsong.c
 void countpatternlengths(void)
@@ -277,6 +294,7 @@ int main(int argc, char **argv)
       case 'Z': sscanf(a + 2, "%x", &zeropageadr); break;
       case 'L': sscanf(a + 2, "%x", &sidaddress); break;
       case 'M': editorInfo.sidmodel = on; break;
+      case 'G': { float g = 0.0f; sscanf(a + 2, "%f", &g); if (g > 0.0f) setbasepitch(g); } break;
     }
   }
   playeradr &= 0xff00;

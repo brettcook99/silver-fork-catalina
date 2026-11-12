@@ -135,6 +135,10 @@ int main(int argc, char **argv)
   else printf("speed multiplier: none fits");
   printf(", %s", pb.ntsc ? "NTSC" : "PAL");
   if (pb.adparam >= 0) printf(", hardrestart ADSR %04X", pb.adparam);
+  if (pb.optimizepulse >= 0) printf(", pulse optimization %s", pb.optimizepulse ? "on" : "off");
+  if (pb.optimizerealtime >= 0) printf(", realtime optimization %s", pb.optimizerealtime ? "on" : "off");
+  if (pb.basepitch > 0.0) printf(", base pitch %.2f", pb.basepitch);
+  else if (pb.basepitch == 0.0) printf(", default frequency table");
   printf("\n");
   return EXIT_SUCCESS;
 }

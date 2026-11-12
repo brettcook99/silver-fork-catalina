@@ -101,6 +101,7 @@ float basepitch = 0.0f;
 float equaldivisionsperoctave = 12.0f;
 int tuningcount = 0;
 double tuning[96];
+static unsigned char defaultfreqtbllo[96], defaultfreqtblhi[96];
 extern unsigned bigwindow;
 
 char configbuf[MAX_PATHNAME];
@@ -469,6 +470,10 @@ int main(int argc, char **argv)
 	if (customclockrate < 100) customclockrate = 0;
 	if (bigwindow < 1) bigwindow = 1;
 	if (bigwindow > 4) bigwindow = 4;
+
+	// The standard frequency table, for setbasepitch()
+	memcpy(defaultfreqtbllo, freqtbllo, sizeof defaultfreqtbllo);
+	memcpy(defaultfreqtblhi, freqtblhi, sizeof defaultfreqtblhi);
 
 	// Read Scala tuning file
 	if (scalatuningfilepath[0] != '0' && scalatuningfilepath[1] != '\0')
@@ -2032,6 +2037,25 @@ void calculatefreqtable()
 			freqtbllo[c] = intfreq & 0xff;
 			freqtblhi[c] = intfreq >> 8;
 		}
+	}
+}
+
+// The tuning a song needs (the SID import gives it, for a tune tuned
+// otherwise than GoatTracker's table: an NTSC tune for its 60 Hz C64, say):
+// the frequency table for a base pitch, A-4 in Hz on the PAL clock with 12
+// notes an octave, or the standard table (0). Like the other editor settings
+// it stays for the songs after, and is saved in the configuration
+void setbasepitch(float pitch)
+{
+	basepitch = (pitch > 0.0f) ? pitch : 0.0f;
+	equaldivisionsperoctave = 12.0f;
+	tuningcount = 0;
+	if (basepitch > 0.0f)
+		calculatefreqtable();
+	else
+	{
+		memcpy(freqtbllo, defaultfreqtbllo, sizeof defaultfreqtbllo);
+		memcpy(freqtblhi, defaultfreqtblhi, sizeof defaultfreqtblhi);
 	}
 }
 

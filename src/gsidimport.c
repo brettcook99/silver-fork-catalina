@@ -699,6 +699,8 @@ static int unpackpattern(const unsigned char *mem, unsigned adr, unsigned end, u
   return pos;
 }
 
+static double packedtuning(SCAN *sc, unsigned songtbllo);
+
 static int exactconvert(const SIDFILE *sf, SNGDATA *sng, SID2SNG_PLAYBACK *pb, char *report, int reportsize)
 {
   unsigned char *mem;
@@ -973,6 +975,8 @@ static int exactconvert(const SIDFILE *sf, SNGDATA *sng, SID2SNG_PLAYBACK *pb, c
   // How it plays: no speed code in the player is 1x
   pb->multiplier = (gp.multiplier < 0) ? 1 : ((gp.multiplier > 16) ? -1 : gp.multiplier);
   pb->adparam = gp.hrcode ? (int)gp.adparam : -1;
+  pb->basepitch = packedtuning(&sc, gp.songtbllo);
+  if (pb->basepitch > 0.0) addreport(report, reportsize, ", tuned to A-4 = %.2f Hz (base pitch)", pb->basepitch);
   ok = 1;
 
 done:
@@ -996,11 +1000,17 @@ done:
 #define LOOPMAXPERIOD 8           // Longest wavetable loop (arpeggio) found
 #define RUNMIN 4                  // Frames a new pitch must last to be a new note
 #define STICKY 0.35               // Extra semitones before the pitch changes note
-#define MAXPULSEROWS 8
+#define MAXPULSEROWS 12
+#define PULSECHAIN 1024          // Frames a pulse program may follow (through the notes after)
 #define NUMLEVELS 11
 #define STABLEPROG 12             // Longer programs: pitch drift is left out
 #define STOPPEDSECS 2              // No change for this long at the end: the tune has stopped
 #define LOOPSECS 600               // Recorded at least this long to find the loop
+#define TEMPOLOSS 0.01             // Notes (of all) a longer row may lose more than the finest
+#define TEMPOOFF 0.05              // ... or have off its rows more than the finest
+#define TWOPI 6.283185307179586
+#define TUNEMIN 0.1                // Semitones off GoatTracker's table: the song gets a base pitch
+#define TUNECONSISTENT 0.5         // How alike the notes' tuning must be for that (0-1)
 
 typedef struct
 {
@@ -1048,9 +1058,20 @@ typedef struct
   int gtmax;                      // Longest gatetimer the song's tempo allows
   int firstwave;
   int pstart, plen;               // Frames for the instrument program
+  int gplen;                      // The same up to the gate going off (a note ended
+                                  // by a keyoff: without the release)
   int pulsecont;                  // The pulse goes on from the previous note
+  int pchain;                     // Frames of pulse its pulse program follows: its
+                                  // own, or on through the notes after it that
+                                  // go on with its sweep (no program of theirs)
   int glide;                      // Legato: glide speed (frequency per frame)
+  int vibdelay, vibleft, vibright; // Vibrato as GoatTracker's instrument vibrato
+                                  // (delay, speedtable row), 0 = none
+  int hradsr;                     // Hardrestart: the ADSR in the gap before it
+                                  // (AD << 8 | SR), -1 = none
   int instr;
+  int ovwave, ovpulse;            // A wave/pulse program of its own (APROGS index),
+                                  // set by a command on its row; -1 = the instrument's
   int row;
 } ANOTE;
 
@@ -1062,6 +1083,7 @@ typedef struct
   int plen;                       // Pulse program rows (0 = no pulse)
   unsigned char pl[MAXPULSEROWS + 1], pr[MAXPULSEROWS + 1];
   int gateoff;                    // The wave program turns the gate off
+  int vibdelay, vibleft, vibright; // Instrument vibrato (0 = none)
   int firstuse;
   int number;
 } AINSTR;
@@ -1075,6 +1097,7 @@ typedef struct
   int adsrflex;                   // 1 = SR may differ, 2 = AD or SR (not both:
                                   // a pattern command sets the one that differs)
   int gttol;                      // Ticks the gate may go off early/late
+  int vib;                        // 1 = the vibrato as found
 } LEVEL;
 
 // Less detail step by step until the instruments fit: the pulse first, then
@@ -1082,27 +1105,576 @@ typedef struct
 // (it's most of the sound)
 static const LEVEL levels[NUMLEVELS] =
 {
-  {PROGMAX, 0x40, 4, 0x10, 0, 0},
-  {PROGMAX, 0x100, 2, 0x40, 0, 0},
-  {PROGMAX, 0x200, 1, 0x80, 0, 1},
-  {16, 0x200, 1, 0x100, 0, 1},
-  {16, 0x1000, 0, 0x100, 0, 1},
-  {16, 0x1000, 0, 0x100, 0, 0x3f},
-  {8, 0x1000, 0, 0x100, 1, 0x3f},
-  {4, 0x1000, 0, 0x100, 1, 0x3f},
-  {4, 0x1000, 0, 0x100, 2, 0x3f},
-  {2, 0x1000, 0, 0x100, 2, 0x3f},
-  {1, 0x1000, 0, 0x100, 2, 0x3f}
+  {PROGMAX, 0x40, 4, 0x10, 0, 0, 1},
+  {PROGMAX, 0x100, 2, 0x40, 0, 0, 1},
+  {PROGMAX, 0x200, 1, 0x80, 0, 1, 1},
+  {16, 0x200, 1, 0x100, 0, 1, 1},
+  {16, 0x1000, 0, 0x100, 0, 1, 1},
+  {16, 0x1000, 0, 0x100, 0, 0x3f, 1},
+  {8, 0x1000, 0, 0x100, 1, 0x3f, 1},
+  {4, 0x1000, 0, 0x100, 1, 0x3f, 1},
+  {4, 0x1000, 0, 0x100, 2, 0x3f, 1},
+  {2, 0x1000, 0, 0x100, 2, 0x3f, 1},
+  {1, 0x1000, 0, 0x100, 2, 0x3f, 0}
 };
 
-// Runs a routine. irqmode 0 = called with JSR, 1 = KERNAL IRQ ($0314)
-// handler, 2 = hardware IRQ ($FFFE) handler. Returns 1 when done, -1 on a
-// CPU error, -2 if it didn't finish
-static int runroutine(CPU6502 *cpu, unsigned adr, int a, int irqmode, unsigned maxinstr, unsigned char *dip)
+//
+// The C64 the tunes are recorded on
+//
+// The CPU with 64K of RAM, and of the rest of the C64 what players use. The
+// SID's registers are written, and voice 3's oscillator and envelope run (a
+// port of reSID 0.16's WaveformGenerator & EnvelopeGenerator by Dag Lem), so
+// that OSC3 ($D41B) and ENV3 ($D41C) read as on a C64: players take random
+// numbers (noise) or modulation from them. A PSID is played by calling its
+// play routine, as SIDDump does (raster waits let through). An RSID runs as
+// on a C64: its init routine (which may not return: a main loop) with the
+// CIA timers and the VIC-II raster interrupt calling its interrupt routines,
+// the KERNAL's interrupt entry and exit emulated (there is no ROM)
+//
+
+#define ACC_READ 1
+#define ACC_WRITE 2
+#define FLAG_I 0x04
+#define PAL_LINES 312
+#define NTSC_LINES 263
+#define PAL_LINECYCLES 63
+#define NTSC_LINECYCLES 65
+#define MAXDEPTH 8
+
+// Which memory address the next instruction reads and/or writes, for the
+// addressing modes that can reach the I/O area: absolute, indexed and
+// indirect (zeropage & stack can't). Returns ACC_READ | ACC_WRITE (both: read-
+// modify-write), 0 if none
+static int memaccess(const CPU6502 *cpu, unsigned *ea)
 {
+  static const int alumodes[8] = {4, 0, 0, 1, 5, 0, 3, 2};
+  const unsigned char *m = cpu->mem;
+  unsigned pc = cpu->pc, op = m[pc];
+  unsigned lo = m[(pc + 1) & 0xffff], hi = m[(pc + 2) & 0xffff];
+  int cc = op & 3, bbb = (op >> 2) & 7, aaa = op >> 5;
+  int mode = 0, acc;
+
+  if (cc == 0)
+  {
+    // BIT, JMP, STY, LDY, CPY, CPX, NOP abs/abs,X; SHY
+    if ((op == 0x4c) || (op == 0x6c)) return 0;
+    if (bbb == 3) mode = 1;
+    else if (bbb == 7) mode = 2;
+    acc = (aaa == 4) ? ACC_WRITE : ACC_READ;
+  }
+  else if (cc == 2)
+  {
+    // Shifts, INC, DEC: read-modify-write. STX, LDX (abs,Y); SHX
+    if (bbb == 3) mode = 1;
+    else if (bbb == 7) mode = ((aaa == 4) || (aaa == 5)) ? 3 : 2;
+    acc = (aaa == 4) ? ACC_WRITE : ((aaa == 5) ? ACC_READ : ACC_READ | ACC_WRITE);
+  }
+  else
+  {
+    // ORA AND EOR ADC STA LDA CMP SBC, and the illegal combinations of a
+    // shift with them (read-modify-write), SAX/SHA/TAS, LAX/LAS
+    mode = alumodes[bbb];
+    if ((cc == 3) && (bbb == 7) && ((aaa == 4) || (aaa == 5))) mode = 3;
+    if (aaa == 4) acc = ACC_WRITE;
+    else if ((cc == 1) || (aaa == 5)) acc = ACC_READ;
+    else acc = ACC_READ | ACC_WRITE;
+  }
+  switch (mode)
+  {
+    case 1: *ea = lo | (hi << 8); break;
+    case 2: *ea = ((lo | (hi << 8)) + cpu->x) & 0xffff; break;
+    case 3: *ea = ((lo | (hi << 8)) + cpu->y) & 0xffff; break;
+    case 4: *ea = m[(lo + cpu->x) & 0xff] | (m[(lo + cpu->x + 1) & 0xff] << 8); break;
+    case 5: *ea = ((m[lo] | (m[(lo + 1) & 0xff] << 8)) + cpu->y) & 0xffff; break;
+    default: return 0;
+  }
+  return acc;
+}
+
+// Whether an instruction writes to memory (other than the stack)
+static int opwrites(unsigned op)
+{
+  int cc = op & 3, bbb = (op >> 2) & 7, aaa = op >> 5;
+  if (cc == 0) return (aaa == 4) && ((bbb == 1) || (bbb == 3) || (bbb == 5) || (bbb == 7));
+  if (cc == 2) return (aaa != 5) && (bbb & 1);
+  if (bbb == 2) return 0;
+  return (aaa == 4) || ((cc == 3) && (aaa != 5));
+}
+
+// SID voice 3: oscillator and envelope (reSID 0.16)
+typedef struct
+{
+  unsigned acc, shift, freq, pw;
+  int wave, test;
+  int gate, attack, decay, sustain, release;
+  int state;                      // 0 attack, 1 decay/sustain, 2 release
+  int ratecounter, rateperiod, expcounter, expperiod, envelope, holdzero;
+  long long time;                 // C64 cycle it runs up to
+} SIDV3;
+
+static const int rateperiods[16] =
+{
+  9, 32, 63, 95, 149, 220, 267, 313, 392, 977, 1954, 3126, 3907, 11720, 19532, 31251
+};
+
+static void v3reset(SIDV3 *v)
+{
+  memset(v, 0, sizeof(SIDV3));
+  v->shift = 0x7ffff8;
+  v->state = 2;
+  v->rateperiod = rateperiods[0];
+  v->expperiod = 1;
+  v->holdzero = 1;
+}
+
+static void v3clock(SIDV3 *v, long long now)
+{
+  long long dt = now - v->time;
+  int step;
+
+  if (dt <= 0) return;
+  v->time = now;
+
+  // The accumulator; the noise shift register is clocked each time bit 19
+  // of it goes high
+  if (!v->test)
+  {
+    unsigned long long a0 = v->acc, d = (unsigned long long)dt * v->freq;
+    long long edges = (long long)((a0 + d + 0x80000) >> 20) - (long long)((a0 + 0x80000) >> 20);
+    v->acc = (unsigned)((a0 + d) & 0xffffff);
+    while (edges-- > 0)
+    {
+      unsigned bit0 = ((v->shift >> 22) ^ (v->shift >> 17)) & 1;
+      v->shift = ((v->shift << 1) & 0x7fffff) | bit0;
+    }
+  }
+
+  // The envelope: a step each rate period (and exponential counter period
+  // when it goes down)
+  step = v->rateperiod - v->ratecounter;
+  if (step <= 0) step += 0x7fff;
+  while (dt)
+  {
+    if (dt < step)
+    {
+      v->ratecounter += (int)dt;
+      if (v->ratecounter & 0x8000) v->ratecounter = (v->ratecounter + 1) & 0x7fff;
+      return;
+    }
+    // Nothing changes any more (at zero, or at the sustain level): only the
+    // counters go on
+    if ((v->holdzero) || ((v->state == 1) && (v->envelope == v->sustain * 0x11)))
+    {
+      long long n;
+      dt -= step;
+      n = 1 + dt / v->rateperiod;
+      v->ratecounter = (int)(dt % v->rateperiod);
+      v->expcounter = v->holdzero ? 0 : (int)((v->expcounter + n) % v->expperiod);
+      return;
+    }
+    v->ratecounter = 0;
+    dt -= step;
+    if ((v->state == 0) || (++v->expcounter == v->expperiod))
+    {
+      v->expcounter = 0;
+      switch (v->state)
+      {
+        case 0:
+        v->envelope = (v->envelope + 1) & 0xff;
+        if (v->envelope == 0xff)
+        {
+          v->state = 1;
+          v->rateperiod = rateperiods[v->decay];
+        }
+        break;
+
+        case 1:
+        if (v->envelope != v->sustain * 0x11) v->envelope--;
+        break;
+
+        default:
+        v->envelope = (v->envelope - 1) & 0xff;
+        break;
+      }
+      switch (v->envelope)
+      {
+        case 0xff: v->expperiod = 1; break;
+        case 0x5d: v->expperiod = 2; break;
+        case 0x36: v->expperiod = 4; break;
+        case 0x1a: v->expperiod = 8; break;
+        case 0x0e: v->expperiod = 16; break;
+        case 0x06: v->expperiod = 30; break;
+        case 0x00: v->expperiod = 1; v->holdzero = 1; break;
+      }
+    }
+    step = v->rateperiod;
+  }
+}
+
+// A register write, reg $0E-$14 (the voice's registers)
+static void v3write(SIDV3 *v, int reg, unsigned char d)
+{
+  switch (reg)
+  {
+    case 0x0e: v->freq = (v->freq & 0xff00) | d; break;
+    case 0x0f: v->freq = (v->freq & 0xff) | (d << 8); break;
+    case 0x10: v->pw = (v->pw & 0xf00) | d; break;
+    case 0x11: v->pw = (v->pw & 0xff) | ((d & 0x0f) << 8); break;
+
+    case 0x12:
+    {
+      int test = d & 0x08, gate = d & 0x01;
+      v->wave = d >> 4;
+      if (test)
+      {
+        v->acc = 0;
+        v->shift = 0;
+      }
+      else if (v->test) v->shift = 0x7ffff8;
+      v->test = test;
+      if ((!v->gate) && (gate))
+      {
+        v->state = 0;
+        v->rateperiod = rateperiods[v->attack];
+        v->holdzero = 0;
+      }
+      else if ((v->gate) && (!gate))
+      {
+        v->state = 2;
+        v->rateperiod = rateperiods[v->release];
+      }
+      v->gate = gate;
+    }
+    break;
+
+    case 0x13:
+    v->attack = d >> 4;
+    v->decay = d & 0x0f;
+    if (v->state == 0) v->rateperiod = rateperiods[v->attack];
+    else if (v->state == 1) v->rateperiod = rateperiods[v->decay];
+    break;
+
+    case 0x14:
+    v->sustain = d >> 4;
+    v->release = d & 0x0f;
+    if (v->state == 2) v->rateperiod = rateperiods[v->release];
+    break;
+  }
+}
+
+// OSC3: the top 8 bits of the waveform output (the combined waveforms as
+// the AND of theirs, roughly what the chips give)
+static unsigned char v3osc(const SIDV3 *v)
+{
+  unsigned a = v->acc, s = v->shift, out = 0xfff;
+  if (!v->wave) return 0;
+  if (v->wave & 8)
+  {
+    if (v->wave != 8) return 0;
+    out = ((s & 0x400000) >> 11) | ((s & 0x100000) >> 10) | ((s & 0x010000) >> 7) | ((s & 0x002000) >> 5) |
+      ((s & 0x000800) >> 4) | ((s & 0x000080) >> 1) | ((s & 0x000010) << 1) | ((s & 0x000004) << 2);
+  }
+  if (v->wave & 1) out &= (((a & 0x800000) ? ~a : a) >> 11) & 0xfff;
+  if (v->wave & 2) out &= a >> 12;
+  if ((v->wave & 4) && (!v->test) && ((a >> 12) < v->pw)) out = 0;
+  return (unsigned char)(out >> 4);
+}
+
+// CIA 6526: the two timers and their interrupts
+typedef struct
+{
+  unsigned latch[2], counter[2];
+  unsigned char cr[2];
+  unsigned char icr, mask;
+} CIA;
+
+// Counts a timer down by d cycles (or d timer A underflows). Returns how
+// many times it underflowed
+static int ciatimer(CIA *x, int t, long long d)
+{
+  int n = 0;
+  while (d > 0)
+  {
+    if ((long long)x->counter[t] >= d)
+    {
+      x->counter[t] -= (unsigned)d;
+      break;
+    }
+    d -= x->counter[t] + 1;
+    x->counter[t] = x->latch[t];
+    x->icr |= 1 << t;
+    n++;
+    if (x->cr[t] & 0x08)
+    {
+      // One-shot
+      x->cr[t] &= ~0x01;
+      break;
+    }
+  }
+  return n;
+}
+
+static void ciaclock(CIA *x, long long d)
+{
+  int under = 0;
+  if ((x->cr[0] & 0x21) == 0x01) under = ciatimer(x, 0, d);
+  if (x->cr[1] & 0x01)
+  {
+    int mode = (x->cr[1] >> 5) & 3;
+    if (mode == 0) ciatimer(x, 1, d);
+    else if ((mode == 2) && (under)) ciatimer(x, 1, under);
+  }
+}
+
+// Cycles to its next underflow (counting cycles), -1 = none
+static long long cianext(const CIA *x)
+{
+  long long t = -1;
+  if ((x->cr[0] & 0x21) == 0x01) t = x->counter[0] + 1;
+  if (((x->cr[1] & 0x61) == 0x01) && ((t < 0) || (x->counter[1] + 1 < t))) t = x->counter[1] + 1;
+  return t;
+}
+
+static unsigned char ciaread(CIA *x, int reg, unsigned char old)
+{
+  unsigned char d;
+  switch (reg)
+  {
+    case 0x04: return x->counter[0] & 0xff;
+    case 0x05: return x->counter[0] >> 8;
+    case 0x06: return x->counter[1] & 0xff;
+    case 0x07: return x->counter[1] >> 8;
+    case 0x0d:
+    d = x->icr | ((x->icr & x->mask & 0x1f) ? 0x80 : 0);
+    x->icr = 0;
+    return d;
+    case 0x0e: return x->cr[0];
+    case 0x0f: return x->cr[1];
+  }
+  return old;
+}
+
+static void ciawrite(CIA *x, int reg, unsigned char d)
+{
+  switch (reg)
+  {
+    case 0x04:
+    case 0x06:
+    x->latch[(reg - 4) >> 1] = (x->latch[(reg - 4) >> 1] & 0xff00) | d;
+    break;
+
+    case 0x05:
+    case 0x07:
+    {
+      int t = (reg - 5) >> 1;
+      x->latch[t] = (x->latch[t] & 0xff) | (d << 8);
+      if (!(x->cr[t] & 0x01)) x->counter[t] = x->latch[t];
+    }
+    break;
+
+    case 0x0d:
+    if (d & 0x80) x->mask |= d & 0x1f;
+    else x->mask &= ~(d & 0x1f);
+    break;
+
+    case 0x0e:
+    case 0x0f:
+    x->cr[reg - 0x0e] = d & ~0x10;
+    if (d & 0x10) x->counter[reg - 0x0e] = x->latch[reg - 0x0e];
+    break;
+  }
+}
+
+typedef struct
+{
+  CPU6502 cpu;                    // (with the 64K of RAM)
+  int full;                       // RSID: the whole C64 runs, else play calls
+  int framecycles, linecycles, lines;
+  long long now;                  // Full: the C64 cycle. Play calls: the cycle
+                                  // the routine started at
+  SIDV3 v3;
+  unsigned char sid[0x20];        // The SID registers written (full)
+  int mainwrote;                  // Voice/filter registers written by the main
+                                  // program since the last frame (full)
+  unsigned char dip;              // Gates gone off since the last tick (full)
+  CIA cia[2];
+  int rastercmp;                  // VIC-II raster interrupt line
+  unsigned char vicirq, vicmask;
+  int nmiline, nmipending;        // CIA 2 interrupt output, NMI on its edge
+  int depth;                      // Interrupts running: their stack pointer,
+  unsigned char framesp[MAXDEPTH];  // source (see interrupt()), and whether
+  int framekey[MAXDEPTH];           // they wrote the SID's voice/filter
+  unsigned char framewrote[MAXDEPTH]; // registers
+} C64;
+
+static long long c64now(const C64 *c)
+{
+  return c->full ? c->now : c->now + c->cpu.cycles;
+}
+
+static int isio(const C64 *c, unsigned ea)
+{
+  if (!c->full) return (ea >= 0xd400) && (ea < 0xd800);
+  return (ea >= 0xd000) && (ea < 0xe000) && (c->cpu.mem[1] & 0x03) && (c->cpu.mem[1] & 0x04);
+}
+
+// I/O registers whose value changes by itself (or reading them does
+// something): the SID's OSC3/ENV3, the VIC-II raster & interrupts, the CIA
+// timers & interrupts
+static int iovolatile(unsigned ea)
+{
+  int reg;
+  if ((ea >= 0xd400) && (ea < 0xd800)) return ((ea & 0x1f) == 0x1b) || ((ea & 0x1f) == 0x1c);
+  if (ea < 0xd400)
+  {
+    reg = ea & 0x3f;
+    return (reg == 0x11) || (reg == 0x12) || (reg == 0x19);
+  }
+  if ((ea >= 0xdc00) && (ea < 0xde00))
+  {
+    reg = ea & 0x0f;
+    return ((reg >= 0x04) && (reg <= 0x07)) || (reg == 0x0d);
+  }
+  return 0;
+}
+
+static int rasterline(const C64 *c)
+{
+  return (int)((c->now % c->framecycles) / c->linecycles);
+}
+
+// Makes the memory hold what a read of an I/O register gives
+static void ioread(C64 *c, unsigned ea)
+{
+  unsigned char *m = c->cpu.mem;
+  if ((ea >= 0xd400) && (ea < 0xd800))
+  {
+    int reg = ea & 0x1f;
+    if ((reg == 0x1b) || (reg == 0x1c))
+    {
+      v3clock(&c->v3, c64now(c));
+      m[ea] = (reg == 0x1b) ? v3osc(&c->v3) : (unsigned char)c->v3.envelope;
+    }
+    else if ((reg == 0x19) || (reg == 0x1a)) m[ea] = 0xff;
+    return;
+  }
+  if (!c->full) return;
+  if (ea < 0xd400)
+  {
+    int line = rasterline(c);
+    switch (ea & 0x3f)
+    {
+      case 0x11: m[ea] = (m[ea] & 0x7f) | ((line & 0x100) >> 1); break;
+      case 0x12: m[ea] = line & 0xff; break;
+      case 0x19: m[ea] = c->vicirq | 0x70 | ((c->vicirq & c->vicmask) ? 0x80 : 0); break;
+      case 0x1a: m[ea] = c->vicmask | 0xf0; break;
+    }
+  }
+  else if ((ea >= 0xdc00) && (ea < 0xde00))
+  {
+    m[ea] = ciaread(&c->cia[(ea >> 8) & 1], ea & 0x0f, m[ea]);
+    if (ea >= 0xdd00) c->nmiline = 0;
+  }
+}
+
+static void iowrite(C64 *c, unsigned ea, unsigned char d)
+{
+  if ((ea >= 0xd400) && (ea < 0xd800))
+  {
+    int reg = ea & 0x1f;
+    if ((reg >= 0x0e) && (reg <= 0x14))
+    {
+      v3clock(&c->v3, c64now(c));
+      v3write(&c->v3, reg, d);
+    }
+    if (reg < 0x19)
+    {
+      c->sid[reg] = d;
+      if (reg < 0x18)
+      {
+        if (!c->depth) c->mainwrote = 1;
+        else c->framewrote[((c->depth > MAXDEPTH) ? MAXDEPTH : c->depth) - 1] = 1;
+      }
+      if (((reg == 0x04) || (reg == 0x0b) || (reg == 0x12)) && (!(d & 0x01))) c->dip |= 1 << (reg / 7);
+    }
+    return;
+  }
+  if (!c->full) return;
+  if (ea < 0xd400)
+  {
+    switch (ea & 0x3f)
+    {
+      case 0x11: c->rastercmp = (c->rastercmp & 0xff) | ((d & 0x80) << 1); break;
+      case 0x12: c->rastercmp = (c->rastercmp & 0x100) | d; break;
+      case 0x19: c->vicirq &= ~(d & 0x0f); break;
+      case 0x1a: c->vicmask = d & 0x0f; break;
+    }
+  }
+  else if ((ea >= 0xdc00) && (ea < 0xde00)) ciawrite(&c->cia[(ea >> 8) & 1], ea & 0x0f, d);
+}
+
+// Executes an instruction, with the I/O it reads and writes. Returns as
+// cpu6502_step()
+static int iostep(C64 *c)
+{
+  unsigned ea = 0;
+  unsigned char old = 0;
+  int acc = memaccess(&c->cpu, &ea), r;
+
+  if ((acc) && (!isio(c, ea))) acc = 0;
+  if (acc & ACC_READ)
+  {
+    ioread(c, ea);
+    old = c->cpu.mem[ea];
+  }
+  r = cpu6502_step(&c->cpu);
+  if ((acc & ACC_WRITE) && (r > 0))
+  {
+    // (A read-modify-write writes the old value first)
+    if (acc & ACC_READ) iowrite(c, ea, old);
+    iowrite(c, ea, c->cpu.mem[ea]);
+  }
+  return r;
+}
+
+static void c64init(C64 *c, const SIDFILE *sf, int full)
+{
+  int ntsc = (sf->info.clock == 2);
+  memset(c, 0, sizeof(C64));
+  c->full = full;
+  c->framecycles = ntsc ? NTSC_FRAMECYCLES : PAL_FRAMECYCLES;
+  c->linecycles = ntsc ? NTSC_LINECYCLES : PAL_LINECYCLES;
+  c->lines = ntsc ? NTSC_LINES : PAL_LINES;
+  v3reset(&c->v3);
+  if (full)
+  {
+    // As after RUN: the KERNAL's interrupt vectors, CIA 1 timer A
+    // interrupting 60 times a second, CIA 2 and the raster interrupt off
+    c->cpu.mem[0x314] = 0x31;
+    c->cpu.mem[0x315] = 0xea;
+    c->cpu.mem[0x318] = 0x47;
+    c->cpu.mem[0x319] = 0xfe;
+    c->cia[0].latch[0] = c->cia[0].counter[0] = ntsc ? 0x4295 : 0x4025;
+    c->cia[0].cr[0] = 0x01;
+    c->cia[0].mask = 0x01;
+    c->cia[0].latch[1] = c->cia[0].counter[1] = 0xffff;
+    c->cia[1].latch[0] = c->cia[1].counter[0] = 0xffff;
+    c->cia[1].latch[1] = c->cia[1].counter[1] = 0xffff;
+    c->rastercmp = 0x100;
+  }
+  memcpy(c->cpu.mem + sf->info.loadaddress, sf->data, sf->info.datasize);
+  c->cpu.mem[0x01] = 0x37;
+}
+
+// Runs a routine (play calls). irqmode 0 = called with JSR, 1 = KERNAL IRQ
+// ($0314) handler, 2 = hardware IRQ ($FFFE) handler. Returns 1 when done, -1
+// on a CPU error, -2 if it didn't finish
+static int runroutine(C64 *c, unsigned adr, int a, int irqmode, unsigned maxinstr, unsigned char *dip)
+{
+  CPU6502 *cpu = &c->cpu;
+  unsigned char *mem = cpu->mem;
   unsigned n;
   unsigned char d = 0;
-  unsigned char *mem = cpu->mem;
 
   cpu6502_init(cpu, adr, a, 0, 0);
   if (irqmode)
@@ -1119,7 +1691,7 @@ static int runroutine(CPU6502 *cpu, unsigned adr, int a, int irqmode, unsigned m
   }
   for (n = 0; n < maxinstr; n++)
   {
-    int r = cpu6502_step(cpu);
+    int r = iostep(c);
     if (r < 0) return -1;
     if (!r) break;
     // Let raster waits finish
@@ -1142,12 +1714,406 @@ static int runroutine(CPU6502 *cpu, unsigned adr, int a, int irqmode, unsigned m
   return (n >= maxinstr) ? -2 : 1;
 }
 
-// Records the SID registers after every play call. Returns 1 on success,
-// 0 if the subtune can't be recorded (the reason in err), -1 if out of
-// memory
+// The SID registers into a recorded frame
+static void snapshot(SFRAME *f, const unsigned char *r, unsigned char dip)
+{
+  int v;
+  for (v = 0; v < MAX_CHN; v++)
+  {
+    f->freq[v] = r[v*7] | (r[v*7+1] << 8);
+    f->pulse[v] = (r[v*7+2] | (r[v*7+3] << 8)) & 0xfff;
+    f->ctrl[v] = r[v*7+4];
+    f->ad[v] = r[v*7+5];
+    f->sr[v] = r[v*7+6];
+  }
+  f->dip = dip;
+  f->cutoff = r[0x16];
+  f->resfilt = r[0x17];
+  f->modevol = r[0x18];
+  // Voice 3 switched off ($D418 bit 7) and not through the filter can't be
+  // heard: players use it for random numbers or as a modulator. GoatTracker
+  // can't switch it off, so it is left out (unless voice 1's ring modulation
+  // or sync, which voice 3 drives, is on)
+  if ((f->modevol & 0x80) && (!(f->resfilt & 0x04)) && (!(f->ctrl[0] & 0x06)))
+  {
+    f->ctrl[2] = 0;
+    f->dip &= ~4;
+  }
+}
+
+static int growframes(SFRAME **frames, int *maxframes, int n)
+{
+  if (n < *maxframes) return 1;
+  {
+    int newmax = *maxframes ? *maxframes * 2 : 4096;
+    SFRAME *nf;
+    if (newmax > MAXTICKS) newmax = MAXTICKS;
+    if (n >= newmax) return 1;
+    nf = (SFRAME *)realloc(*frames, newmax * sizeof(SFRAME));
+    if (!nf) return 0;
+    *frames = nf;
+    *maxframes = newmax;
+  }
+  return 1;
+}
+
+static void push(CPU6502 *cpu, unsigned char d)
+{
+  cpu->mem[0x100 + cpu->sp--] = d;
+}
+
+static unsigned char pull(CPU6502 *cpu)
+{
+  return cpu->mem[0x100 + ++cpu->sp];
+}
+
+// Lets time pass (full mode): the timers count, the raster moves
+static void advance(C64 *c, long long d)
+{
+  long long prev = c->now, lstart = (long long)c->rastercmp * c->linecycles;
+  int line;
+  c->now += d;
+  ciaclock(&c->cia[0], d);
+  ciaclock(&c->cia[1], d);
+  line = (c->cia[1].icr & c->cia[1].mask & 0x1f) ? 1 : 0;
+  if ((line) && (!c->nmiline)) c->nmipending = 1;
+  c->nmiline = line;
+  if ((c->rastercmp < c->lines) &&
+    ((c->now - lstart + c->framecycles) / c->framecycles > (prev - lstart + c->framecycles) / c->framecycles))
+    c->vicirq |= 0x01;
+}
+
+// Cycles to the next thing that happens (full mode), at most limit
+static long long nextevent(const C64 *c, long long limit)
+{
+  long long t = limit, n;
+  int x;
+  for (x = 0; x < 2; x++)
+  {
+    n = cianext(&c->cia[x]);
+    if ((n >= 0) && (n < t)) t = n;
+  }
+  if (c->rastercmp < c->lines)
+  {
+    long long lstart = (long long)c->rastercmp * c->linecycles;
+    long long pos = (c->now - lstart) % c->framecycles;
+    if (pos < 0) pos += c->framecycles;
+    n = c->framecycles - pos;
+    if (n < t) t = n;
+  }
+  n = c->framecycles - c->now % c->framecycles;
+  if (n < t) t = n;
+  return (t < 1) ? 1 : t;
+}
+
+// An interrupt (full mode): through the KERNAL when its ROM is in. Its
+// source: 2/3 CIA 1 timer A/B, $100 + line VIC-II raster, 4/5 CIA 2 timer A/B
+// (NMI), 1 other. Returns the cycles it takes
+static int interrupt(C64 *c, int nmi)
+{
+  CPU6502 *cpu = &c->cpu;
+  const unsigned char *m = cpu->mem;
+  int key = 1;
+  if (nmi) key = (c->cia[1].icr & c->cia[1].mask & 0x01) ? 4 : 5;
+  else if (c->vicirq & c->vicmask & 0x01) key = 0x100 | c->rastercmp;
+  else if (c->cia[0].icr & c->cia[0].mask & 0x01) key = 2;
+  else if (c->cia[0].icr & c->cia[0].mask & 0x02) key = 3;
+  if (c->depth < MAXDEPTH)
+  {
+    c->framesp[c->depth] = cpu->sp;
+    c->framekey[c->depth] = key;
+    c->framewrote[c->depth] = 0;
+  }
+  c->depth++;
+  push(cpu, cpu->pc >> 8);
+  push(cpu, cpu->pc & 0xff);
+  push(cpu, (cpu->flags | 0x20) & ~0x10);
+  cpu->flags |= FLAG_I;
+  if (m[1] & 0x02)
+  {
+    if (nmi) cpu->pc = m[0x318] | (m[0x319] << 8);
+    else
+    {
+      push(cpu, cpu->a);
+      push(cpu, cpu->x);
+      push(cpu, cpu->y);
+      cpu->pc = m[0x314] | (m[0x315] << 8);
+      return 29;
+    }
+  }
+  else cpu->pc = nmi ? m[0xfffa] | (m[0xfffb] << 8) : m[0xfffe] | (m[0xffff] << 8);
+  return 7;
+}
+
+// Interrupt sources seen while an RSID runs
+#define MAXKEYS 16
+
+typedef struct
+{
+  int key;
+  int calls, wrote;               // Interrupts, those that wrote the SID
+} KEYSTAT;
+
+// An RSID: the C64 runs until cycle end. The SID is recorded at the end of
+// each interrupt from source musickey (-1: none, once a frame instead).
+// stats (if not NULL) gets the sources & how often they wrote the SID,
+// *mainframes the frames in which the main program did. Returns 1 on
+// success, 0 if the tune crashed (err), -1 if out of memory
+static int runfull(C64 *c, const SIDFILE *sf, int subtune, long long end, int musickey, SFRAME **framesout,
+  int *numticks, double *rateout, KEYSTAT *stats, int *numstats, int *mainframes, char *err, int errsize)
+{
+  CPU6502 *cpu = &c->cpu;
+  unsigned char *m = cpu->mem;
+  SFRAME *ticks = NULL;
+  int maxticks = 0, nt = 0, idle = 0, result = -1;
+  long long firsttick = 0, lasttick = 0, nextframe = c->framecycles;
+  unsigned char seen[16][7];      // The main program's last states (busy loops)
+  int seenpos = 0, clean = 0;
+
+  if (numstats) *numstats = 0;
+  if (mainframes) *mainframes = 0;
+  cpu6502_init(cpu, sf->info.initaddress, subtune - 1, 0, 0);
+  while (c->now < end)
+  {
+    unsigned startcycles;
+    int r;
+
+    if (c->now >= nextframe)
+    {
+      nextframe += c->framecycles;
+      if ((mainframes) && (c->mainwrote)) (*mainframes)++;
+      c->mainwrote = 0;
+      if (musickey == -1)
+      {
+        // Once a frame (a tune playing from its main program)
+        if (!growframes(&ticks, &maxticks, nt)) goto done;
+        if (nt < maxticks) snapshot(&ticks[nt++], c->sid, c->dip);
+        c->dip = 0;
+      }
+    }
+    // Interrupts
+    if (c->nmipending)
+    {
+      c->nmipending = 0;
+      advance(c, interrupt(c, 1));
+      clean = 0;
+    }
+    else if ((!(cpu->flags & FLAG_I)) && ((c->cia[0].icr & c->cia[0].mask & 0x1f) || (c->vicirq & c->vicmask)))
+    {
+      advance(c, interrupt(c, 0));
+      clean = 0;
+    }
+    if ((idle) && (!c->depth))
+    {
+      // Nothing to run until something interrupts
+      long long d = nextevent(c, end - c->now);
+      if (c->now + d > nextframe) d = nextframe - c->now;
+      advance(c, (d < 1) ? 1 : d);
+      continue;
+    }
+
+    // The KERNAL's interrupt exits (there's no ROM): they pull the registers
+    // and return. Other calls to it return at once
+    if ((m[1] & 0x02) && (cpu->pc >= 0xe000))
+    {
+      unsigned pc = cpu->pc;
+      if (pc == 0xea31) ciaread(&c->cia[0], 0x0d, 0);
+      if ((pc == 0xea31) || (pc == 0xea81) || (pc == 0xfebc) || (pc == 0xfe47))
+      {
+        if (pc != 0xfe47)
+        {
+          cpu->y = pull(cpu);
+          cpu->x = pull(cpu);
+          cpu->a = pull(cpu);
+        }
+        cpu->flags = pull(cpu);
+        cpu->pc = pull(cpu);
+        cpu->pc |= pull(cpu) << 8;
+        r = 2;
+      }
+      else if (cpu->sp == 0xff) r = 0;
+      else
+      {
+        cpu->pc = pull(cpu);
+        cpu->pc |= pull(cpu) << 8;
+        cpu->pc++;
+        r = 1;
+      }
+      advance(c, 20);
+      clean = 0;
+    }
+    else
+    {
+      unsigned pc = cpu->pc, ea;
+      unsigned char op = m[pc];
+      int acc = memaccess(cpu, &ea);
+      if (!c->depth)
+      {
+        // The main program waiting in a loop for an interrupt: in the same
+        // state as a few instructions ago, nothing written (but the stack)
+        // or read from I/O that changes since. Nothing changes until
+        // something interrupts
+        unsigned char st[7];
+        int k, busy = 0;
+        st[0] = pc & 0xff;
+        st[1] = pc >> 8;
+        st[2] = cpu->a;
+        st[3] = cpu->x;
+        st[4] = cpu->y;
+        st[5] = cpu->flags;
+        st[6] = cpu->sp;
+        for (k = 1; (k <= clean) && (k <= 16); k++)
+        {
+          if (!memcmp(seen[(seenpos - k) & 15], st, 7))
+          {
+            busy = 1;
+            break;
+          }
+        }
+        if (busy)
+        {
+          long long d = nextevent(c, end - c->now);
+          if (c->now + d > nextframe) d = nextframe - c->now;
+          advance(c, (d < 1) ? 1 : d);
+          clean = 0;
+          continue;
+        }
+        memcpy(seen[seenpos & 15], st, 7);
+        seenpos++;
+        if ((opwrites(op)) || ((acc & ACC_READ) && (isio(c, ea)) && (iovolatile(ea)))) clean = 0;
+        else clean++;
+      }
+      startcycles = cpu->cycles;
+      r = iostep(c);
+      advance(c, cpu->cycles - startcycles);
+      if (r < 0)
+      {
+        setreport(err, errsize, "The tune crashed (opcode $%02X at $%04X)", cpu->errorop, cpu->errorpc);
+        result = 0;
+        goto done;
+      }
+      if ((r > 0) && (op == 0x40)) r = 2;
+    }
+    if (!r)
+    {
+      // The init routine returned (or a BRK): the C64 waits for interrupts.
+      // (With them enabled: as the player of a SID file does)
+      if (!c->depth)
+      {
+        idle = 1;
+        cpu->flags &= ~FLAG_I;
+      }
+      else
+      {
+        setreport(err, errsize, "The tune's interrupt routine doesn't return (BRK at $%04X)", cpu->pc);
+        result = 0;
+        goto done;
+      }
+    }
+    // An interrupt routine returned
+    while ((r == 2) && (c->depth) && ((c->depth > MAXDEPTH) || (cpu->sp == c->framesp[c->depth - 1])))
+    {
+      c->depth--;
+      if (c->depth < MAXDEPTH)
+      {
+        int key = c->framekey[c->depth], k;
+        if (stats)
+        {
+          for (k = 0; (k < *numstats) && (stats[k].key != key); k++);
+          if ((k == *numstats) && (k < MAXKEYS))
+          {
+            stats[k].key = key;
+            stats[k].calls = stats[k].wrote = 0;
+            (*numstats)++;
+          }
+          if (k < *numstats)
+          {
+            stats[k].calls++;
+            if (c->framewrote[c->depth]) stats[k].wrote++;
+          }
+        }
+        if (key == musickey)
+        {
+          if (!growframes(&ticks, &maxticks, nt)) goto done;
+          if (nt < maxticks)
+          {
+            if (!nt) firsttick = c->now;
+            lasttick = c->now;
+            snapshot(&ticks[nt++], c->sid, c->dip);
+          }
+          c->dip = 0;
+        }
+        // (What it wrote counts for the one it interrupted too)
+        if ((c->depth) && (c->framewrote[c->depth])) c->framewrote[c->depth - 1] = 1;
+      }
+      r = 1;
+    }
+  }
+
+  if (musickey < 0) *rateout = 1.0;
+  else
+  {
+    double rate = ((nt >= 2) && (lasttick > firsttick)) ?
+      (double)(nt - 1) * c->framecycles / (double)(lasttick - firsttick) : 1.0;
+    if (fabs(rate - floor(rate + 0.5)) < 0.04 * rate) rate = floor(rate + 0.5);
+    if (rate < 0.25) rate = 0.25;
+    if (rate > 16.0) rate = 16.0;
+    *rateout = rate;
+  }
+  *framesout = ticks;
+  *numticks = nt;
+  ticks = NULL;
+  result = 1;
+
+done:
+  free(ticks);
+  return result;
+}
+
+// An RSID: first a few seconds to see which interrupt plays the music (the
+// one that writes the SID most often; if the main program writes it in more
+// frames, it plays from there), then the recording, at the rate of that
+// interrupt. Returns as record()
+static int recordfull(C64 *c, const SIDFILE *sf, int subtune, int seconds, SFRAME **framesout, int *numticks,
+  double *rateout, char *err, int errsize)
+{
+  KEYSTAT stats[MAXKEYS];
+  SFRAME *probe = NULL;
+  double clock = (sf->info.clock == 2) ? NTSC_CLOCK : PAL_CLOCK, rate;
+  int numstats = 0, mainframes = 0, musickey = -1, best = 0, n, k, r;
+
+  r = runfull(c, sf, subtune, (long long)(clock * ((seconds < 5) ? seconds : 5)), -2, &probe, &n, &rate, stats, &numstats,
+    &mainframes, err, errsize);
+  free(probe);
+  if (r <= 0) return r;
+  for (k = 0; k < numstats; k++)
+  {
+    if (stats[k].wrote > best)
+    {
+      best = stats[k].wrote;
+      musickey = stats[k].key;
+    }
+  }
+  if ((mainframes > best) || (!best)) musickey = -1;
+#ifdef SID2SNG_DEBUG
+  if (getenv("SID2SNG_RSID"))
+  {
+    for (k = 0; k < numstats; k++) fprintf(stderr, "source %x: %d calls, %d wrote\n", stats[k].key, stats[k].calls, stats[k].wrote);
+    fprintf(stderr, "main program wrote in %d frames: music from %x\n", mainframes, musickey);
+  }
+#endif
+  c64init(c, sf, 1);
+  return runfull(c, sf, subtune, (long long)(clock * seconds), musickey, framesout, numticks, rateout, NULL, NULL, NULL,
+    err, errsize);
+}
+
+// Records the SID registers after every play call (of an RSID: every
+// interrupt that plays). Returns 1 on success, 0 if the subtune can't be
+// recorded (the reason in err), -1 if out of memory
 static int record(const SIDFILE *sf, int subtune, int seconds, SFRAME **framesout, int *numticks, double *rateout,
   char *err, int errsize)
 {
+  C64 *c;
   CPU6502 *cpu;
   SFRAME *frames = NULL;
   const SIDINFO *i = &sf->info;
@@ -1157,21 +2123,29 @@ static int record(const SIDFILE *sf, int subtune, int seconds, SFRAME **framesou
   int fps = ntsc ? 60 : 50;
   int framecycles = ntsc ? NTSC_FRAMECYCLES : PAL_FRAMECYCLES;
   double rate = 1.0, acc = 0.0;
+  long long initend;
   int maxticks, ticks = 0, frame, r, speedbit;
   int result = 0;
 
-  cpu = (CPU6502 *)calloc(1, sizeof(CPU6502));
-  if (!cpu) return -1;
-  memcpy(cpu->mem + i->loadaddress, sf->data, i->datasize);
-  cpu->mem[0x01] = 0x37;
-  cpu->mem[0xd41b] = 0x03;
+  c = (C64 *)calloc(1, sizeof(C64));
+  if (!c) return -1;
+  cpu = &c->cpu;
+  if (i->rsid)
+  {
+    c64init(c, sf, 1);
+    result = recordfull(c, sf, subtune, seconds, framesout, numticks, rateout, err, errsize);
+    free(c);
+    return result;
+  }
+  c64init(c, sf, 0);
 
-  r = runroutine(cpu, i->initaddress, subtune - 1, 0, INIT_MAXINSTR, NULL);
+  r = runroutine(c, i->initaddress, subtune - 1, 0, INIT_MAXINSTR, NULL);
   if (r == -1)
   {
     setreport(err, errsize, "The tune's init routine crashed (opcode $%02X at $%04X)", cpu->errorop, cpu->errorpc);
     goto fail;
   }
+  initend = cpu->cycles;
 
   if (!playadr)
   {
@@ -1194,7 +2168,7 @@ static int record(const SIDFILE *sf, int subtune, int seconds, SFRAME **framesou
 
   // CIA timer speed: calls per frame
   speedbit = (subtune <= 32) ? ((i->speed >> (subtune - 1)) & 1) : ((i->speed >> 31) & 1);
-  if ((speedbit) || (i->rsid))
+  if (speedbit)
   {
     unsigned timer = cpu->mem[0xdc04] | (cpu->mem[0xdc05] << 8);
     if (!timer) timer = 0x4025;
@@ -1222,10 +2196,11 @@ static int record(const SIDFILE *sf, int subtune, int seconds, SFRAME **framesou
     while ((calls--) && (ticks < maxticks))
     {
       SFRAME *f = &frames[ticks];
-      const unsigned char *m = cpu->mem;
-      int v;
+      unsigned char dip;
 
-      r = runroutine(cpu, playadr, 0, irqmode, PLAY_MAXINSTR, &f->dip);
+      // (The C64's time, for the SID's voice 3)
+      c->now = initend + (long long)(ticks * (double)framecycles / rate);
+      r = runroutine(c, playadr, 0, irqmode, PLAY_MAXINSTR, &dip);
       if (r == -1)
       {
         setreport(err, errsize, "The tune's play routine crashed (opcode $%02X at $%04X)", cpu->errorop, cpu->errorpc);
@@ -1236,36 +2211,33 @@ static int record(const SIDFILE *sf, int subtune, int seconds, SFRAME **framesou
         setreport(err, errsize, "The tune's play routine doesn't return (it may need a real C64)");
         goto fail;
       }
-      for (v = 0; v < MAX_CHN; v++)
-      {
-        f->freq[v] = m[0xd400 + v*7] | (m[0xd401 + v*7] << 8);
-        f->pulse[v] = (m[0xd402 + v*7] | (m[0xd403 + v*7] << 8)) & 0xfff;
-        f->ctrl[v] = m[0xd404 + v*7];
-        f->ad[v] = m[0xd405 + v*7];
-        f->sr[v] = m[0xd406 + v*7];
-      }
-      f->cutoff = m[0xd416];
-      f->resfilt = m[0xd417];
-      f->modevol = m[0xd418];
+      snapshot(f, cpu->mem + 0xd400, dip);
       ticks++;
     }
   }
-  free(cpu);
+  free(c);
   *framesout = frames;
   *numticks = ticks;
   return 1;
 
 fail:
   free(frames);
-  free(cpu);
+  free(c);
   return result;
 }
 
+// What the notes are worked out for (see approxconvert()). clockhz turns the
+// SID's register values into the ones that sound the same on the clock the
+// song is played at, on GoatTracker's PAL scale; tunehz is the A-4 of the
+// frequency table on that scale (GoatTracker's base pitch, 440 for its own
+// table), gtfreq[] the table
 static double clockhz = PAL_CLOCK;
+static double tunehz = 440.0;
+static unsigned short gtfreq[96];
 
 static double notesemis(unsigned freq)
 {
-  return 57.0 + 12.0 * log(freq * clockhz / 16777216.0 / 440.0) / log(2.0);
+  return 57.0 + 12.0 * log(freq * clockhz / 16777216.0 / tunehz) / log(2.0);
 }
 
 static int clampint(int n, int lo, int hi)
@@ -1309,7 +2281,7 @@ static void frameentry(const SFRAME *f, int v, int note, int base, int gate, int
     // octaves of it); else it's a fixed pitch (drums)
     note = nearestnote(f->freq[v]);
     rel = note - base;
-    if ((!tonal) && (rel % 12)) rel = 0x100;
+    if (rel % 12) rel = 0x100;
   }
   else rel = note - base;
   if ((rel >= -0x20) && (rel <= 0x5f)) *wr = rel & 0x7f;
@@ -1385,15 +2357,47 @@ static void simpulse(const AINSTR *in, int frames, int *out)
   }
 }
 
-// Pulse program from the recorded pulse values: set the start pulse, then
-// modulation steps (a back-and-forth sweep loops)
-static void makepulse(AINSTR *in, const int *pv, int len, const LEVEL *lv)
+// Adds pulse program rows for a modulation run (127 frames a row at most).
+// Returns the first row's index, -1 if there's no room
+static int pulserun(AINSTR *in, int frames, int delta)
+{
+  int first = in->plen;
+  while (frames > 0)
+  {
+    int n = (frames > 0x7f) ? 0x7f : frames;
+    if (in->plen >= MAXPULSEROWS) return -1;
+    in->pl[in->plen] = n;
+    in->pr[in->plen] = delta & 0xff;
+    in->plen++;
+    frames -= n;
+  }
+  return first;
+}
+
+// Pulse program from the recorded pulse values (len frames, the note's own
+// the first ownlen): set the start pulse, then modulation steps. A sweep
+// going back and forth loops its two steps (after a first part step when it
+// starts halfway); one still going at the end of a pulse chain (pv longer
+// than the note) goes on
+static void makepulse(AINSTR *in, const int *pv, int len, int ownlen, const LEVEL *lv)
 {
   int runlen[MAXPULSEROWS], rundelta[MAXPULSEROWS], runset[MAXPULSEROWS];
-  int numruns = 0, f = 1, c;
-  int p0 = (pv[0] + lv->p0quant / 2) / lv->p0quant * lv->p0quant;
+  int numruns = 0, f = 1, c, cycle = -1, ended, loopto = -1;
+  int p = pv[0], p0;
 
-  if (p0 > 0xfff) p0 = 0xfff;
+  // No modulation steps: the pulse the note has on average (its start may
+  // be a sweep's, 0 say)
+  if (!lv->maxruns)
+  {
+    long sum = 0;
+    for (c = 0; c < ownlen; c++) sum += pv[c];
+    p = (int)(sum / ownlen);
+    len = ownlen;
+  }
+  p0 = (p + lv->p0quant / 2) / lv->p0quant * lv->p0quant;
+  // (Rounded to 0 or $1000 a pulse that isn't would be silent)
+  if ((!p0) && (p)) p0 = lv->p0quant;
+  if (p0 > 0xfff) p0 = (p < 0xfff) ? 0x1000 - lv->p0quant : 0xfff;
   while ((f < len) && (numruns < MAXPULSEROWS - 1))
   {
     int d = pulsedelta(pv[f], pv[f-1]);
@@ -1407,50 +2411,79 @@ static void makepulse(AINSTR *in, const int *pv, int len, const LEVEL *lv)
       continue;
     }
     c = 1;
-    while ((f + c < len) && (c < 127) && (pulsedelta(pv[f+c], pv[f+c-1]) == d)) c++;
+    while ((f + c < len) && (pulsedelta(pv[f+c], pv[f+c-1]) == d)) c++;
     runset[numruns] = -1;
     runlen[numruns] = c;
     rundelta[numruns] = d;
     numruns++;
     f += c;
   }
+  ended = (f >= len);
   // Holding the pulse at the end needs no row
-  while ((numruns) && (runset[numruns-1] < 0) && (!rundelta[numruns-1])) numruns--;
+  while ((numruns) && (runset[numruns-1] < 0) && (!rundelta[numruns-1]))
+  {
+    numruns--;
+    ended = 0;
+  }
 
   in->pl[0] = 0x80 | (p0 >> 8);
   in->pr[0] = p0 & 0xff;
   in->plen = 1;
 
-  // Back and forth sweep: loop the two steps
-  if ((lv->maxruns >= 2) && (numruns >= 3) && (runset[0] < 0) && (runset[1] < 0) && (runset[2] < 0) &&
-      (rundelta[0]) && (rundelta[1] == -rundelta[0]) && (rundelta[2] == rundelta[0]))
+  // Back and forth: steps d, -d, d from the start (or after a first part step
+  // of -d: the sweep started halfway)
+  if (lv->maxruns >= 2)
   {
-    in->pl[1] = runlen[0];
-    in->pr[1] = rundelta[0] & 0xff;
-    in->pl[2] = runlen[1];
-    in->pr[2] = rundelta[1] & 0xff;
-    in->pl[3] = 0xff;
-    in->pr[3] = 2;
-    in->plen = 4;
-    return;
+    for (c = 0; (c <= 1) && (cycle < 0); c++)
+    {
+      int k;
+      if (numruns < c + 3) break;
+      for (k = 0; k < c + 3; k++) if (runset[k] >= 0) break;
+      if (k < c + 3) continue;
+      if ((rundelta[c]) && (rundelta[c+1] == -rundelta[c]) && (rundelta[c+2] == rundelta[c]) &&
+        ((!c) || (rundelta[0] == rundelta[c+1]))) cycle = c;
+    }
   }
-  if (numruns > lv->maxruns) numruns = lv->maxruns;
+  if (cycle >= 0)
+  {
+    int r;
+    if ((cycle) && (pulserun(in, runlen[0], rundelta[0]) < 0)) goto stop;
+    r = pulserun(in, runlen[cycle], rundelta[cycle]);
+    if ((r < 0) || (pulserun(in, runlen[cycle+1], rundelta[cycle+1]) < 0)) goto stop;
+    loopto = r;
+    goto end;
+  }
+  if (numruns > lv->maxruns)
+  {
+    numruns = lv->maxruns;
+    ended = 0;
+  }
   for (c = 0; c < numruns; c++)
   {
+    int r;
     if (runset[c] >= 0)
     {
+      if (in->plen >= MAXPULSEROWS) break;
       in->pl[in->plen] = 0x80 | (runset[c] >> 8);
       in->pr[in->plen] = runset[c] & 0xff;
+      in->plen++;
+      continue;
     }
-    else
-    {
-      in->pl[in->plen] = runlen[c];
-      in->pr[in->plen] = rundelta[c] & 0xff;
-    }
-    in->plen++;
+    r = pulserun(in, runlen[c], rundelta[c]);
+    if (r < 0) break;
+    // A sweep still going at the end of the notes that follow it goes on
+    if ((c == numruns - 1) && (ended) && (len > ownlen) && (rundelta[c])) loopto = r;
   }
+  if (c < numruns) loopto = -1;
+  goto end;
+
+stop:
+  // (No room for the loop: just the start pulse)
+  in->plen = 1;
+  loopto = -1;
+end:
   in->pl[in->plen] = 0xff;
-  in->pr[in->plen] = 0;
+  in->pr[in->plen] = (loopto >= 0) ? loopto + 1 : 0;
   in->plen++;
 }
 
@@ -1479,9 +2512,10 @@ static int notecmp_start(const void *a, const void *b)
 }
 
 // The program entries of a note
-static int noteentries(const RECORDING *rec, const ANOTE *n, int cap, unsigned char *wl, unsigned char *wr, int *pv)
+static int noteentries(const RECORDING *rec, const ANOTE *n, int cap, int drift, int release, unsigned char *wl,
+  unsigned char *wr, int *pv)
 {
-  int f, len = n->plen, tones = 0;
+  int f, len = release ? n->plen : n->gplen, tones = 0;
   int keep = (n->start > 0);
   for (f = 0; f < len; f++)
   {
@@ -1496,6 +2530,10 @@ static int noteentries(const RECORDING *rec, const ANOTE *n, int cap, unsigned c
     frameentry(&rec->fr[t], n->voice, rec->pn[n->voice][t], n->base, (!n->shortgate) || (t - n->pstart + 1 < n->gateoff - n->start),
       tones * 2 >= len, &wl[f], &wr[f]);
     pv[f] = rec->fr[t].pulse[n->voice];
+    // A silent frame (no waveform, or the test bit: often a hardrestart at
+    // the end) sounds the same at any pitch: it keeps the pitch (programs
+    // that differ only there are one)
+    if ((f) && ((wl[f] >= WAVESILENT) || (wl[f] & 0x08))) wr[f] = 0x80;
     // Leading frames still on the previous note's frequency
     if ((keep) && (rec->fr[t].freq[n->voice] == rec->fr[n->start - 1].freq[n->voice]))
     {
@@ -1504,8 +2542,9 @@ static int noteentries(const RECORDING *rec, const ANOTE *n, int cap, unsigned c
     else keep = 0;
   }
   // Pitch that wanders without repeating (slides) would make every note an
-  // instrument of its own: keep the waveforms & absolute notes only
-  if (len > STABLEPROG)
+  // instrument of its own: keep the waveforms & absolute notes only (unless
+  // it fits: drift set)
+  if ((len > STABLEPROG) && (!drift))
   {
     int loop;
     if (findloop(wl, wr, len, &loop) > STABLEPROG)
@@ -1536,9 +2575,36 @@ static int noteentries(const RECORDING *rec, const ANOTE *n, int cap, unsigned c
     wl[cap - 1] = wl[best];
     wr[cap - 1] = wr[best];
     pv[cap - 1] = pv[best];
+    // (A pitch that keeps changing has none: an arpeggio coming back to the
+    // note stays on the note, a slide at the last tone's pitch of the rows
+    // before)
+    if ((bestcount * 2 <= len - cap + 1) && (wr[cap - 1] < 0x80))
+    {
+      int back = 0;
+      for (e = cap - 1; e < len; e++) if (wr[e] == 0) back++;
+      if (back < 2) for (e = cap - 2; (e >= 0) && ((wr[e] >= 0x80) || (wl[e] & 0x80) || (wl[e] < 0x10)); e--);
+      wr[cap - 1] = ((back < 2) && (e >= 0)) ? wr[e] : 0;
+    }
     len = cap;
   }
   return len;
+}
+
+// A wave program as written into the song: after the first row (which sets
+// the note's frequency), rows that keep the pitch the row before them gave
+// (on a loop, also the last row) don't set it: setting the note restarts
+// vibrato and stops slides
+static void keeppitch(unsigned char *wr, int len, int loop)
+{
+  unsigned char orig[PROGMAX + 1];
+  int f;
+  memcpy(orig, wr, len);
+  for (f = 1; f < len; f++)
+  {
+    if ((orig[f] >= 0x80) || (orig[f-1] != orig[f])) continue;
+    if ((loop == f) && (orig[len-1] != orig[f])) continue;
+    wr[f] = 0x80;
+  }
 }
 
 static int usespulse(const unsigned char *wl, int len)
@@ -1551,75 +2617,224 @@ static int usespulse(const unsigned char *wl, int len)
   return 0;
 }
 
-// Does the instrument play like the note?
-static int instrmatches(const AINSTR *in, const ANOTE *n, const SFRAME *f0, const unsigned char *wl, const unsigned char *wr,
-  const int *pv, int len, int pulse, const LEVEL *lv)
+// The wave & pulse programs of the instruments, and of notes that have a
+// program of their own (set by a command on their row): each once, their
+// rows counted against the tables' room
+typedef struct
 {
-  int f;
+  int len, loop;                  // Rows, loop row (-1 = stop)
+  unsigned char l[PROGMAX], r[PROGMAX];
+  int gateoff;                    // The program turns the gate off
+} AWAVE;
+
+typedef struct
+{
+  int len;
+  unsigned char l[MAXPULSEROWS + 1], r[MAXPULSEROWS + 1];
+} APULSE;
+
+#define MAXPROGS (MAX_TABLELEN / 2 + 1)
+
+typedef struct
+{
+  AWAVE wave[MAXPROGS];
+  APULSE pulse[MAXPROGS];
+  int numwave, numpulse;
+  int waverows, pulserows;
+} APROGS;
+
+// The wave program's index (added if new), -1 if there's no room
+static int findwave(APROGS *pg, const unsigned char *l, const unsigned char *r, int len, int loop)
+{
+  AWAVE *w;
+  int c;
+  for (c = 0; c < pg->numwave; c++)
+  {
+    w = &pg->wave[c];
+    if ((w->len == len) && (w->loop == loop) && (!memcmp(w->l, l, len)) && (!memcmp(w->r, r, len))) return c;
+  }
+  if ((pg->numwave >= MAXPROGS) || (pg->waverows + len + 1 > MAX_TABLELEN)) return -1;
+  w = &pg->wave[pg->numwave];
+  w->len = len;
+  w->loop = loop;
+  memcpy(w->l, l, len);
+  memcpy(w->r, r, len);
+  w->gateoff = 0;
+  for (c = 0; c < len; c++)
+  {
+    if (!(l[c] & 0x01)) w->gateoff = 1;
+  }
+  pg->waverows += len + 1;
+  return pg->numwave++;
+}
+
+static int findpulse(APROGS *pg, const unsigned char *l, const unsigned char *r, int len)
+{
+  APULSE *p;
+  int c;
+  for (c = 0; c < pg->numpulse; c++)
+  {
+    p = &pg->pulse[c];
+    if ((p->len == len) && (!memcmp(p->l, l, len)) && (!memcmp(p->r, r, len))) return c;
+  }
+  if ((pg->numpulse >= MAXPROGS) || (pg->pulserows + len > MAX_TABLELEN)) return -1;
+  p = &pg->pulse[pg->numpulse];
+  p->len = len;
+  memcpy(p->l, l, len);
+  memcpy(p->r, r, len);
+  pg->pulserows += len;
+  return pg->numpulse++;
+}
+
+// The pulse program for a note (into in): from its pulse values, or (its
+// sweep going on through the notes after it) from the pulse of them all
+static void notepulse(const ANOTE *n, const int *pv, int len, const LEVEL *lv, AINSTR *in)
+{
+  if ((n->pchain > len) && (lv->maxruns))
+  {
+    int chain[PULSECHAIN];
+    int f, frames = n->pchain;
+    if (n->pstart + frames > n->rec->numticks) frames = n->rec->numticks - n->pstart;
+    for (f = 0; f < frames; f++) chain[f] = n->rec->fr[n->pstart + f].pulse[n->voice];
+    if (frames > len)
+    {
+      makepulse(in, chain, frames, len, lv);
+      return;
+    }
+  }
+  makepulse(in, pv, len, len, lv);
+}
+
+#define DIFF_NONE 0
+#define DIFF_AD 1
+#define DIFF_SR 2
+#define DIFF_WAVE 3
+#define DIFF_PULSE 4
+
+// Does the instrument play like the note? Returns -1 if not, else what
+// differs (one thing at most, that a command on the note's row sets): AD
+// or SR when the level allows it, the wave or pulse program when override
+// is set (then also AD or SR at any level), else DIFF_NONE
+static int instrmatches(const AINSTR *in, const ANOTE *n, const SFRAME *f0, const unsigned char *wl, const unsigned char *wr,
+  const int *pv, int len, int pulse, const LEVEL *lv, int override)
+{
+  int f, diff = DIFF_NONE;
   int adok = (in->ad == f0->ad[n->voice]), srok = (in->sr == f0->sr[n->voice]);
   int gt = in->gatetimer & 0x3f;
-  if (in->firstwave != n->firstwave) return 0;
+  if (in->firstwave != n->firstwave) return -1;
   // How the note starts (after a rest: any way but legato)
-  if ((n->gtflags >= 0) ? ((in->gatetimer & 0xc0) != n->gtflags) : (in->gatetimer & 0x40)) return 0;
+  if ((n->gtflags >= 0) ? ((in->gatetimer & 0xc0) != n->gtflags) : (in->gatetimer & 0x40)) return -1;
   // When the gate goes off before the next row
-  if (gt > n->gtmax) return 0;
-  if ((n->gtwant) && (abs(gt - n->gtwant) > lv->gttol)) return 0;
-  if ((!adok) && (lv->adsrflex < 2)) return 0;
-  if ((!srok) && (lv->adsrflex < 1)) return 0;
-  if ((!adok) && (!srok)) return 0;
+  if (gt > n->gtmax) return -1;
+  if ((n->gtwant) && (abs(gt - n->gtwant) > lv->gttol)) return -1;
+  if ((!adok) && (!srok)) return -1;
+  if (!adok)
+  {
+    if ((!override) && (lv->adsrflex < 2)) return -1;
+    diff = DIFF_AD;
+  }
+  if (!srok)
+  {
+    if ((!override) && (lv->adsrflex < 1)) return -1;
+    diff = DIFF_SR;
+  }
+  if ((lv->vib) && ((in->vibdelay != n->vibdelay) || (in->vibleft != n->vibleft) || (in->vibright != n->vibright)))
+    return -1;
+  // A note whose pulse goes on from the note before can't have a pulse
+  // program: it would start the pulse over (while the pulse matters)
+  if ((n->pulsecont) && (in->plen) && (lv->pulsetol < 0x1000)) return -1;
   for (f = 0; f < len; f++)
   {
     int row = f;
     if (row >= in->wlen) row = (in->wloop >= 0) ? in->wloop + (f - in->wloop) % (in->wlen - in->wloop) : in->wlen - 1;
-    if ((wl[f] != in->wl[row]) || (wr[f] != in->wr[row])) return 0;
+    if ((wl[f] != in->wl[row]) || (wr[f] != in->wr[row]))
+    {
+      if ((!override) || (diff)) return -1;
+      diff = DIFF_WAVE;
+      break;
+    }
   }
   if (pulse)
   {
     int sim[PROGMAX];
-    if (!in->plen) return 0;
-    simpulse(in, len, sim);
-    for (f = 0; f < len; f++)
+    int same = (in->plen > 0);
+    if (same)
     {
-      if (pulsediff(sim[f], pv[f]) > lv->pulsetol) return 0;
+      simpulse(in, len, sim);
+      for (f = 0; f < len; f++)
+      {
+        if (pulsediff(sim[f], pv[f]) > lv->pulsetol) same = 0;
+      }
+    }
+    if (!same)
+    {
+      if ((!override) || (diff)) return -1;
+      diff = DIFF_PULSE;
     }
   }
-  return 1;
+  return diff;
 }
 
-// Gives every note an instrument at a level of detail. Returns the number
-// of instruments, or -1 if they don't fit (instruments or table rows) and
-// force isn't set
-static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxins, int levelnum, int force)
+// Gives every note an instrument at a level of detail (override: also one
+// that differs in one thing a command on the note's row sets: its AD, SR,
+// wave or pulse program). Returns the number of instruments, or -1 if they
+// don't fit (instruments or table rows) and force isn't set
+static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxins, APROGS *pg, int levelnum, int drift,
+  int override, int release, int force)
 {
   const LEVEL *lv = &levels[levelnum];
   int numins = 0, c, d;
-  int waverows = 0, pulserows = 0;
 
+  pg->numwave = pg->numpulse = 0;
+  pg->waverows = pg->pulserows = 0;
   for (c = 0; c < numnotes; c++)
   {
     ANOTE *n = order[c];
     const SFRAME *f0 = &n->rec->fr[n->start];
     unsigned char wl[PROGMAX], wr[PROGMAX];
     int pv[PROGMAX];
-    int len = noteentries(n->rec, n, lv->wcap, wl, wr, pv);
+    int len = noteentries(n->rec, n, lv->wcap, drift, release, wl, wr, pv);
     int pulse = usespulse(wl, len) && (!n->pulsecont);
     int time = notetime(n);
+    int best = -1, bestdiff = DIFF_PULSE + 1, w, p;
     AINSTR *in;
 
+    n->ovwave = n->ovpulse = -1;
     for (d = 0; d < numins; d++)
     {
-      if (instrmatches(&ins[d], n, f0, wl, wr, pv, len, pulse, lv)) break;
+      int k = instrmatches(&ins[d], n, f0, wl, wr, pv, len, pulse, lv, override);
+      if ((k < 0) || (k >= bestdiff)) continue;
+      best = d;
+      bestdiff = k;
+      if (k == DIFF_NONE) break;
     }
-    if (d < numins)
+    // (The note's own program, if there's room in the table for it)
+    if (bestdiff == DIFF_WAVE)
     {
-      n->instr = d;
-      if (time < ins[d].firstuse) ins[d].firstuse = time;
+      int loop, wlen = findloop(wl, wr, len, &loop);
+      n->ovwave = findwave(pg, wl, wr, wlen, loop);
+      if (n->ovwave < 0) best = -1;
+    }
+    if (bestdiff == DIFF_PULSE)
+    {
+      AINSTR t;
+      memset(&t, 0, sizeof t);
+      notepulse(n, pv, len, lv, &t);
+      n->ovpulse = findpulse(pg, t.pl, t.pr, t.plen);
+      if (n->ovpulse < 0) best = -1;
+    }
+    if (best >= 0)
+    {
+      n->instr = best;
+      if (time < ins[best].firstuse) ins[best].firstuse = time;
       continue;
     }
+    n->ovwave = n->ovpulse = -1;
     if (numins >= maxins)
     {
-      int best = 0, bestscore = -1;
+      int bestscore = -1;
       if (!force) return -1;
+      best = 0;
       // Out of instruments: the most alike, the ADSR first (a command can
       // set one of AD/SR)
       for (d = 0; d < numins; d++)
@@ -1629,8 +2844,13 @@ static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxin
         if (ins[d].sr == f0->sr[n->voice]) score += 16;
         if (ins[d].gateoff == n->shortgate) score += 8;
         if ((ins[d].wl[0] & 0xf0) == (wl[0] & 0xf0)) score += 8;
-        if ((ins[d].plen > 0) == (pulse > 0)) score += 4;
+        // (A note whose pulse goes on is better off with a pulse program
+        // than with none: the pulse may not have been set. One that sets
+        // the pulse would be silent without: that before the ADSR)
+        if ((usespulse(wl, len)) && (!n->pulsecont)) score += (ins[d].plen > 0) ? 40 : 0;
+        else if ((ins[d].plen > 0) == (usespulse(wl, len) > 0)) score += 4;
         if (ins[d].gatetimer == n->gatetimer) score += 1;
+        if ((ins[d].vibdelay == n->vibdelay) && (ins[d].vibleft == n->vibleft) && (ins[d].vibright == n->vibright)) score += 6;
         if (score > bestscore)
         {
           bestscore = score;
@@ -1647,6 +2867,12 @@ static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxin
     in->sr = f0->sr[n->voice];
     in->firstwave = n->firstwave;
     in->gatetimer = n->gatetimer;
+    if (lv->vib)
+    {
+      in->vibdelay = n->vibdelay;
+      in->vibleft = n->vibleft;
+      in->vibright = n->vibright;
+    }
     in->wlen = findloop(wl, wr, len, &in->wloop);
     memcpy(in->wl, wl, in->wlen);
     memcpy(in->wr, wr, in->wlen);
@@ -1654,7 +2880,7 @@ static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxin
     {
       if (!(in->wl[d] & 0x01)) in->gateoff = 1;
     }
-    if (pulse) makepulse(in, pv, len, lv);
+    if (pulse) notepulse(n, pv, len, lv, in);
     in->firstuse = time;
 #ifdef SID2SNG_DEBUG
     if ((getenv("SID2SNG_INSDUMP")) && (atoi(getenv("SID2SNG_INSDUMP")) == levelnum))
@@ -1670,19 +2896,10 @@ static int assigninstruments(ANOTE **order, int numnotes, AINSTR *ins, int maxin
 #endif
     n->instr = numins;
     // The table has each program once (addprogram() finds it again)
-    for (d = 0; d < numins; d++)
-    {
-      if ((ins[d].wlen == in->wlen) && (ins[d].wloop == in->wloop) && (!memcmp(ins[d].wl, in->wl, in->wlen)) &&
-        (!memcmp(ins[d].wr, in->wr, in->wlen))) break;
-    }
-    if (d == numins) waverows += in->wlen + 1;
-    for (d = 0; d < numins; d++)
-    {
-      if ((ins[d].plen == in->plen) && (!memcmp(ins[d].pl, in->pl, in->plen)) && (!memcmp(ins[d].pr, in->pr, in->plen))) break;
-    }
-    if (d == numins) pulserows += in->plen;
+    w = findwave(pg, in->wl, in->wr, in->wlen, in->wloop);
+    p = in->plen ? findpulse(pg, in->pl, in->pr, in->plen) : 0;
     numins++;
-    if ((!force) && ((waverows > MAX_TABLELEN) || (pulserows > MAX_TABLELEN))) return -1;
+    if ((!force) && ((w < 0) || (p < 0))) return -1;
   }
   return numins;
 }
@@ -1713,6 +2930,20 @@ static int addprogram(SNGDATA *sng, int t, const unsigned char *pl, const unsign
   }
   sng->tablelen[t] += len;
   return pos + 1;
+}
+
+// A wave program into the wavetable, as written into the song: after the
+// first row, rows that keep the pitch don't set it (keeppitch()), then the
+// jump to the loop (or the stop). Returns the 1-based row, 0 if no room
+static int wavetotable(SNGDATA *sng, const unsigned char *l, const unsigned char *r, int len, int loop)
+{
+  unsigned char wl[PROGMAX + 1], wr[PROGMAX + 1];
+  memcpy(wl, l, len);
+  memcpy(wr, r, len);
+  keeppitch(wr, len, loop);
+  wl[len] = 0xff;
+  wr[len] = (loop >= 0) ? loop + 1 : 0;
+  return addprogram(sng, WTBL, wl, wr, len + 1);
 }
 
 // Speedtable row for a glide speed (0 = none: tie notes)
@@ -1761,6 +2992,239 @@ static int growtonotes(ANOTE **notes, int *maxnotes, int numnotes)
   return 1;
 }
 
+// GoatTracker's frequency table (PAL)
+static const unsigned short gtdefaultfreq[96] =
+{
+  0x0117,0x0127,0x0139,0x014b,0x015f,0x0174,0x018a,0x01a1,0x01ba,0x01d4,0x01f0,0x020e,
+  0x022d,0x024e,0x0271,0x0296,0x02be,0x02e8,0x0314,0x0343,0x0374,0x03a9,0x03e1,0x041c,
+  0x045a,0x049c,0x04e2,0x052d,0x057c,0x05cf,0x0628,0x0685,0x06e8,0x0752,0x07c1,0x0837,
+  0x08b4,0x0939,0x09c5,0x0a5a,0x0af7,0x0b9e,0x0c4f,0x0d0a,0x0dd1,0x0ea3,0x0f82,0x106e,
+  0x1168,0x1271,0x138a,0x14b3,0x15ee,0x173c,0x189e,0x1a15,0x1ba2,0x1d46,0x1f04,0x20dc,
+  0x22d0,0x24e2,0x2714,0x2967,0x2bdd,0x2e79,0x313c,0x3429,0x3744,0x3a8d,0x3e08,0x41b8,
+  0x45a1,0x49c5,0x4e28,0x52cd,0x57ba,0x5cf1,0x6278,0x6853,0x6e87,0x751a,0x7c10,0x8371,
+  0x8b42,0x9389,0x9c4f,0xa59b,0xaf74,0xb9e2,0xc4f0,0xd0a6,0xdd0e,0xea33,0xf820,0xffff
+};
+
+// The frequency table the notes are worked out for: GoatTracker's own (base
+// pitch 0), or the one the tracker makes for a base pitch (A-4 in Hz on the
+// PAL clock: calculatefreqtable() in goattrk2.c, 12 notes an octave)
+static void settuning(double basepitch)
+{
+  int c;
+  if (basepitch <= 0.0)
+  {
+    tunehz = 440.0;
+    memcpy(gtfreq, gtdefaultfreq, sizeof gtfreq);
+    return;
+  }
+  tunehz = basepitch;
+  for (c = 0; c < 96; c++)
+  {
+    // (The tracker keeps the base pitch as a float)
+    double freq = (double)(float)basepitch * (16777216.0 / 985248.0) * pow(2.0, 0.25) / 32.0 * pow(2.0, c / 12.0);
+    int intfreq = (int)(freq + 0.5);
+    gtfreq[c] = (intfreq > 0xffff) ? 0xffff : intfreq;
+  }
+}
+
+// EXACT: the tuning of a packed song. The packer puts the frequency table
+// (the notes the song uses, low bytes then high bytes) just before the song
+// table; the player reads it with "lda lo-FIRSTNOTE,y; sta; lda hi-FIRSTNOTE,
+// y". Returns the base pitch whose table it is, 0 for GoatTracker's own, -1
+// if not found or another tuning
+static double packedtuning(SCAN *sc, unsigned songtbllo)
+{
+  unsigned pos = sc->lo;
+  while (findnext(sc, "B9 <a >a (9D ?? ?? | 95 ?\?) B9 <b >b (9D ?? ?? | 95 ?\?)", &pos))
+  {
+    unsigned a = sc->cap[0], b = sc->cap[1];
+    int num = (int)b - (int)a, first, n, top, same = 1, k;
+    double est;
+    pos++;
+    if ((num < 1) || (num > 96)) continue;
+    first = (int)songtbllo - (int)b - num;
+    if ((first < 0) || (first + num > 96) || (a + first < sc->lo) || (b + first + num > sc->hi)) continue;
+    for (n = first; n < first + num; n++)
+    {
+      unsigned f = sc->mem[a + n] | (sc->mem[b + n] << 8);
+      if (f != gtdefaultfreq[n]) same = 0;
+    }
+    if (same) return 0.0;
+    // The base pitch from the highest note (the most exact; not one cut off
+    // at $FFFF), the one of the nearby ones in 0.01 Hz steps that gives the
+    // whole table
+    top = first + num - 1;
+    while ((top > first) && ((sc->mem[a + top] | (sc->mem[b + top] << 8)) == 0xffff)) top--;
+    est = (sc->mem[a + top] | (sc->mem[b + top] << 8)) * 985248.0 / 16777216.0 * pow(2.0, (57 - top) / 12.0);
+    est = floor(est * 100.0 + 0.5) / 100.0;
+    for (k = 0; k < 7; k++)
+    {
+      double tryhz = est + ((k & 1) ? -0.01 : 0.01) * ((k + 1) / 2);
+      if (tryhz <= 0.0) continue;
+      settuning(tryhz);
+      for (n = first; n < first + num; n++)
+      {
+        unsigned f = sc->mem[a + n] | (sc->mem[b + n] << 8);
+        if (f != gtfreq[n]) break;
+      }
+      if (n == first + num)
+      {
+        settuning(0.0);
+        return tryhz;
+      }
+    }
+    settuning(0.0);
+    return -1.0;
+  }
+  return -1.0;
+}
+
+#define VIBFRAMES 48              // Frames of a note looked at for vibrato
+#define VIBMAXCMP 31              // Slowest vibrato (ticks between turns)
+#define VIBMAXDELAY 24
+
+// The frequency offsets of GoatTracker's instrument vibrato (depth 1) from a
+// note's start (tick 0): the first wave row sets the note (tick 1), effects
+// run from tick 2 on (realtime optimization off, see approxconvert()), after
+// the delay counted down on them
+static void simvib(int delay, int cmp, int frames, int *out)
+{
+  unsigned char vt = 0;
+  int off = 0, f, dl = delay;
+  for (f = 0; f < frames; f++)
+  {
+    if (f >= 2)
+    {
+      if (dl > 1) dl--;
+      else
+      {
+        if ((vt < 0x80) && (vt > cmp)) vt ^= 0xff;
+        vt += 2;
+        off += (vt & 1) ? -1 : 1;
+      }
+    }
+    out[f] = off;
+  }
+}
+
+// Vibrato in a note that holds its pitch: the instrument vibrato (delay,
+// speed, depth: note-relative if near as good, so that the notes of an
+// instrument can share it) that gives its frequency offsets best
+static void findvibrato(const SFRAME *fr, int numticks, const int *pn, ANOTE *n)
+{
+  int o[VIBFRAMES], s[VIBFRAMES], w[VIBFRAMES];
+  int len, f, v = n->voice, turns = 0, dir = 0, lo = 0x10000, hi = -1, count = 0;
+  int delay, cmp, bestdelay = 0, bestl = 0, bestr = 0, onset = 0, startdelay;
+  int absdelay = 0, absl = 0, absr = 0, reldelay = 0, rell = 0, relr = 0;
+  double e0 = 0.0, best, bestabs = 1e30, bestrel = 1e30;
+  unsigned center;
+
+  n->vibdelay = n->vibleft = n->vibright = 0;
+  if ((n->legato) || (n->base < 0) || (n->base + 1 >= 96)) return;
+  for (len = 0; (len < VIBFRAMES) && (n->start + len < n->end) && (n->start + len < numticks); len++);
+  if (len < 6) return;
+  // The frames that play the note (waveform, no noise or test bit)
+  for (f = 0; f < len; f++)
+  {
+    const SFRAME *fx = &fr[n->start + f];
+    unsigned char c = fx->ctrl[v];
+    w[f] = (f >= 1) && (c & 0x70) && (!(c & 0x88)) && (fx->freq[v]) && (pn[n->start + f] == n->base);
+    if ((f >= 1) && (c & 0x70) && (!(c & 0x88)) && (pn[n->start + f] != n->base)) return;
+    if (!w[f]) continue;
+    if ((int)fx->freq[v] < lo) lo = fx->freq[v];
+    if ((int)fx->freq[v] > hi) hi = fx->freq[v];
+    count++;
+  }
+  if ((count < 5) || (hi <= lo)) return;
+  center = (lo + hi + 1) / 2;
+  // Big enough to hear (8 cents), turning a few times
+  if ((hi - lo) * 1000 < (int)center * 5) return;
+  for (f = 0; f < len; f++)
+  {
+    o[f] = w[f] ? (int)fr[n->start + f].freq[v] - (int)center : 0;
+    e0 += (double)o[f] * o[f];
+    if ((f) && (w[f]) && (w[f-1]) && (o[f] != o[f-1]))
+    {
+      int d = (o[f] > o[f-1]) ? 1 : -1;
+      if ((dir) && (d != dir)) turns++;
+      dir = d;
+    }
+  }
+  if (turns < 2) return;
+
+  // Where it starts wobbling: the delay. (Its phase can't be had: many
+  // players' vibrato runs on through the notes, GoatTracker's starts with
+  // each note. So the speed and depth are fitted at the phase that fits
+  // best, but the instrument starts it where the note does)
+  for (f = 1; (f < len) && ((!w[f]) || (!o[f]) || (o[f] == o[f-1])); f++);
+  onset = f;
+  startdelay = (onset - 1 > 1) ? onset - 1 : 1;
+  if (startdelay > VIBMAXDELAY) return;
+  for (cmp = 0; cmp <= VIBMAXCMP; cmp++)
+  {
+    for (delay = startdelay; (delay <= startdelay + 2 * cmp + 4) && (delay <= VIBMAXDELAY + 2 * VIBMAXCMP); delay++)
+    {
+      double so = 0.0, ss = 0.0, err;
+      int depth, shift;
+      simvib(delay, cmp, len, s);
+      for (f = 0; f < len; f++)
+      {
+        if (!w[f]) continue;
+        so += (double)o[f] * s[f];
+        ss += (double)s[f] * s[f];
+      }
+      if (ss <= 0.0) continue;
+      depth = (int)floor(so / ss + 0.5);
+      if (depth >= 1)
+      {
+        if (depth > 255) depth = 255;
+        err = e0 - 2.0 * depth * so + (double)depth * depth * ss;
+        if (err < bestabs)
+        {
+          bestabs = err;
+          absdelay = startdelay;
+          absl = cmp;
+          absr = depth;
+        }
+      }
+      // Note-relative: the semitone's frequency step shifted down
+      for (shift = 0; shift < 8; shift++)
+      {
+        int d = (gtfreq[n->base + 1] - gtfreq[n->base]) >> shift;
+        if (d < 1) break;
+        err = e0 - 2.0 * d * so + (double)d * d * ss;
+        if (err < bestrel)
+        {
+          bestrel = err;
+          reldelay = startdelay;
+          rell = 0x80 | cmp;
+          relr = shift;
+        }
+      }
+    }
+  }
+  // Note-relative when near as good (an instrument's notes can share it)
+  if ((reldelay) && (bestrel <= bestabs * 1.25 + e0 * 0.02))
+  {
+    best = bestrel;
+    bestdelay = reldelay;
+    bestl = rell;
+    bestr = relr;
+  }
+  else
+  {
+    best = bestabs;
+    bestdelay = absdelay;
+    bestl = absl;
+    bestr = absr;
+  }
+  // Only a good fit
+  if ((!bestdelay) || (best > e0 * 0.45)) return;
+  n->vibdelay = bestdelay;
+  n->vibleft = bestl;
+  n->vibright = bestr;
+}
+
 // The tick when a note can't be heard any more after its gate went off (the
 // release has died down, at the release rate of each frame's SR), at most
 // its end. tickms: milliseconds per tick
@@ -1789,6 +3253,88 @@ static int firsttick(int row, int phase, int tempo)
   return phase + row * tempo - tempo / 2;
 }
 
+//
+// A tune whose timing shifts a frame or two against a grid of rows now and
+// then (a part a frame longer than whole rows, say) is put on the rows by
+// leaving those frames out (or doubling them): song ticks are the
+// recording's ticks without them. at[] the ticks where the timing shifts,
+// by[] by how much, in order
+//
+
+#define DRIFTRUN 4                // Onsets in a row on a shifted grid: the timing has shifted
+#define DRIFTMAX 2                // Most ticks it may shift by (a third of a row at most)
+
+static int warptick(const int *at, const int *by, int num, int t)
+{
+  int i, d = 0;
+  for (i = 0; (i < num) && (at[i] <= t); i++) d += by[i];
+  return t - d;
+}
+
+// The recording's tick a song tick plays (where frames are left out, the
+// later ones)
+static int unwarptick(const int *at, const int *by, int num, int g)
+{
+  int i, d = 0;
+  for (i = 0; i < num; i++)
+  {
+    if (at[i] - (d + by[i]) > g) break;
+    d += by[i];
+  }
+  return g + d;
+}
+
+// Where the onsets (in order) shift against a grid of tt ticks: a run of
+// DRIFTRUN onsets all off by the same few ticks. Returns how many shifts
+// (max at most)
+static int finddrift(const int *on, int n, int tt, int *at, int *by, int max)
+{
+  int phase = 0, hits = -1, run = 0, runby = 0, runstart = 0, num = 0, shift = 0, c, p;
+  if ((!n) || (tt < 3)) return 0;
+  // (Starting on the grid most of the first notes are on)
+  for (p = 0; p < tt; p++)
+  {
+    int h = 0;
+    for (c = 0; (c < n) && (c < 64); c++) if (!((on[c] - p) % tt)) h++;
+    if (h > hits)
+    {
+      hits = h;
+      phase = p;
+    }
+  }
+  for (c = 0; c < n; c++)
+  {
+    int r, d;
+    if ((c) && (on[c] == on[c-1])) continue;
+    r = (((on[c] - shift - phase) % tt) + tt) % tt;
+    if (!r)
+    {
+      run = 0;
+      continue;
+    }
+    d = (r > tt / 2) ? r - tt : r;
+    if ((abs(d) > DRIFTMAX) || (abs(d) * 3 > tt))
+    {
+      run = 0;
+      continue;
+    }
+    if ((run) && (d == runby)) run++;
+    else
+    {
+      run = 1;
+      runby = d;
+      runstart = on[c];
+    }
+    if (run < DRIFTRUN) continue;
+    if (num >= max) break;
+    at[num] = runstart;
+    by[num++] = d;
+    shift += d;
+    run = 0;
+  }
+  return num;
+}
+
 // One subtune of the conversion
 typedef struct
 {
@@ -1802,17 +3348,18 @@ typedef struct
   ANOTE *notes;
   int numnotes;
   int tempo, phase;
+  int *driftat, *driftby;         // Where the rows' timing shifts, by how much (see
+  int numdrift;                   // finddrift()): rows are on song ticks
   int looprow, endrow;            // Loop: rows [looprow, endrow) repeat (-1 = no loop)
+  int stopped;                    // The tune stops (nothing changes at the end of the recording)
   int totalrows;                  // Rows in the grid
   unsigned char *grid[MAX_CHN];   // The rows, 4 bytes each
-  int songlen;                    // Orderlist positions
-  int restart;                    // Orderlist restart position
-  int *chunkrow, *chunklen;       // First row & rows of each orderlist position
-  int *chunk[MAX_CHN];            // Pattern (UPATT index) at each orderlist position
   int usednotes, dropped, truncated;
   int gttempo, gtfunk;            // Tempo in the song; gtfunk: funktempo with this second value (0 = none)
   double tickratio;               // Song player ticks per play call of the SID (1 = the same speed)
   double pitchdist[2];            // How far the notes are from the frequency table, played PAL/NTSC (semitones)
+  double tunesin, tunecos;        // The notes' pitch beyond the nearest note (A-4 = 440 Hz as they
+  int tunecount;                  // sound) as directions on a circle, summed; how many
 } ASUB;
 
 static void freesub(ASUB *s)
@@ -1821,13 +3368,12 @@ static void freesub(ASUB *s)
   for (v = 0; v < MAX_CHN; v++)
   {
     free(s->grid[v]);
-    free(s->chunk[v]);
     free(s->rec.pn[v]);
   }
-  free(s->chunkrow);
-  free(s->chunklen);
   free(s->notes);
   free(s->fr);
+  free(s->driftat);
+  free(s->driftby);
 }
 
 // Frames alike for finding the loop. The pulse width is left out: a pulse
@@ -1891,17 +3437,21 @@ static int findrepeat(const SFRAME *fr, int numticks, const int *onsetsum, int s
 // note's sound and (findloop set) where it starts repeating. Returns 1 on
 // success, 0 if the subtune can't be used (the reason in s->err), -1 if
 // out of memory
+static int ratemultiplier(double rate);
+
 static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds, int findloop, ASUB *s)
 {
   const SFRAME *fr;
   ANOTE *notes = NULL;
-  int *onsets = NULL, *onsetsum = NULL;
+  int *onsets = NULL, *onsetsum = NULL, *warped = NULL, *driftat = NULL, *driftby = NULL;
+  int drifting;
   int numticks = 0, numnotes = 0, maxnotes = 0;
   int tempo = 6, phase = 0;
   int result = -1, v, c, d, t;
 
   result = record(sf, s->subtune, seconds, &s->fr, &s->numticks, &s->rate, s->err, sizeof s->err);
   if (result <= 0) return result;
+  drifting = 1;
   result = -1;
   fr = s->fr;
   numticks = s->numticks;
@@ -1921,7 +3471,21 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
       else
       {
         double st = notesemis(freq);
-        if ((prev < 0) || (fabs(st - prev) >= 0.5 + STICKY)) prev = clampint((int)floor(st + 0.5), 0, MAX_NOTES - 1);
+        int near = clampint((int)floor(st + 0.5), 0, MAX_NOTES - 1);
+        if ((prev < 0) || (fabs(st - prev) >= 0.5 + STICKY)) prev = near;
+        // Settled (the same for as long as a new note lasts, so not
+        // vibrato): the nearest note. A slide that ends a bit off a note
+        // would stay on the one before
+        else if ((prev != near) && (t >= RUNMIN - 1))
+        {
+          int k;
+          for (k = 1; (k < RUNMIN) && (fr[t-k].freq[v] == freq); k++);
+          if (k == RUNMIN)
+          {
+            prev = near;
+            for (k = 1; k < RUNMIN; k++) s->rec.pn[v][t-k] = prev;
+          }
+        }
         s->rec.pn[v][t] = prev;
       }
     }
@@ -1948,6 +3512,7 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
         notes[cur].start = t;
         notes[cur].end = numticks;
         notes[cur].gateoff = -1;
+        notes[cur].hradsr = -1;
         notes[cur].base = -1;
       }
       else if ((!gate) && (prevgate) && (cur >= 0) && (notes[cur].gateoff < 0)) notes[cur].gateoff = t;
@@ -2049,17 +3614,27 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
     double srcclock = (sf->info.clock == 2) ? NTSC_CLOCK : PAL_CLOCK;
     int k, count = 0;
     s->pitchdist[0] = s->pitchdist[1] = 0.0;
+    s->tunesin = s->tunecos = 0.0;
+    s->tunecount = 0;
     for (c = 0; c < numnotes; c++)
     {
       int t = (notes[c].start + 2 < numticks) ? notes[c].start + 2 : notes[c].start;
       unsigned freq = fr[t].freq[notes[c].voice];
+      unsigned char ctrl = fr[t].ctrl[notes[c].voice];
+      double semi;
       if (freq < 0x100) continue;
       for (k = 0; k < 2; k++)
       {
-        double semi = 12.0 * log(freq * srcclock * PAL_CLOCK / (k ? NTSC_CLOCK : PAL_CLOCK) / 16777216.0 / 440.0) / log(2.0);
+        semi = 12.0 * log(freq * srcclock * PAL_CLOCK / (k ? NTSC_CLOCK : PAL_CLOCK) / 16777216.0 / 440.0) / log(2.0);
         s->pitchdist[k] += fabs(semi - floor(semi + 0.5));
       }
       count++;
+      // (Tones only: noise is often a fixed pitch)
+      if ((ctrl & 0x80) || (ctrl & 0x08) || (!(ctrl & 0x70))) continue;
+      semi = 12.0 * log(freq * srcclock / 16777216.0 / 440.0) / log(2.0);
+      s->tunesin += sin(TWOPI * semi);
+      s->tunecos += cos(TWOPI * semi);
+      s->tunecount++;
     }
     if (count)
     {
@@ -2078,7 +3653,10 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
   // Rhythm: the most common time between notes, split into rows. From the
   // length asked for (a longer recording to find the loop gives the same)
   onsets = (int *)malloc(numnotes * sizeof(int));
-  if (!onsets) goto done;
+  warped = (int *)malloc(numnotes * sizeof(int));
+  driftat = (int *)malloc((numnotes + 1) * sizeof(int));
+  driftby = (int *)malloc((numnotes + 1) * sizeof(int));
+  if ((!onsets) || (!warped) || (!driftat) || (!driftby)) goto done;
   {
     int fps = (sf->info.clock == 2) ? 60 : 50;
     int rhythmend = (int)(clampint(opt->seconds, 1, 1800) * fps * s->rate) + 1;
@@ -2103,31 +3681,53 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
     else if (opt->rowsperbeat > 0) tempo = (common + opt->rowsperbeat / 2) / opt->rowsperbeat;
     else
     {
-      // The longest row that most notes start on
-      int bestt = 0;
-      double bestscore = -1.0;
+      // The longest row that most notes start on, unless it loses notably
+      // more notes than finer rows (a note off the rows that lands on the
+      // row of the note before it is lost), or has notably more off them
+      // (On the rows with the shifts of the timing taken out)
+      int bestt = 0, lost[9], fewest = 0x7fffffff;
+      double bestscore = -1.0, score[9], finest = 0.0;
       for (d = 1; d <= 8; d++)
       {
         int tt = common / d;
-        int p, hits = 0;
-        double score;
+        int p, hits = 0, bestp = 0, nd;
+        score[d] = -1.0;
+        lost[d] = 0;
         if ((common % d) || (tt < 3)) continue;
+        nd = drifting ? finddrift(onsets, numon, tt, driftat, driftby, numon) : 0;
+        for (c = 0; c < numon; c++) warped[c] = warptick(driftat, driftby, nd, onsets[c]);
         for (p = 0; p < tt; p++)
         {
           int h = 0;
-          for (c = 0; c < numon; c++) if ((onsets[c] - p) % tt == 0) h++;
-          if (h > hits) hits = h;
+          for (c = 0; c < numon; c++) if ((warped[c] - p) % tt == 0) h++;
+          if (h > hits)
+          {
+            hits = h;
+            bestp = p;
+          }
         }
-        score = (double)hits / numon;
-        if (score >= 0.8)
+        score[d] = (double)hits / numon;
+        if (score[d] > finest) finest = score[d];
+        for (c = 1; c < numnotes; c++)
         {
-          bestt = tt;
+          if ((notes[c].start < rhythmend) && (notes[c].voice == notes[c-1].voice) &&
+            (timetorow(warptick(driftat, driftby, nd, notes[c].start), bestp, tt) ==
+            timetorow(warptick(driftat, driftby, nd, notes[c-1].start), bestp, tt))) lost[d]++;
+        }
+        if (lost[d] < fewest) fewest = lost[d];
+      }
+      for (d = 1; d <= 8; d++)
+      {
+        if (score[d] < 0.0) continue;
+        if ((score[d] >= 0.8) && (lost[d] <= fewest + numon * TEMPOLOSS) && (score[d] >= finest - TEMPOOFF))
+        {
+          bestt = common / d;
           break;
         }
-        if (score > bestscore + 0.05)
+        if ((finest < 0.8) && (score[d] > bestscore + 0.05))
         {
-          bestscore = score;
-          bestt = tt;
+          bestscore = score[d];
+          bestt = common / d;
         }
       }
       if (!bestt) bestt = (common < 3) ? common * ((3 + common - 1) / common) : common;
@@ -2135,13 +3735,31 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
     }
     tempo = clampint(tempo, 3, 0x7f);
 
+    // Where the timing shifts, over the whole recording
+    {
+      int *all = (int *)malloc((numnotes + 1) * sizeof(int));
+      if (!all) goto done;
+      for (c = 0; c < numnotes; c++) all[c] = notes[c].start;
+      qsort(all, numnotes, sizeof(int), cmpint);
+      s->driftat = (int *)malloc((numnotes / DRIFTRUN + 1) * sizeof(int));
+      s->driftby = (int *)malloc((numnotes / DRIFTRUN + 1) * sizeof(int));
+      if ((!s->driftat) || (!s->driftby))
+      {
+        free(all);
+        goto done;
+      }
+      s->numdrift = drifting ? finddrift(all, numnotes, tempo, s->driftat, s->driftby, numnotes / DRIFTRUN + 1) : 0;
+      free(all);
+    }
+    for (c = 0; c < numon; c++) warped[c] = warptick(s->driftat, s->driftby, s->numdrift, onsets[c]);
+
     // Where the rows start
     {
       int hits = -1;
       for (d = 0; d < tempo; d++)
       {
         int h = 0;
-        for (c = 0; c < numon; c++) if ((onsets[c] >= d) && ((onsets[c] - d) % tempo == 0)) h++;
+        for (c = 0; c < numon; c++) if ((warped[c] >= d) && ((warped[c] - d) % tempo == 0)) h++;
         if (h > hits)
         {
           hits = h;
@@ -2150,7 +3768,7 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
       }
     }
   }
-  for (c = 0; c < numnotes; c++) notes[c].row = timetorow(notes[c].start, phase, tempo);
+  for (c = 0; c < numnotes; c++) notes[c].row = timetorow(warptick(s->driftat, s->driftby, s->numdrift, notes[c].start), phase, tempo);
 
   // Hardrestart (or not) from the gap before each note: a short gap is the
   // previous note's gate going off before this one (tied, its gatetimer
@@ -2179,6 +3797,7 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
           if ((fr[t].ad[v] != fr[p->start].ad[v]) || (fr[t].sr[v] != fr[p->start].sr[v])) hr = 1;
         }
         n->gtflags = hr ? 0 : 0x80;
+        if (hr) n->hradsr = (fr[n->start - 1].ad[v] << 8) | fr[n->start - 1].sr[v];
         p->tied = 1;
       }
     }
@@ -2233,13 +3852,77 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
       // The gate goes off before the next row (a keyoff can't be that
       // early): the program turns it off and goes on into the release, where
       // the sound still changes (drum noise, arpeggios). The frames after the
-      // gate goes off are in the program only while the release is heard
-      n->shortgate = (!n->tied) && (!n->legato) && (n->gateoff < n->end) && (timetorow(n->gateoff, phase, tempo) <= n->row);
-      if ((n->tied) || (n->shortgate)) d = audibleend(fr, n, tickms);
-      else d = n->gateoff;
+      // gate goes off are in the program only while the release is heard;
+      // so for a note ended by a keyoff (the program goes on after it) when
+      // the sound changes there
+      n->shortgate = (!n->tied) && (!n->legato) && (n->gateoff < n->end) &&
+        (timetorow(warptick(s->driftat, s->driftby, s->numdrift, n->gateoff), phase, tempo) <= n->row);
+      d = audibleend(fr, n, tickms);
+      n->gplen = -1;
+      if ((!n->tied) && (!n->shortgate) && (n->gateoff > n->pstart) && (n->gateoff < numticks))
+      {
+        const SFRAME *g = &fr[n->gateoff - 1];
+        n->gplen = clampint(n->gateoff - n->pstart, 1, PROGMAX);
+        for (t = n->gateoff; (t < d) && (t < numticks); t++)
+        {
+          if (((fr[t].ctrl[v] | 0x01) != (g->ctrl[v] | 0x01)) || (fr[t].freq[v] != g->freq[v])) break;
+        }
+        if ((t >= d) || (t >= numticks)) d = n->gateoff;
+      }
       if (d > numticks) d = numticks;
       n->plen = clampint(d - n->pstart, 1, PROGMAX);
+      if (n->gplen < 0) n->gplen = n->plen;
     }
+  }
+  // A pulse can go on from the previous note only when an earlier note of
+  // the voice has set one: the first pulse note sets it (the song starts
+  // with the pulse at 0, silent). (Pulse in the release after a keyoff
+  // doesn't count: the program may leave it out)
+  {
+    int pulseset[MAX_CHN] = {0, 0, 0};
+    for (c = 0; c < numnotes; c++)
+    {
+      ANOTE *n = &notes[c];
+      int pulse = 0;
+      if (n->legato) continue;
+      for (t = n->pstart; (t < n->pstart + n->gplen) && (t < numticks); t++)
+      {
+        if ((fr[t].ctrl[n->voice] & 0x40) && (fr[t].ctrl[n->voice] < 0x80)) pulse = 1;
+      }
+      if (!pulse) continue;
+      if (!pulseset[n->voice]) n->pulsecont = 0;
+      pulseset[n->voice] = 1;
+    }
+  }
+  // A note that starts a pulse sweep the next notes go on with (their
+  // instruments have no pulse program): its program follows the sweep
+  // through them, up to the next note that starts the pulse anew
+  for (c = 0; c < numnotes; c++) notes[c].pchain = notes[c].plen;
+  for (c = 0; c < numnotes; c++)
+  {
+    ANOTE *n = &notes[c];
+    int e, end, goeson = 0;
+    if ((n->legato) || (n->pulsecont)) continue;
+    for (e = c + 1; (e < numnotes) && (notes[e].voice == n->voice); e++)
+    {
+      int pulse = 0;
+      for (t = notes[e].pstart; (t < notes[e].pstart + notes[e].plen) && (t < numticks); t++)
+      {
+        if ((fr[t].ctrl[n->voice] & 0x40) && (fr[t].ctrl[n->voice] < 0x80)) pulse = 1;
+      }
+      if ((pulse) && (!notes[e].pulsecont)) break;
+      if ((pulse) && (!notes[e].legato)) goeson = 1;
+    }
+    if (!goeson) continue;
+    end = ((e < numnotes) && (notes[e].voice == n->voice)) ? notes[e].pstart : numticks;
+    if (end > n->pstart + PULSECHAIN) end = n->pstart + PULSECHAIN;
+    // (Up to where the pulse is set anew)
+    for (t = n->pstart + n->plen; t < end; t++)
+    {
+      int d = pulsedelta(fr[t].pulse[n->voice], fr[t-1].pulse[n->voice]);
+      if ((d > 127) || (d < -128)) end = t;
+    }
+    n->pchain = clampint(end - n->pstart, n->plen, PULSECHAIN);
   }
 
   // When the gate goes off: the player reads the next row (a keyoff, or the
@@ -2273,12 +3956,22 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
     if ((want >= tempo) && (rb - 1 >= n->offfirst)) want -= tempo - 1;
     n->offwant = clampint(want, 1, tempo - 1);
   }
+  for (c = 0; c < numnotes; c++) findvibrato(fr, numticks, s->rec.pn[notes[c].voice], &notes[c]);
   s->tempo = tempo;
   s->phase = phase;
 
+  // A tune that stops: nothing changes for a while at the end
+  {
+    int fps = (sf->info.clock == 2) ? 60 : 50;
+    for (t = numticks - 1; (t > 0) && (sameframe(&fr[t], &fr[t-1])); t--);
+    s->stopped = (numticks - t >= (int)(STOPPEDSECS * fps * s->rate) + 1);
+  }
+
   // The loop: where the tune starts repeating, on whole rows (the period a
   // whole number of rows, the loop starting on the first frame of a row).
-  // It has to leave out at least a pattern of rows
+  // It has to leave out at least a pattern of rows. (With the timing
+  // shifting, the period in song ticks is whole rows, in the recording's it
+  // may be more or less)
   s->looprow = -1;
   if (findloop)
   {
@@ -2291,19 +3984,24 @@ static int analysesub(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, int seconds
     if (!onsetsum) goto done;
     for (c = 0; c < numnotes; c++) onsetsum[notes[c].start + 1]++;
     for (t = 0; t < numticks; t++) onsetsum[t + 1] += onsetsum[t];
-    r = findrepeat(fr, numticks, onsetsum, tempo, minsave, stopped, &start, &period);
+    r = findrepeat(fr, numticks, onsetsum, s->numdrift ? 1 : tempo, minsave, stopped, &start, &period);
     if (r < 0) goto done;
     if (r)
     {
-      int row = timetorow(start, phase, tempo);
-      if (firsttick(row, phase, tempo) < start) row++;
-      if ((firsttick(row, phase, tempo) + period <= numticks) && (row + period / tempo <= MAX_SONGLEN * MAX_PATTROWS))
+      int gstart = warptick(s->driftat, s->driftby, s->numdrift, start);
+      int gperiod = warptick(s->driftat, s->driftby, s->numdrift, start + period) - gstart;
+      int prows = (gperiod + tempo / 2) / tempo;
+      int row = timetorow(gstart, phase, tempo), first;
+      if (firsttick(row, phase, tempo) < gstart) row++;
+      first = unwarptick(s->driftat, s->driftby, s->numdrift, firsttick(row, phase, tempo));
+      if ((prows > 0) && (abs(gperiod - prows * tempo) <= DRIFTMAX) && (first + period <= numticks) &&
+        (row + prows <= MAX_SONGLEN * MAX_PATTROWS))
       {
         // The recording after the loop (and what its notes' sound needs)
         // isn't needed
-        int keep = firsttick(row, phase, tempo) + period + PROGMAX + 2;
+        int keep = first + period + PROGMAX + 2;
         s->looprow = row;
-        s->endrow = row + period / tempo;
+        s->endrow = row + prows;
         if (keep < numticks)
         {
           SFRAME *newfr = (SFRAME *)realloc(s->fr, keep * sizeof(SFRAME));
@@ -2326,6 +4024,9 @@ done:
   s->numnotes = numnotes;
   free(onsets);
   free(onsetsum);
+  free(warped);
+  free(driftat);
+  free(driftby);
   return result;
 }
 
@@ -2359,7 +4060,7 @@ static int fittempo(double exact, int *funk, double *err)
 // Play calls per second
 static double callhz(double rate, int ntsc)
 {
-  return rate * (ntsc ? 60.0 : 50.0);
+  return rate * (ntsc ? NTSC_CLOCK / NTSC_FRAMECYCLES : PAL_CLOCK / PAL_FRAMECYCLES);
 }
 
 // A tune that plays at another rate than GoatTracker can (0.5 or 1-16
@@ -2367,9 +4068,14 @@ static double callhz(double rate, int ntsc)
 // the tempo that lasts as long; the instruments' programs run per call, so
 // they get faster or slower. Chosen: the tempos as close as can be, the
 // programs' speed as little off as can be, the SID's own PAL/NTSC if alike
+static int tuneconsistent(const ASUB *subs, int numsubs, double *offset);
+
 static void choosespeed(const ASUB *subs, int numsubs, int srcntsc, int *ntsc, int *multiplier)
 {
-  double best = 1e9;
+  double best = 1e9, offset;
+  // (Notes all alike off the table get a base pitch that fits them: then
+  // they are on pitch either way)
+  int tuned = tuneconsistent(subs, numsubs, &offset);
   int n, m, s;
 
   *ntsc = srcntsc;
@@ -2394,6 +4100,7 @@ static void choosespeed(const ASUB *subs, int numsubs, int srcntsc, int *ntsc, i
         count++;
       }
       if (!count) return;
+      if (tuned) pitch = 0.0;
       // (A tune a third of a semitone off counts about as a tempo 2% off)
       cost = maxerr + 0.1 * programs / count + 0.06 * pitch / count + ((n != srcntsc) ? 0.002 : 0.0);
       if (cost < best - 1e-12)
@@ -2404,6 +4111,40 @@ static void choosespeed(const ASUB *subs, int numsubs, int srcntsc, int *ntsc, i
       }
     }
   }
+}
+
+// Are the notes tuned alike (all about as far off equal temperament at A-4 =
+// 440 Hz)? *offset gets how far, -0.5 to 0.5 semitones
+static int tuneconsistent(const ASUB *subs, int numsubs, double *offset)
+{
+  double ssum = 0.0, csum = 0.0;
+  int count = 0, s;
+  for (s = 0; s < numsubs; s++)
+  {
+    if (!subs[s].ok) continue;
+    ssum += subs[s].tunesin;
+    csum += subs[s].tunecos;
+    count += subs[s].tunecount;
+  }
+  *offset = 0.0;
+  if (count < 8) return 0;
+  *offset = atan2(ssum, csum) / TWOPI;
+  return sqrt(ssum * ssum + csum * csum) / count >= TUNECONSISTENT;
+}
+
+// The base pitch (A-4 in Hz on the PAL clock, GoatTracker's setting) whose
+// frequency table has the tune's notes when played PAL or NTSC, 0 for
+// GoatTracker's own table (near enough, or no tuning fits all the notes).
+// The notes keep their names: an NTSC tune tuned for its 60 Hz C64 played in
+// NTSC mode gets 423.87 Hz (GoatTracker's own table is for PAL: on the NTSC
+// clock it is 0.65 semitones sharp)
+static double findtuning(const ASUB *subs, int numsubs, int ntsc)
+{
+  double offset, basepitch;
+  if (!tuneconsistent(subs, numsubs, &offset)) return 0.0;
+  basepitch = 440.0 * pow(2.0, offset / 12.0) * PAL_CLOCK / (ntsc ? NTSC_CLOCK : PAL_CLOCK);
+  if (fabs(12.0 * log(basepitch / 440.0) / log(2.0)) < TUNEMIN) return 0.0;
+  return floor(basepitch * 100.0 + 0.5) / 100.0;
 }
 
 // Empty rows for a subtune (with room to round up to whole patterns).
@@ -2428,10 +4169,173 @@ static int allocgrid(ASUB *s, int totalrows)
   return 1;
 }
 
+//
+// The filter as filtertable programs: set the type, resonance & routing and
+// the cutoff, then modulation steps (a sweep), looping if it goes on so. A
+// program starts with a command on a row (the frame after it, as the
+// player's filter runs before the rows are read) and runs until the next
+// one; one is started where the one running no longer gives the recorded
+// filter
+//
+
+#define MAXFROWS 16               // Rows of a filter program (with the jump)
+#define FHORIZON 1024             // Frames a filter program may follow
+#define FILTERTOL 3               // Cutoff difference that doesn't matter
+#define FLOOPMAX 4                // Longest loop of modulation steps
+
+typedef struct
+{
+  unsigned char l[MAXFROWS], r[MAXFROWS];
+  int len;                        // Rows, the last one the jump (1-based target, 0 = stop)
+} FPROG;
+
+// The player's filter on one frame (gplay.c playroutine())
+typedef struct
+{
+  FPROG prog;
+  int ptr;                        // 1-based row, 0 = stopped
+  int time;
+  unsigned char cutoff, type, ctrl;
+} FSTATE;
+
+static void fstep(FSTATE *f)
+{
+  const FPROG *p = &f->prog;
+  if ((f->ptr <= 0) || (f->ptr > p->len)) return;
+  if (p->l[f->ptr-1] == 0xff)
+  {
+    f->ptr = p->r[f->ptr-1];
+    if ((f->ptr <= 0) || (f->ptr > p->len)) return;
+  }
+  if (!f->time)
+  {
+    if (p->l[f->ptr-1] >= 0x80)
+    {
+      f->type = p->l[f->ptr-1] & 0x70;
+      f->ctrl = p->r[f->ptr-1];
+      f->ptr++;
+      if ((f->ptr <= p->len) && (p->l[f->ptr-1] == 0x00))
+      {
+        f->cutoff = p->r[f->ptr-1];
+        f->ptr++;
+      }
+    }
+    else
+    {
+      if (p->l[f->ptr-1]) f->time = p->l[f->ptr-1];
+      else
+      {
+        f->cutoff = p->r[f->ptr-1];
+        f->ptr++;
+      }
+    }
+  }
+  if (f->time)
+  {
+    f->cutoff += p->r[f->ptr-1];
+    f->time--;
+    if (!f->time) f->ptr++;
+  }
+}
+
+// Does it give the frame's filter? (Which voices go through it, its type,
+// resonance, cutoff; none: the rest doesn't matter)
+static int fsame(const FSTATE *f, const SFRAME *fr)
+{
+  if ((!(fr->resfilt & 0x07)) && (!(f->ctrl & 0x07))) return 1;
+  if ((f->ctrl != fr->resfilt) || (f->type != (fr->modevol & 0x70))) return 0;
+  return abs((int)f->cutoff - (int)fr->cutoff) <= FILTERTOL;
+}
+
+// A filter program for the recording's filter from frame from on (while its
+// type, resonance & routing stay the same)
+static void filterprogram(const SFRAME *fr, int from, int numticks, FPROG *p)
+{
+  int rd[FHORIZON], rn[FHORIZON];
+  int end, m = 0, k, a, per, bestframes = 0, besta = -1, bestp = 0;
+
+  for (end = from + 1; (end < numticks) && (end - from < FHORIZON) && (fr[end].resfilt == fr[from].resfilt) &&
+    ((fr[end].modevol & 0x70) == (fr[from].modevol & 0x70)); end++);
+  // The cutoff changes per frame, as runs of the same change (127 frames a
+  // row at most)
+  for (k = from + 1; k < end; k++)
+  {
+    int d = (fr[k].cutoff - fr[k-1].cutoff) & 0xff;
+    if ((m) && (rd[m-1] == d) && (rn[m-1] < 0x7f)) rn[m-1]++;
+    else
+    {
+      rd[m] = d;
+      rn[m++] = 1;
+    }
+  }
+  // Holding the cutoff at the end needs no row
+  while ((m) && (!rd[m-1])) m--;
+  // Without a loop: up to where the cutoff holds, as far as it goes (then
+  // another program takes over; one for a sweep that comes again is the
+  // same). With a loop of up to FLOOPMAX runs (seen once again at least):
+  // as far as it goes on so. The one that gives the most frames
+  for (k = 0; (k < m) && (k < MAXFROWS - 3); k++)
+  {
+    if ((!rd[k]) && (rn[k] >= 2)) break;
+    bestframes += rn[k];
+  }
+  for (a = 0; (a < m) && (a + 4 <= MAXFROWS); a++)
+  {
+    int pre = 0;
+    for (k = 0; k < a; k++) pre += rn[k];
+    for (per = 1; (per <= FLOOPMAX) && (a + per + 3 <= MAXFROWS) && (a + 2 * per <= m); per++)
+    {
+      int i, frames = pre;
+      for (i = a; i < m; i++)
+      {
+        int j = a + (i - a) % per;
+        if (rd[i] != rd[j]) break;
+        if (rn[i] != rn[j])
+        {
+          // (The last run may be cut short)
+          if (rn[i] < rn[j]) frames += rn[i];
+          break;
+        }
+        frames += rn[i];
+      }
+      if ((i < a + 2 * per) || (frames <= bestframes)) continue;
+      bestframes = frames;
+      besta = a;
+      bestp = per;
+    }
+  }
+  p->l[0] = 0x80 | (fr[from].modevol & 0x70);
+  p->r[0] = fr[from].resfilt;
+  p->l[1] = 0x00;
+  p->r[1] = fr[from].cutoff;
+  p->len = 2;
+  if (besta >= 0)
+  {
+    for (k = 0; k < besta + bestp; k++)
+    {
+      p->l[p->len] = rn[k];
+      p->r[p->len++] = rd[k];
+    }
+    p->l[p->len] = 0xff;
+    p->r[p->len] = 3 + besta;
+    p->len++;
+    return;
+  }
+  for (k = 0; (k < m) && (p->len < MAXFROWS - 1); k++)
+  {
+    if ((!rd[k]) && (rn[k] >= 2)) break;
+    p->l[p->len] = rn[k];
+    p->r[p->len++] = rd[k];
+  }
+  p->l[p->len] = 0xff;
+  p->r[p->len] = 0;
+  p->len++;
+}
+
 // Puts a subtune's notes on the rows, with the tempo, filter & volume
 // commands (for the song played at the speed multiplier given, -1 = not
 // known). Returns 0 if out of memory
-static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
+static int buildgrid(ASUB *s, const AINSTR *ins, const APROGS *pg, SNGDATA *sng, int multiplier)
 {
   const SFRAME *fr = s->fr;
   ANOTE *notes = s->notes;
@@ -2439,7 +4343,7 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
   int *owner[MAX_CHN] = {NULL, NULL, NULL};
   int numnotes = s->numnotes, numticks = s->numticks;
   int tempo = s->tempo, phase = s->phase;
-  int totalrows = 1, ok = 0, v, c, d, t;
+  int totalrows = 1, ok = 0, v, c, d, t, k;
 
   if (s->looprow >= 0)
   {
@@ -2448,16 +4352,26 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
   }
   else
   {
+    // (Room for the last keyoffs: a gatetimer turns the gate off before the
+    // keyoff's row, which can be up to 2 rows after the gate went off)
     for (c = 0; c < numnotes; c++)
     {
-      int offrow = timetorow(notes[c].gateoff, phase, tempo);
+      int offrow = timetorow(warptick(s->driftat, s->driftby, s->numdrift, notes[c].gateoff), phase, tempo);
       if (notes[c].row + 2 > totalrows) totalrows = notes[c].row + 2;
-      if (offrow + 1 > totalrows) totalrows = offrow + 1;
+      if (offrow + 3 > totalrows) totalrows = offrow + 3;
     }
     if (totalrows > MAX_SONGLEN * MAX_PATTROWS)
     {
       totalrows = MAX_SONGLEN * MAX_PATTROWS;
       s->truncated = 1;
+    }
+    // A tune that stops ends so: the orderlist loops on an empty row after
+    // it (it would start over otherwise)
+    else if (s->stopped)
+    {
+      s->looprow = totalrows;
+      s->endrow = totalrows + 1;
+      totalrows++;
     }
   }
   if (!allocgrid(s, totalrows)) goto done;
@@ -2506,6 +4420,27 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
       grid[n->voice][r*4+2] = CMD_SETAD;
       grid[n->voice][r*4+3] = fr[n->start].ad[n->voice];
     }
+    // A wave or pulse program of its own (the rest as the instrument's)
+    else if (n->ovwave >= 0)
+    {
+      const AWAVE *w = &pg->wave[n->ovwave];
+      int row = wavetotable(sng, w->l, w->r, w->len, w->loop);
+      if (row)
+      {
+        grid[n->voice][r*4+2] = CMD_SETWAVEPTR;
+        grid[n->voice][r*4+3] = row;
+      }
+    }
+    else if (n->ovpulse >= 0)
+    {
+      const APULSE *pp = &pg->pulse[n->ovpulse];
+      int row = addprogram(sng, PTBL, pp->l, pp->r, pp->len);
+      if (row)
+      {
+        grid[n->voice][r*4+2] = CMD_SETPULSEPTR;
+        grid[n->voice][r*4+3] = row;
+      }
+    }
   }
   // Keyoffs: on the row (before the next note's) that the instrument's
   // gatetimer turns the gate off nearest to when it went off. Not when the
@@ -2519,7 +4454,7 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
     {
       // A short gate the instrument's program doesn't turn off (simplified):
       // the first row after
-      if ((!n->shortgate) || (ins[n->instr].gateoff)) continue;
+      if ((!n->shortgate) || ((n->ovwave >= 0) ? pg->wave[n->ovwave].gateoff : ins[n->instr].gateoff)) continue;
       offrow = n->row + 1;
       last = ((c + 1 < numnotes) && (notes[c+1].voice == n->voice)) ? notes[c+1].row : totalrows;
     }
@@ -2546,7 +4481,10 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
 
   // Tempo, filter & volume as commands, in whichever channel has room
   {
-    int curtype = 0, curres = 0, curcut = -1, curvol = 15;
+    FSTATE cur;
+    const SFRAME *ff = fr;
+    SFRAME *resampled = NULL;
+    int numff = numticks, curvol = 15;
     int r;
     // The song's tempo (fitted to its speed, see choosespeed()), or a
     // funktempo pair from the speedtable. (The default tempo is 6 at 1x
@@ -2568,34 +4506,65 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
         grid[v][3] = s->gttempo;
       }
     }
+    // (The filter runs per frame of the song: at another speed than the
+    // SID's its frames are the recording's resampled; and where the timing
+    // shifts, frames are left out, see finddrift())
+    if ((fabs(s->tickratio - 1.0) > 1e-6) || (s->numdrift))
+    {
+      numff = (int)(warptick(s->driftat, s->driftby, s->numdrift, numticks) * s->tickratio) + 1;
+      resampled = (SFRAME *)malloc(numff * sizeof(SFRAME));
+      if (!resampled) goto done;
+      for (k = 0; k < numff; k++)
+        resampled[k] = fr[clampint(unwarptick(s->driftat, s->driftby, s->numdrift, (int)(k / s->tickratio)), 0, numticks - 1)];
+      ff = resampled;
+    }
+    memset(&cur, 0, sizeof cur);
     for (r = 0; r < totalrows; r++)
     {
-      int want[3], wantdata[3], numwant = 0, w;
+      int want[3], wantdata[3], numwant = 0, w, need = 0, g0, g1;
+      FSTATE next;
       const SFRAME *f;
       t = phase + r * tempo;
-      if (t >= numticks) break;
-      f = &fr[t];
-      if (((f->modevol & 0x70) != curtype) || (f->resfilt != curres))
+      d = unwarptick(s->driftat, s->driftby, s->numdrift, t);
+      if (d >= numticks) break;
+      f = &fr[d];
+      g0 = (int)floor(t * s->tickratio + 0.5);
+      g1 = (int)floor((t + tempo) * s->tickratio + 0.5);
+      // The filter on the frames this row's commands decide: a program of
+      // its own where the one running doesn't give it (also on the loop's
+      // first row: it comes round from the loop's end)
+      next = cur;
+      for (k = g0 + 1; (k <= g1) && (k < numff); k++)
       {
-        unsigned char pl[3], pr[3];
+        fstep(&next);
+        if (!fsame(&next, &ff[k])) need = 1;
+      }
+      if ((r == s->looprow) && (g0 + 1 < numff) && (ff[g0+1].resfilt & 0x07)) need = 1;
+      if ((need) && (g0 + 1 < numff))
+      {
+        FSTATE start;
         int ptr;
-        pl[0] = 0x80 | (f->modevol & 0x70);
-        pr[0] = f->resfilt;
-        pl[1] = 0x00;
-        pr[1] = f->cutoff;
-        pl[2] = 0xff;
-        pr[2] = 0x00;
-        ptr = addprogram(sng, FTBL, pl, pr, 3);
+        memset(&start, 0, sizeof start);
+        filterprogram(ff, g0 + 1, numff, &start.prog);
+        start.ptr = 1;
+        ptr = addprogram(sng, FTBL, start.prog.l, start.prog.r, start.prog.len);
         if (ptr)
         {
           want[numwant] = CMD_SETFILTERPTR;
           wantdata[numwant++] = ptr;
+          start.cutoff = cur.cutoff;
+          start.type = cur.type;
+          start.ctrl = cur.ctrl;
         }
-      }
-      else if ((int)f->cutoff != curcut)
-      {
-        want[numwant] = CMD_SETFILTERCUTOFF;
-        wantdata[numwant++] = f->cutoff;
+        else
+        {
+          // (No room in the table: the cutoff, with the rest as it is)
+          want[numwant] = CMD_SETFILTERCUTOFF;
+          wantdata[numwant++] = ff[g0+1].cutoff;
+          start = cur;
+          start.cutoff = ff[g0+1].cutoff;
+        }
+        next = start;
       }
       if ((f->modevol & 0x0f) != curvol)
       {
@@ -2609,16 +4578,46 @@ static int buildgrid(ASUB *s, const AINSTR *ins, SNGDATA *sng, int multiplier)
           if (grid[v][r*4+2]) continue;
           grid[v][r*4+2] = want[w];
           grid[v][r*4+3] = wantdata[w];
-          if (want[w] == CMD_SETFILTERPTR)
-          {
-            curtype = f->modevol & 0x70;
-            curres = f->resfilt;
-            curcut = f->cutoff;
-          }
-          if (want[w] == CMD_SETFILTERCUTOFF) curcut = f->cutoff;
+          if ((want[w] == CMD_SETFILTERPTR) || (want[w] == CMD_SETFILTERCUTOFF)) cur = next;
           if (want[w] == CMD_SETMASTERVOL) curvol = f->modevol & 0x0f;
           break;
         }
+      }
+      // The filter through the row's frames
+      for (k = g0 + 1; (k <= g1) && (k < numff); k++) fstep(&cur);
+    }
+    free(resampled);
+  }
+
+  // An AD or SR command the same on two notes stays on the rows between
+  // them (rests, keyoffs): the packer leaves out a command the same as the
+  // row before's, and it does the same again there. Else it would be packed
+  // anew on each note
+  for (v = 0; v < MAX_CHN; v++)
+  {
+    int last = -1, from = -1, r;
+    for (r = 0; r < totalrows; r++)
+    {
+      unsigned char *row = &grid[v][r*4];
+      if (row[2])
+      {
+        if ((last >= 0) && (from >= 0) && (row[2] == grid[v][last*4+2]) && (row[3] == grid[v][last*4+3]) &&
+          ((row[2] == CMD_SETAD) || (row[2] == CMD_SETSR)))
+        {
+          int k;
+          for (k = from; k < r; k++)
+          {
+            grid[v][k*4+2] = row[2];
+            grid[v][k*4+3] = row[3];
+          }
+        }
+        last = r;
+        from = r + 1;
+      }
+      else if ((row[0] != REST) && (row[0] != KEYOFF))
+      {
+        last = -1;
+        from = -1;
       }
     }
   }
@@ -2641,196 +4640,701 @@ done:
   return ok;
 }
 
-// A different pattern
+// Bytes of a pattern packed by the relocator (greloc.c packpattern(), with
+// effects): more than 256 and it can't pack the song
+static int packedsize(const unsigned char *p, int rows)
+{
+  unsigned char im[MAX_PATTROWS * 4];
+  int instr = 0, command = -1, databyte = -1, len = 0, size = 0, c, d;
+
+  // The rows as the player reads them: instrument changes, commands when
+  // they change, notes
+  for (c = 0; (c < rows) && (c < MAX_PATTROWS); c++)
+  {
+    const unsigned char *r = &p[c*4];
+    int changed = (r[2] != command) || (r[3] != databyte);
+    if ((r[1]) && ((!c) || (r[1] != instr)))
+    {
+      im[len++] = INSTRCHG;
+      instr = r[1];
+    }
+    if (changed)
+    {
+      command = r[2];
+      databyte = r[3];
+      im[len++] = ((r[0] == REST) ? FXONLY : FX) + command;
+      if (command) im[len++] = databyte;
+      if (r[0] != REST) im[len++] = r[0];
+    }
+    else im[len++] = r[0];
+  }
+  // Rests of a row of their own packed together (up to 64)
+  for (c = 0; c < len;)
+  {
+    int packok = (c > 0);
+    if (im[c] < FX)
+    {
+      size++;
+      c++;
+      packok = 0;
+    }
+    if ((im[c] >= FX) && (im[c] < FIRSTNOTE))
+    {
+      int fxonly = (im[c] >= FXONLY);
+      size++;
+      if (im[c++] & 0x0f)
+      {
+        size++;
+        c++;
+      }
+      if (fxonly) continue;
+      packok = 0;
+    }
+    if ((!packok) || (im[c] != REST))
+    {
+      size++;
+      c++;
+      continue;
+    }
+    for (d = c; (d < len) && (im[d] == REST) && (d - c < 64); d++);
+    size++;
+    c = (d - c > 1) ? d : c + 1;
+  }
+  return size;
+}
+
+//
+// Patterns & orderlists
+//
+// Each channel of each subtune is cut into blocks of rows (the song before
+// its loop and the loop each from their start, so that the orderlist can
+// loop back) that become patterns, the same ones once: also ones that are
+// the same but for their notes being transposed (the orderlist transposes
+// them, -16 to +14 semitones). Then patterns that always come one after the
+// other are joined, up to a length: fewer patterns, or fewer orderlist
+// positions. Each channel is cut its own way. The blocks are as long as the
+// pattern length asked for, shorter where that makes too many patterns; if
+// it is still too many, the ends of the longest subtunes are left out
+//
+
+#define NOTRANS 0x100                     // A pattern without notes: any transpose
+#define MINTRANS (TRANSDOWN - TRANSUP)    // -16
+#define MAXTRANS (LOOPSONG - 1 - TRANSUP) // +14
+#define MINBLOCK 8
+#define MAXJOINPASSES 64
+
+// An orderlist position of a channel: a pattern played transposed
 typedef struct
 {
-  const unsigned char *data;
-  int len;                        // Rows
-  unsigned hash;
-  int refs;                       // Orderlist positions that use it
+  int pid;                        // Pattern
+  int trans;                      // Transpose (NOTRANS: no notes in it)
+  int rows;
+  int segstart;                   // 1 = first of the song, 2 = first of its loop
+} TITEM;
+
+typedef struct
+{
+  unsigned char *data;            // rows * 4
+  int rows;
+  int lo, hi;                     // Lowest & highest note (0-92), -1 = none
+  unsigned hash;                  // Of the rows with the notes from the lowest
+  int next;                       // The next one in the same hash slot
+  int refs;
   int number;                     // In the song, -1 = not numbered yet
-} UPATT;
+} TPATT;
 
-static unsigned patthash(const unsigned char *p, int len)
+typedef struct
 {
-  unsigned h = 2166136261u;
-  int c;
-  for (c = 0; c < len; c++) h = (h ^ p[c]) * 16777619u;
-  return h;
+  TPATT *p;
+  int num, max;
+  int *slot;                      // Hash table: first pattern, -1 = none
+  int numslots;
+  TITEM *item[MAX_SONGS][MAX_CHN];
+  int numitems[MAX_SONGS][MAX_CHN];
+  int maxitems[MAX_SONGS][MAX_CHN];
+} PLAYOUT;
+
+static void freelayout(PLAYOUT *pl)
+{
+  int s, v, c;
+  for (c = 0; c < pl->num; c++) free(pl->p[c].data);
+  free(pl->p);
+  free(pl->slot);
+  for (s = 0; s < MAX_SONGS; s++)
+  {
+    for (v = 0; v < MAX_CHN; v++) free(pl->item[s][v]);
+  }
+  memset(pl, 0, sizeof(PLAYOUT));
 }
 
-// Orderlist positions of patternlength rows (the last one filled up with
-// empty rows). With a loop (loopstart >= 0) the rows before it and the loop
-// are cut separately, the last pattern of each shorter if need be (the
-// loop must be exact). Sets s->chunkrow/chunklen/songlen/restart
-static void layoutsub(ASUB *s, int loopstart, int patternlength)
+// Empties a layout (keeping its memory). Returns 0 if out of memory
+static int clearlayout(PLAYOUT *pl, int numslots)
 {
-  int bounds[3], numseg, seg, r, n = 0;
-
-  bounds[0] = 0;
-  if (loopstart >= 0)
+  int s, v, c;
+  for (c = 0; c < pl->num; c++) free(pl->p[c].data);
+  pl->num = 0;
+  if (pl->numslots != numslots)
   {
-    bounds[1] = loopstart;
-    bounds[2] = loopstart + s->endrow - s->looprow;
-    numseg = 2;
+    free(pl->slot);
+    pl->slot = (int *)malloc(numslots * sizeof(int));
+    if (!pl->slot) return 0;
+    pl->numslots = numslots;
   }
-  else
+  for (c = 0; c < numslots; c++) pl->slot[c] = -1;
+  for (s = 0; s < MAX_SONGS; s++)
   {
-    bounds[1] = s->totalrows;
-    numseg = 1;
+    for (v = 0; v < MAX_CHN; v++) pl->numitems[s][v] = 0;
   }
-  s->restart = 0;
-  for (seg = 0; seg < numseg; seg++)
-  {
-    if (seg) s->restart = n;
-    for (r = bounds[seg]; r < bounds[seg+1]; r += patternlength)
-    {
-      s->chunkrow[n] = r;
-      s->chunklen[n] = ((numseg > 1) && (bounds[seg+1] - r < patternlength)) ? bounds[seg+1] - r : patternlength;
-      n++;
-    }
-  }
-  s->songlen = n;
-}
-
-// Room for a subtune's orderlist positions, laid out with the loop where it
-// was found. Returns 0 if out of memory
-static int cutsub(ASUB *s, int patternlength)
-{
-  int maxlen = (s->totalrows + patternlength - 1) / patternlength + 2;
-  int v;
-
-  free(s->chunkrow);
-  free(s->chunklen);
-  s->chunkrow = (int *)malloc(maxlen * sizeof(int));
-  s->chunklen = (int *)malloc(maxlen * sizeof(int));
-  if ((!s->chunkrow) || (!s->chunklen)) return 0;
-  for (v = 0; v < MAX_CHN; v++)
-  {
-    free(s->chunk[v]);
-    s->chunk[v] = (int *)malloc(maxlen * sizeof(int));
-    if (!s->chunk[v]) return 0;
-  }
-  layoutsub(s, s->looprow, patternlength);
   return 1;
 }
 
-// Finds the different patterns in all the subtunes' orderlist positions
-// (into *uout, the positions' chunk[] numbered). Returns how many, -1 if
-// out of memory
-static int findpatterns(ASUB *subs, int numsubs, UPATT **uout)
+static void notespan(const unsigned char *d, int rows, int *lo, int *hi)
 {
-  UPATT *u;
-  int *table;
-  int maxchunks = 0, tablesize, numunique = 0, s, v, d, e;
-
-  for (s = 0; s < numsubs; s++) maxchunks += subs[s].songlen * MAX_CHN;
-  for (tablesize = 1; tablesize < maxchunks * 2; tablesize <<= 1);
-  free(*uout);
-  u = *uout = (UPATT *)malloc(maxchunks * sizeof(UPATT));
-  table = (int *)malloc(tablesize * sizeof(int));
-  if ((!u) || (!table))
+  int r;
+  *lo = *hi = -1;
+  for (r = 0; r < rows; r++)
   {
-    free(table);
-    return -1;
+    int n = d[r*4];
+    if ((n < FIRSTNOTE) || (n > LASTNOTE)) continue;
+    n -= FIRSTNOTE;
+    if ((*lo < 0) || (n < *lo)) *lo = n;
+    if (n > *hi) *hi = n;
   }
-  for (d = 0; d < tablesize; d++) table[d] = -1;
+}
 
+static unsigned canonhash(const unsigned char *d, int rows, int lo)
+{
+  unsigned h = 2166136261u;
+  int c;
+  for (c = 0; c < rows * 4; c++)
+  {
+    unsigned b = d[c];
+    if ((!(c & 3)) && (b >= FIRSTNOTE) && (b <= LASTNOTE)) b = 0x100 + b - FIRSTNOTE - lo;
+    h = (h ^ b) * 16777619u;
+  }
+  return (h ^ (unsigned)rows) * 16777619u;
+}
+
+// The same rows, the notes transposed (a from alo, b from blo)?
+static int canonsame(const unsigned char *a, int alo, const unsigned char *b, int blo, int rows)
+{
+  int c;
+  for (c = 0; c < rows * 4; c++)
+  {
+    if ((!(c & 3)) && (a[c] >= FIRSTNOTE) && (a[c] <= LASTNOTE))
+    {
+      if ((b[c] < FIRSTNOTE) || (b[c] > LASTNOTE) || (a[c] - alo != b[c] - blo)) return 0;
+    }
+    else if (a[c] != b[c]) return 0;
+  }
+  return 1;
+}
+
+// Adds a pattern (find: the same one, transposed, if there is one). *trans
+// gets the transpose that plays it as given: with base (the transpose it is
+// played at itself, NOTRANS = none) it is to stay in range. Returns the
+// pattern, -1 if out of memory
+static int addpatt(PLAYOUT *pl, const unsigned char *d, int rows, int find, int base, int *trans)
+{
+  TPATT *p;
+  int lo, hi, e, best = -1, besttrans = 0;
+  unsigned h;
+
+  notespan(d, rows, &lo, &hi);
+  h = canonhash(d, rows, (lo < 0) ? 0 : lo);
+  for (e = find ? pl->slot[h & (pl->numslots - 1)] : -1; e >= 0; e = pl->p[e].next)
+  {
+    int t;
+    p = &pl->p[e];
+    if ((p->hash != h) || (p->rows != rows) || ((p->lo < 0) != (lo < 0))) continue;
+    if (!canonsame(d, lo, p->data, p->lo, rows)) continue;
+    if (lo < 0)
+    {
+      *trans = NOTRANS;
+      return e;
+    }
+    t = lo - p->lo;
+    if (base != NOTRANS) t += base;
+    if ((t < MINTRANS) || (t > MAXTRANS)) continue;
+    if ((best < 0) || (abs(t) < abs(besttrans)))
+    {
+      best = e;
+      besttrans = t;
+    }
+  }
+  if (best >= 0)
+  {
+    *trans = besttrans;
+    return best;
+  }
+  if (pl->num >= pl->max)
+  {
+    int newmax = pl->max ? pl->max * 2 : 256;
+    TPATT *newp = (TPATT *)realloc(pl->p, newmax * sizeof(TPATT));
+    if (!newp) return -1;
+    pl->p = newp;
+    pl->max = newmax;
+  }
+  p = &pl->p[pl->num];
+  p->data = (unsigned char *)malloc(rows * 4);
+  if (!p->data) return -1;
+  memcpy(p->data, d, rows * 4);
+  p->rows = rows;
+  p->lo = lo;
+  p->hi = hi;
+  p->hash = h;
+  p->refs = 0;
+  p->number = -1;
+  p->next = pl->slot[h & (pl->numslots - 1)];
+  pl->slot[h & (pl->numslots - 1)] = pl->num;
+  *trans = (lo < 0) ? NOTRANS : ((base != NOTRANS) ? base : 0);
+  return pl->num++;
+}
+
+static int additem(PLAYOUT *pl, int s, int v, int pid, int trans, int rows, int segstart)
+{
+  TITEM *it;
+  if (pl->numitems[s][v] >= pl->maxitems[s][v])
+  {
+    int newmax = pl->maxitems[s][v] ? pl->maxitems[s][v] * 2 : 64;
+    TITEM *newitem = (TITEM *)realloc(pl->item[s][v], newmax * sizeof(TITEM));
+    if (!newitem) return 0;
+    pl->item[s][v] = newitem;
+    pl->maxitems[s][v] = newmax;
+  }
+  it = &pl->item[s][v][pl->numitems[s][v]++];
+  it->pid = pid;
+  it->trans = trans;
+  it->rows = rows;
+  it->segstart = segstart;
+  return 1;
+}
+
+// How a subtune is laid out: its loop (from loopstart, looplen rows, or
+// none: looplen 0), and its rows kept (rows: the end left out if fewer)
+typedef struct
+{
+  int loopstart, looplen;
+  int rows, keep;
+} SUBLAYOUT;
+
+// The rows of a subtune's channel cut into blocks of len rows, as patterns
+static int layoutblocks(PLAYOUT *pl, const ASUB *subs, int numsubs, const SUBLAYOUT *sl, int len)
+{
+  int s, v, seg;
   for (s = 0; s < numsubs; s++)
   {
     for (v = 0; v < MAX_CHN; v++)
     {
-      for (d = 0; d < subs[s].songlen; d++)
+      for (seg = 0; seg < 2; seg++)
       {
-        int len = subs[s].chunklen[d];
-        const unsigned char *src = &subs[s].grid[v][subs[s].chunkrow[d] * 4];
-        unsigned h = patthash(src, len * 4) + len * 0x9e3779b9u;
-        int slot = h & (tablesize - 1);
-        while ((e = table[slot]) >= 0)
+        int a = seg ? sl[s].loopstart : 0;
+        int b = seg ? sl[s].loopstart + sl[s].looplen : (sl[s].looplen ? sl[s].loopstart : sl[s].rows);
+        int r;
+        if ((seg) && (!sl[s].looplen)) break;
+        if (b > sl[s].keep) b = sl[s].keep;
+        for (r = a; r < b;)
         {
-          if ((u[e].hash == h) && (u[e].len == len) && (!memcmp(u[e].data, src, len * 4))) break;
-          slot = (slot + 1) & (tablesize - 1);
+          int rows = (b - r < len) ? b - r : len, trans, pid;
+          // (A row packs into 4 bytes at most: 64 rows always fit. A block
+          // the relocator can't pack is cut in halves)
+          while ((rows > 64) && (packedsize(&subs[s].grid[v][r*4], rows) > 256)) rows /= 2;
+          pid = addpatt(pl, &subs[s].grid[v][r*4], rows, 1, NOTRANS, &trans);
+          if (pid < 0) return 0;
+          if (!additem(pl, s, v, pid, trans, rows, (r == a) ? seg + 1 : 0)) return 0;
+          r += rows;
         }
-        if (e < 0)
-        {
-          e = numunique++;
-          table[slot] = e;
-          u[e].data = src;
-          u[e].len = len;
-          u[e].hash = h;
-          u[e].refs = 0;
-          u[e].number = -1;
-        }
-        u[e].refs++;
-        subs[s].chunk[v][d] = e;
       }
     }
   }
-  free(table);
-  return numunique;
+  return 1;
 }
 
-// Cuts the subtunes' rows into patterns, the same ones only once, and makes
-// the orderlists. If there are too many patterns, longer ones are tried,
-// then the end of the longest subtune is left out, a pattern at a time.
-// Returns 0 if out of memory
-static int makepatterns(ASUB *subs, int numsubs, SNGDATA *sng, int patternlength)
+static int transdelta(const TITEM *a, const TITEM *b)
 {
-  UPATT *u = NULL;
-  int numunique = 0, ok = 0, s, v, d, e;
+  if ((a->trans == NOTRANS) || (b->trans == NOTRANS)) return NOTRANS;
+  return b->trans - a->trans;
+}
 
-  for (;;)
+// Joins patterns that always come one after the other (where both don't
+// come elsewhere first: fewer patterns; then where one of them doesn't:
+// fewer orderlist positions), up to maxrows and what the relocator can
+// pack. Returns 0 if out of memory
+static int joinpatterns(PLAYOUT *pl, int numsubs, int maxrows)
+{
+  int *occ = NULL, *fol = NULL, *foldelta = NULL, *folcount = NULL, *pre = NULL, *predelta = NULL, *precount = NULL;
+  int *sel = NULL, *used = NULL;
+  int pass, ok = 0;
+
+  for (pass = 0; pass < MAXJOINPASSES; pass++)
   {
-    int toolong = 0;
+    int n = pl->num, numsel = 0, kind, s, v, i, x;
+    free(occ); free(fol); free(foldelta); free(folcount); free(pre); free(predelta); free(precount); free(sel); free(used);
+    occ = (int *)calloc(n, sizeof(int));
+    fol = (int *)malloc(n * sizeof(int));
+    foldelta = (int *)malloc(n * sizeof(int));
+    folcount = (int *)calloc(n, sizeof(int));
+    pre = (int *)malloc(n * sizeof(int));
+    predelta = (int *)malloc(n * sizeof(int));
+    precount = (int *)calloc(n, sizeof(int));
+    sel = (int *)malloc(n * sizeof(int));
+    used = (int *)calloc(n, sizeof(int));
+    if ((!occ) || (!fol) || (!foldelta) || (!folcount) || (!pre) || (!predelta) || (!precount) || (!sel) || (!used)) goto done;
+    for (x = 0; x < n; x++) fol[x] = pre[x] = sel[x] = -1;
 
+    // What follows each pattern, what comes before it
     for (s = 0; s < numsubs; s++)
     {
-      if (!cutsub(&subs[s], patternlength)) goto done;
-      if (subs[s].songlen > MAX_SONGLEN) toolong = 1;
-    }
-    numunique = findpatterns(subs, numsubs, &u);
-    if (numunique < 0) goto done;
-
-    // A loop goes round, so it can start later: on the pattern boundary
-    // after it, where that makes fewer patterns (a tune built in patterns
-    // counted from its start, not from the loop)
-    for (s = 0; s < numsubs; s++)
-    {
-      int n;
-      if ((subs[s].looprow < 0) || (!(subs[s].looprow % patternlength))) continue;
-      layoutsub(&subs[s], (subs[s].looprow + patternlength - 1) / patternlength * patternlength, patternlength);
-      n = findpatterns(subs, numsubs, &u);
-      if (n < 0) goto done;
-      if (n < numunique)
+      for (v = 0; v < MAX_CHN; v++)
       {
-        numunique = n;
-        if (subs[s].songlen > MAX_SONGLEN) toolong = 1;
-        continue;
+        TITEM *it = pl->item[s][v];
+        int num = pl->numitems[s][v];
+        for (i = 0; i < num; i++)
+        {
+          int y, d;
+          x = it[i].pid;
+          occ[x]++;
+          if ((i + 1 >= num) || (it[i+1].segstart)) continue;
+          y = it[i+1].pid;
+          d = transdelta(&it[i], &it[i+1]);
+          if (fol[x] == -1)
+          {
+            fol[x] = y;
+            foldelta[x] = d;
+          }
+          else if ((fol[x] != y) || (foldelta[x] != d)) fol[x] = -2;
+          folcount[x]++;
+          if (pre[y] == -1)
+          {
+            pre[y] = x;
+            predelta[y] = d;
+          }
+          else if ((pre[y] != x) || (predelta[y] != d)) pre[y] = -2;
+          precount[y]++;
+        }
       }
-      layoutsub(&subs[s], subs[s].looprow, patternlength);
-      numunique = findpatterns(subs, numsubs, &u);
-      if (numunique < 0) goto done;
     }
 
-    if ((!toolong) && (numunique <= MAX_PATT)) break;
-    if (patternlength >= MAX_PATTROWS) break;
-    patternlength = MAX_PATTROWS;
-  }
+    // Pairs to join: both always together, else one of them (not both
+    // ways in one pass: each pattern in one pair at most)
+    for (kind = 0; (kind < 2) && (!numsel); kind++)
+    {
+      for (x = 0; x < n; x++)
+      {
+        int y, d, both, alwaysx, alwaysy;
+        if ((!occ[x]) || (fol[x] < 0) || (fol[x] == x)) continue;
+        y = fol[x];
+        d = foldelta[x];
+        alwaysx = (folcount[x] == occ[x]);
+        alwaysy = (pre[y] == x) && (predelta[y] == d) && (precount[y] == occ[y]);
+        both = alwaysx && alwaysy;
+        if (kind ? ((!alwaysx) && (!alwaysy)) : (!both)) continue;
+        if ((used[x]) || (used[y])) continue;
+        if (pl->p[x].rows + pl->p[y].rows > maxrows) continue;
+        if ((d != NOTRANS) && ((pl->p[y].lo + d < 0) || (pl->p[y].hi + d > NUMNOTES - 1))) continue;
+        sel[x] = y;
+        used[x] = used[y] = 1;
+        numsel++;
+      }
+      // (Pairs where y always comes after x, x also elsewhere)
+      if (kind)
+      {
+        int y;
+        for (y = 0; y < n; y++)
+        {
+          int d;
+          if ((!occ[y]) || (pre[y] < 0) || (pre[y] == y) || (precount[y] != occ[y])) continue;
+          x = pre[y];
+          d = predelta[y];
+          if ((used[x]) || (used[y])) continue;
+          if (pl->p[x].rows + pl->p[y].rows > maxrows) continue;
+          if ((d != NOTRANS) && ((pl->p[y].lo + d < 0) || (pl->p[y].hi + d > NUMNOTES - 1))) continue;
+          sel[x] = y;
+          foldelta[x] = d;
+          used[x] = used[y] = 1;
+          numsel++;
+        }
+      }
+    }
+    if (!numsel) break;
 
-  // Still too many: the longest subtunes get shorter
-  for (;;)
+    // The joined patterns (that the relocator can pack), and where they go
+    {
+      int *joined = (int *)malloc(n * sizeof(int));
+      int made = 0;
+      if (!joined) goto done;
+      for (x = 0; x < n; x++)
+      {
+        unsigned char buf[MAX_PATTROWS * 4];
+        int y = sel[x], d, rx, ry, r, trans, z;
+        joined[x] = -1;
+        if (y < 0) continue;
+        d = foldelta[x];
+        rx = pl->p[x].rows;
+        ry = pl->p[y].rows;
+        memcpy(buf, pl->p[x].data, rx * 4);
+        memcpy(buf + rx * 4, pl->p[y].data, ry * 4);
+        // (y's notes as played after x's: both transposed as x)
+        if ((d != NOTRANS) && (pl->p[x].lo >= 0))
+        {
+          for (r = rx; r < rx + ry; r++)
+          {
+            if ((buf[r*4] >= FIRSTNOTE) && (buf[r*4] <= LASTNOTE)) buf[r*4] += d;
+          }
+        }
+        if (packedsize(buf, rx + ry) > 256) continue;
+        z = addpatt(pl, buf, rx + ry, 0, NOTRANS, &trans);
+        if (z < 0)
+        {
+          free(joined);
+          goto done;
+        }
+        joined[x] = z;
+        made++;
+      }
+      if (made)
+      {
+        for (s = 0; s < numsubs; s++)
+        {
+          for (v = 0; v < MAX_CHN; v++)
+          {
+            TITEM *it = pl->item[s][v];
+            int num = pl->numitems[s][v], out = 0;
+            for (i = 0; i < num; i++)
+            {
+              x = it[i].pid;
+              if ((x < n) && (joined[x] >= 0) && (i + 1 < num) && (!it[i+1].segstart) && (it[i+1].pid == sel[x]) &&
+                (transdelta(&it[i], &it[i+1]) == foldelta[x]))
+              {
+                TITEM j = it[i];
+                j.pid = joined[x];
+                if (j.trans == NOTRANS) j.trans = it[i+1].trans;
+                j.rows += it[i+1].rows;
+                it[out++] = j;
+                i++;
+              }
+              else it[out++] = it[i];
+            }
+            pl->numitems[s][v] = out;
+          }
+        }
+      }
+      free(joined);
+      if (!made) break;
+    }
+  }
+  ok = 1;
+
+done:
+  free(occ); free(fol); free(foldelta); free(folcount); free(pre); free(predelta); free(precount); free(sel); free(used);
+  return ok;
+}
+
+// The patterns again from the ones used, each only once (joined ones can be
+// the same as others), counted. Returns how many, -1 if out of memory
+static int finishlayout(PLAYOUT *pl, int numsubs)
+{
+  PLAYOUT n;
+  int s, v, i, count = 0;
+  memset(&n, 0, sizeof n);
+  if (!clearlayout(&n, pl->numslots)) goto oom;
+  for (s = 0; s < numsubs; s++)
   {
-    int longest = 0;
-    for (s = 1; s < numsubs; s++) if (subs[s].songlen > subs[longest].songlen) longest = s;
-    if ((numunique <= MAX_PATT) && (subs[longest].songlen <= MAX_SONGLEN)) break;
-    // (Can't happen: one pattern per channel & subtune always fits)
-    if (subs[longest].songlen <= 1) break;
-    d = --subs[longest].songlen;
     for (v = 0; v < MAX_CHN; v++)
     {
-      if (!--u[subs[longest].chunk[v][d]].refs) numunique--;
+      for (i = 0; i < pl->numitems[s][v]; i++)
+      {
+        const TITEM *it = &pl->item[s][v][i];
+        int trans, pid = addpatt(&n, pl->p[it->pid].data, it->rows, 1, it->trans, &trans);
+        if (pid < 0) goto oom;
+        if (!additem(&n, s, v, pid, trans, it->rows, it->segstart)) goto oom;
+        if (!n.p[pid].refs++) count++;
+      }
     }
-    if (subs[longest].restart >= subs[longest].songlen) subs[longest].restart = 0;
+  }
+  freelayout(pl);
+  *pl = n;
+  return count;
+oom:
+  freelayout(&n);
+  return -1;
+}
+
+// A channel's orderlist (out NULL: only counted): transposes when they
+// change (at the loop's start when not known: it comes round from the end),
+// a pattern played again repeated. Returns the length, *restart the loop's
+// position
+static int orderlist(const PLAYOUT *pl, int s, int v, unsigned char *out, int *restart)
+{
+  const TITEM *it = pl->item[s][v];
+  int num = pl->numitems[s][v], len = 0, cur = 0, known = 1, i = 0;
+  *restart = 0;
+  while (i < num)
+  {
+    int reps = 1;
+    if (it[i].segstart == 2)
+    {
+      *restart = len;
+      known = 0;
+    }
+    while ((i + reps < num) && (reps < 16) && (!it[i+reps].segstart) && (it[i+reps].pid == it[i].pid) &&
+      (it[i+reps].trans == it[i].trans)) reps++;
+    if ((it[i].trans != NOTRANS) && ((!known) || (cur != it[i].trans)))
+    {
+      if (out) out[len] = TRANSUP + it[i].trans;
+      len++;
+      cur = it[i].trans;
+      known = 1;
+    }
+    if (reps > 1)
+    {
+      if (out) out[len] = REPEAT + reps - 1;
+      len++;
+    }
+    if (out) out[len] = pl->p[it[i].pid].number;
+    len++;
+    i += reps;
+  }
+  return len;
+}
+
+// Lays out the subtunes with blocks of len rows, joined up to maxrows.
+// Returns the patterns, -1 if out of memory; *toolong gets the first
+// subtune with an orderlist too long, -1 if none
+static int trylayout(PLAYOUT *pl, const ASUB *subs, int numsubs, const SUBLAYOUT *sl, int len, int maxrows, int join,
+  int *toolong)
+{
+  int s, v, n, restart;
+  if (!clearlayout(pl, 1 << 16)) return -1;
+  if (!layoutblocks(pl, subs, numsubs, sl, len)) return -1;
+  if ((join) && (!joinpatterns(pl, numsubs, maxrows))) return -1;
+  n = finishlayout(pl, numsubs);
+  if (n < 0) return -1;
+  *toolong = -1;
+  for (s = 0; s < numsubs; s++)
+  {
+    for (v = 0; v < MAX_CHN; v++)
+    {
+      if ((orderlist(pl, s, v, NULL, &restart) > MAX_SONGLEN) && (*toolong < 0)) *toolong = s;
+    }
+  }
+  return n;
+}
+
+// Cuts the subtunes' rows into patterns and makes the orderlists. Returns 0
+// if out of memory
+static int makepatterns(ASUB *subs, int numsubs, SNGDATA *sng, int patternlength)
+{
+  PLAYOUT pl;
+  SUBLAYOUT *sl = NULL, *bestsl = NULL;
+  int tries[16][2], numtries = 0, t, best = -1, bestn = 0x7fffffff, n = 0, toolong, ok = 0, s, v, i, len;
+
+  memset(&pl, 0, sizeof pl);
+  sl = (SUBLAYOUT *)calloc(numsubs, sizeof(SUBLAYOUT));
+  bestsl = (SUBLAYOUT *)calloc(numsubs, sizeof(SUBLAYOUT));
+  if ((!sl) || (!bestsl)) goto done;
+
+  // Blocks of the pattern length, then shorter ones, joined up to it; then
+  // the same up to the longest pattern
+  for (len = patternlength; len >= MINBLOCK; len /= 2)
+  {
+    tries[numtries][0] = len;
+    tries[numtries++][1] = patternlength;
+  }
+  if (patternlength < MAX_PATTROWS)
+  {
+    for (len = MAX_PATTROWS; len >= MINBLOCK; len /= 2)
+    {
+      tries[numtries][0] = len;
+      tries[numtries++][1] = MAX_PATTROWS;
+    }
+  }
+
+  for (t = 0; t < numtries; t++)
+  {
+    len = tries[t][0];
+    for (s = 0; s < numsubs; s++)
+    {
+      ASUB *a = &subs[s];
+      sl[s].looplen = 0;
+      sl[s].loopstart = 0;
+      sl[s].rows = (a->totalrows + len - 1) / len * len;
+      if (a->looprow >= 0)
+      {
+        // A tune that stops loops on a block of empty rows after its end
+        if (a->stopped)
+        {
+          sl[s].loopstart = (a->looprow + len - 1) / len * len;
+          sl[s].looplen = len;
+        }
+        else
+        {
+          sl[s].loopstart = a->looprow;
+          sl[s].looplen = a->endrow - a->looprow;
+        }
+        sl[s].rows = sl[s].loopstart + sl[s].looplen;
+      }
+      sl[s].keep = sl[s].rows;
+    }
+    // A loop goes round, so it can start later: on the block boundary after
+    // it, where that makes fewer patterns (a tune built in patterns counted
+    // from its start, not from the loop)
+    n = trylayout(&pl, subs, numsubs, sl, len, tries[t][1], 0, &toolong);
+    if (n < 0) goto done;
+    for (s = 0; s < numsubs; s++)
+    {
+      int was = sl[s].loopstart, m;
+      if ((!sl[s].looplen) || (subs[s].stopped) || (!(was % len))) continue;
+      sl[s].loopstart = (was + len - 1) / len * len;
+      sl[s].rows = sl[s].keep = sl[s].loopstart + sl[s].looplen;
+      m = trylayout(&pl, subs, numsubs, sl, len, tries[t][1], 0, &toolong);
+      if (m < 0) goto done;
+      if (m < n) n = m;
+      else
+      {
+        sl[s].loopstart = was;
+        sl[s].rows = sl[s].keep = sl[s].loopstart + sl[s].looplen;
+      }
+    }
+    n = trylayout(&pl, subs, numsubs, sl, len, tries[t][1], 1, &toolong);
+    if (n < 0) goto done;
+#ifdef SID2SNG_DEBUG
+    if (getenv("SID2SNG_PATT")) fprintf(stderr, "blocks %d join %d: %d patterns, orderlist too long %d\n", len, tries[t][1], n, toolong);
+#endif
+    // (An orderlist too long counts as too many patterns)
+    if (toolong >= 0) n += MAX_PATT;
+    if (n < bestn)
+    {
+      bestn = n;
+      best = t;
+      memcpy(bestsl, sl, numsubs * sizeof(SUBLAYOUT));
+    }
+    if (n <= MAX_PATT) break;
+  }
+
+  // Still too many: the subtune whose orderlist is too long, else the
+  // longest one, gets shorter
+  len = tries[best][0];
+  memcpy(sl, bestsl, numsubs * sizeof(SUBLAYOUT));
+  for (;;)
+  {
+    int cut, longest = 0;
+    n = trylayout(&pl, subs, numsubs, sl, len, tries[best][1], 1, &toolong);
+    if (n < 0) goto done;
+#ifdef SID2SNG_DEBUG
+    if (getenv("SID2SNG_PATT")) fprintf(stderr, "  cut: %d patterns, orderlist too long %d\n", n, toolong);
+#endif
+    if ((n <= MAX_PATT) && (toolong < 0)) break;
+    if (toolong >= 0) longest = toolong;
+    else
+    {
+      for (s = 1; s < numsubs; s++) if (sl[s].keep > sl[longest].keep) longest = s;
+    }
+    // (Can't happen: a block per channel & subtune always fits)
+    if (sl[longest].keep <= len) break;
+    cut = sl[longest].keep / ((n > MAX_PATT * 3 / 2) ? 16 : 64) / len * len;
+    if (cut < len) cut = len;
+    sl[longest].keep -= cut;
     subs[longest].truncated = 1;
   }
 
@@ -2841,28 +5345,115 @@ static int makepatterns(ASUB *subs, int numsubs, SNGDATA *sng, int patternlength
   {
     for (v = 0; v < MAX_CHN; v++)
     {
-      for (d = 0; d < subs[s].songlen; d++)
+      int restart, olen;
+      for (i = 0; i < pl.numitems[s][v]; i++)
       {
-        e = subs[s].chunk[v][d];
-        if (u[e].number < 0)
-        {
-          if (sng->numpatterns >= MAX_PATT) goto done;
-          u[e].number = sng->numpatterns++;
-          memcpy(sng->pattern[u[e].number], u[e].data, u[e].len * 4);
-          sng->pattlen[u[e].number] = u[e].len;
-        }
-        sng->songorder[s][v][d] = u[e].number;
+        TPATT *p = &pl.p[pl.item[s][v][i].pid];
+        if (p->number >= 0) continue;
+        if (sng->numpatterns >= MAX_PATT) goto done;
+        p->number = sng->numpatterns++;
+        memcpy(sng->pattern[p->number], p->data, p->rows * 4);
+        sng->pattlen[p->number] = p->rows;
       }
-      sng->songlen[s][v] = subs[s].songlen;
-      sng->songorder[s][v][subs[s].songlen] = LOOPSONG;
-      sng->songorder[s][v][subs[s].songlen + 1] = subs[s].restart;
+      olen = orderlist(&pl, s, v, sng->songorder[s][v], &restart);
+      if (olen > MAX_SONGLEN) goto done;
+      sng->songlen[s][v] = olen;
+      sng->songorder[s][v][olen] = LOOPSONG;
+      sng->songorder[s][v][olen + 1] = restart;
     }
   }
   ok = 1;
 
 done:
-  free(u);
+  freelayout(&pl);
+  free(sl);
+  free(bestsl);
   return ok;
+}
+
+// The players start each channel on instrument 1 at the default tempo (6
+// ticks a row, 6 per speed multiple): they read the first row when the tick
+// counter comes to instrument 1's gatetimer, before the song's own tempo is
+// set; then the rows up to the channel's first note at the subtune's tempo.
+// A gatetimer longer than a row is never come to: the packed SID's player
+// never reads a row (the subtune is silent) and the tracker stops the song.
+// The packer numbers the instruments its own way, hardrestart ones first,
+// then no-hardrestart, then legato ones, each in the song's order; so the
+// first instrument of the first kind the song uses becomes instrument 1.
+// That one is made instrument 1 here too, picking one whose gatetimer the
+// default tempo and every subtune's (mintempo: the fastest) come to (or
+// shortening its gatetimer if none has)
+static void fixstartinstrument(SNGDATA *sng, int multiplier, int mintempo)
+{
+  int used[MAX_INSTR];
+  int limit = (multiplier > 0) ? multiplier * 6 - 1 : 5;
+  int kind = 3, first = 0, pick = 0, s, v, d, r, i;
+
+  if (mintempo - 1 < limit) limit = mintempo - 1;
+  if (limit < 1) limit = 1;
+  memset(used, 0, sizeof used);
+  for (s = 0; s < sng->numsongs; s++)
+  {
+    for (v = 0; v < MAX_CHN; v++)
+    {
+      for (d = 0; d < sng->songlen[s][v]; d++)
+      {
+        int p = sng->songorder[s][v][d];
+        if (p >= sng->numpatterns) continue;
+        for (r = 0; r < sng->pattlen[p]; r++)
+        {
+          int ins = sng->pattern[p][r*4+1];
+          if ((ins > 0) && (ins < MAX_INSTR)) used[ins] = 1;
+        }
+      }
+    }
+  }
+  for (i = 1; i < MAX_INSTR; i++)
+  {
+    int k;
+    if (!used[i]) continue;
+    k = (sng->instr[i].gatetimer & 0x40) ? 2 : ((sng->instr[i].gatetimer & 0x80) ? 1 : 0);
+    if (k < kind)
+    {
+      kind = k;
+      first = i;
+      pick = 0;
+    }
+    if ((k == kind) && (!pick) && ((sng->instr[i].gatetimer & 0x3f) <= limit)) pick = i;
+  }
+  if (!first) return;
+  if (!pick)
+  {
+    pick = first;
+    sng->instr[pick].gatetimer = (sng->instr[pick].gatetimer & 0xc0) | limit;
+  }
+  if (pick != 1)
+  {
+    INSTR tmp = sng->instr[1];
+    int p;
+    sng->instr[1] = sng->instr[pick];
+    sng->instr[pick] = tmp;
+    // (Their names end in their numbers)
+    for (i = 0; i < 2; i++)
+    {
+      INSTR *in = &sng->instr[i ? pick : 1];
+      int len = 0;
+      char num[4];
+      while ((len < MAX_INSTRNAMELEN) && (in->name[len])) len++;
+      snprintf(num, sizeof num, "%02X", i ? pick : 1);
+      if ((len >= 3) && (in->name[len - 3] == ' ')) memcpy(&in->name[len - 2], num, 2);
+    }
+    for (p = 0; p < sng->numpatterns; p++)
+    {
+      for (r = 0; r < sng->pattlen[p]; r++)
+      {
+        unsigned char *ins = &sng->pattern[p][r*4+1];
+        if (*ins == 1) *ins = (unsigned char)pick;
+        else if (*ins == pick) *ins = 1;
+      }
+    }
+  }
+  if (sng->numinstr < pick) sng->numinstr = pick;
 }
 
 static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA *sng, SID2SNG_PLAYBACK *pb,
@@ -2871,13 +5462,14 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   ASUB *subs = NULL;
   ANOTE **order = NULL;
   AINSTR *ins = NULL;
+  APROGS *progs = NULL;
   int numsubs, first, seconds, patternlength;
   int numins = 0, numgated = 0, numok = 0, totalnotes = 0;
   int usednotes = 0, dropped = 0, truncated = 0, empty = 0, looped = 0, samerate = 1;
   int srcntsc = (sf->info.clock == 2), gtntsc = (sf->info.clock == 2), multiplier = 1, scaled = 0;
   int insmintempo[MAX_INSTR];
-  int level = 0, ok = 0, pass, s, c, d, r;
-  double rate = 1.0, maxtempoerr = 0.0, minratio = 1e9, maxratio = 0.0;
+  int level = 0, last, ok = 0, pass, s, c, d, r;
+  double rate = 1.0, maxtempoerr = 0.0, minratio = 1e9, maxratio = 0.0, basepitch = 0.0;
 
   // One subtune, or all of them (as many as a song can have)
   if (opt->subtune)
@@ -2898,17 +5490,14 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   seconds = clampint(opt->seconds, 1, 1800);
   patternlength = clampint(opt->patternlength, 16, MAX_PATTROWS);
 
-  if ((sf->info.rsid) && (!sf->info.playaddress))
-  {
-    setreport(report, reportsize, "This is an RSID tune: it runs from its own interrupts and needs a real C64, "
-      "so it can't be recorded. A PSID version of the tune may work");
-    return 0;
-  }
-
   // Notes from the register values as GoatTracker's frequency table has
-  // them. It is for PAL; an NTSC tune is to be played in NTSC mode (the same
-  // table on the faster clock), so it comes out at its own pitch
+  // them, at first its own table played on the SID's clock (PAL or NTSC
+  // mode). Then, if the speed is to be the other one, or the tune is tuned
+  // otherwise (an NTSC tune for its 60 Hz C64: GoatTracker's table is for
+  // PAL, in NTSC mode it is 0.65 semitones sharp), the notes again for the
+  // clock it plays at, on the table of the base pitch that fits them
   clockhz = PAL_CLOCK;
+  settuning(0.0);
   subs = (ASUB *)calloc(numsubs, sizeof(ASUB));
   if (!subs) goto oom;
   for (pass = 0; ; pass++)
@@ -2953,9 +5542,10 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
       scaled = 1;
       choosespeed(subs, numsubs, srcntsc, &gtntsc, &multiplier);
     }
-    // On the other PAL/NTSC the SID's clock differs: the notes again, from
-    // the pitches they are to sound at
-    if (gtntsc == srcntsc) break;
+    // On the other PAL/NTSC the SID's clock differs, another tuning has
+    // other notes: the notes again, from the pitches they are to sound at
+    basepitch = findtuning(subs, numsubs, gtntsc);
+    if ((gtntsc == srcntsc) && (basepitch == 0.0)) break;
     for (s = 0; s < numsubs; s++)
     {
       freesub(&subs[s]);
@@ -2963,6 +5553,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     }
     samerate = 1;
     clockhz = (srcntsc ? NTSC_CLOCK : PAL_CLOCK) * PAL_CLOCK / (gtntsc ? NTSC_CLOCK : PAL_CLOCK);
+    settuning(basepitch);
   }
   if (!numok)
   {
@@ -2973,6 +5564,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   }
   pb->multiplier = multiplier;
   pb->ntsc = gtntsc;
+  pb->basepitch = basepitch;
   for (s = 0; s < numsubs; s++)
   {
     ASUB *a = &subs[s];
@@ -3009,7 +5601,8 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   // notes first, they show more of the sound. Less detail until it all fits
   order = (ANOTE **)malloc(totalnotes * sizeof(ANOTE *));
   ins = (AINSTR *)malloc(MAX_INSTR * sizeof(AINSTR));
-  if ((!order) || (!ins)) goto oom;
+  progs = (APROGS *)malloc(sizeof(APROGS));
+  if ((!order) || (!ins) || (!progs)) goto oom;
   for (s = 0; s < numsubs; s++)
   {
     if (!subs[s].ok) continue;
@@ -3033,12 +5626,25 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
       AINSTR *all = (AINSTR *)malloc((numgated + 1) * sizeof(AINSTR));
       if (all)
       {
-        fprintf(stderr, "level %d: %d instruments needed\n", level, assigninstruments(order, numgated, all, numgated, level, 1));
+        fprintf(stderr, "level %d: %d instruments needed, %d with commands\n", level,
+          assigninstruments(order, numgated, all, numgated, progs, level, 0, 0, 1, 1),
+          assigninstruments(order, numgated, all, numgated, progs, level, 0, 1, 1, 1));
         free(all);
       }
     }
 #endif
-    numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, level, level == NUMLEVELS - 1);
+    // (Each level with the pitch sweeps of long sounds first, the last
+    // without; then with notes that differ from their instrument in one
+    // thing, set by a command on their row; then leaving out how the sound
+    // changes after a keyoff)
+    last = (level == NUMLEVELS - 1);
+    numins = -1;
+    if (!last) numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, progs, level, 1, 0, 1, 0);
+    if (numins < 0) numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, progs, level, 0, 0, 1, 0);
+    if ((numins < 0) && (!last)) numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, progs, level, 1, 1, 1, 0);
+    if (numins < 0) numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, progs, level, 0, 1, 1, 0);
+    if ((numins < 0) && (!last)) numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, progs, level, 1, 1, 0, 0);
+    if (numins < 0) numins = assigninstruments(order, numgated, ins, MAX_INSTR - 1, progs, level, 0, 1, 0, last);
     if (numins >= 0) break;
   }
 #ifdef SID2SNG_DEBUG
@@ -3092,16 +5698,11 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   {
     AINSTR *a = &ins[c];
     INSTR *in = &sng->instr[a->number];
-    unsigned char wl[PROGMAX + 1], wr[PROGMAX + 1];
     char name[MAX_INSTRNAMELEN + 1];
 
-    memcpy(wl, a->wl, a->wlen);
-    memcpy(wr, a->wr, a->wlen);
-    wl[a->wlen] = 0xff;
-    wr[a->wlen] = (a->wloop >= 0) ? a->wloop + 1 : 0;
     in->ad = a->ad;
     in->sr = a->sr;
-    in->ptr[WTBL] = addprogram(sng, WTBL, wl, wr, a->wlen + 1);
+    in->ptr[WTBL] = wavetotable(sng, a->wl, a->wr, a->wlen, a->wloop);
     if (a->plen) in->ptr[PTBL] = addprogram(sng, PTBL, a->pl, a->pr, a->plen);
     in->gatetimer = a->gatetimer;
     // The gate goes off within the row before the note: the player stops
@@ -3110,6 +5711,16 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     // subtune may come from there)
     if ((a->gatetimer & 0x3f) > insmintempo[c] - 1) in->gatetimer = (a->gatetimer & 0xc0) | (insmintempo[c] - 1);
     in->firstwave = a->firstwave;
+    if (a->vibdelay)
+    {
+      unsigned char vl = a->vibleft, vr = a->vibright;
+      int row = addprogram(sng, STBL, &vl, &vr, 1);
+      if (row)
+      {
+        in->ptr[STBL] = row;
+        in->vibdelay = a->vibdelay;
+      }
+    }
     memset(name, 0, sizeof name);
     snprintf(name, sizeof name, "%s %02X", wavename(a->wl[0]), a->number);
     memcpy(in->name, name, MAX_INSTRNAMELEN);
@@ -3121,11 +5732,52 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
   {
     if (subs[s].ok)
     {
-      if (!buildgrid(&subs[s], ins, sng, pb->multiplier)) goto oom;
+      if (!buildgrid(&subs[s], ins, progs, sng, pb->multiplier)) goto oom;
     }
     else if (!allocgrid(&subs[s], 1)) goto oom;
   }
   if (!makepatterns(subs, numsubs, sng, patternlength)) goto oom;
+  {
+    int mintempo = 0x7f;
+    for (s = 0; s < numsubs; s++)
+    {
+      if (!subs[s].ok) continue;
+      if (subs[s].gttempo < mintempo) mintempo = subs[s].gttempo;
+      if ((subs[s].gtfunk) && (subs[s].gtfunk < mintempo)) mintempo = subs[s].gtfunk;
+    }
+    fixstartinstrument(sng, pb->multiplier, mintempo);
+  }
+
+  // The hardrestart ADSR the tune uses most (before notes that start with
+  // one), so that it sounds the same in the song
+  {
+    int vals[64], counts[64], numvals = 0, best = -1, k;
+    for (s = 0; s < numsubs; s++)
+    {
+      if (!subs[s].ok) continue;
+      for (c = 0; c < subs[s].numnotes; c++)
+      {
+        int a = subs[s].notes[c].hradsr;
+        if ((a < 0) || (subs[s].notes[c].instr < 0)) continue;
+        for (k = 0; (k < numvals) && (vals[k] != a); k++);
+        if (k == numvals)
+        {
+          if (numvals == 64) continue;
+          vals[numvals] = a;
+          counts[numvals++] = 0;
+        }
+        counts[k]++;
+      }
+    }
+    for (k = 0; k < numvals; k++) if ((best < 0) || (counts[k] > counts[best])) best = k;
+    pb->adparam = (best >= 0) ? vals[best] : 0x0f00;
+  }
+  // The player's optimizations off: pulse steps would be left out on the
+  // frames the sequencer reads a row (a sweep going on through the notes
+  // falls behind), vibrato & slides on a row's first frame (they would
+  // fall out of step with the tune's)
+  pb->optimizepulse = 0;
+  pb->optimizerealtime = 0;
 
   for (s = 0; s < numsubs; s++)
   {
@@ -3133,7 +5785,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     dropped += subs[s].dropped;
     if (subs[s].truncated) truncated++;
     if (!subs[s].ok) empty++;
-    if ((subs[s].ok) && (subs[s].looprow >= 0)) looped++;
+    if ((subs[s].ok) && (subs[s].looprow >= 0) && (!subs[s].stopped)) looped++;
   }
 
   if (numsubs == 1)
@@ -3182,6 +5834,7 @@ static int approxconvert(const SIDFILE *sf, const SID2SNG_OPTIONS *opt, SNGDATA 
     else if (pb->multiplier == 0) addreport(report, reportsize, ", 25Hz (speed multiplier 0)");
     if (pb->ntsc) addreport(report, reportsize, ", NTSC");
   }
+  if (basepitch > 0.0) addreport(report, reportsize, ", tuned to A-4 = %.2f Hz (base pitch)", basepitch);
   if (dropped) addreport(report, reportsize, ", %d notes too close together left out", dropped);
   if (level) addreport(report, reportsize, ", instruments simplified to fit");
   if (truncated)
@@ -3216,6 +5869,7 @@ done:
   }
   free(order);
   free(ins);
+  free(progs);
   return ok;
 }
 
@@ -3241,6 +5895,9 @@ int sid2sng_play(const char *sidpath, const char *sngpath, const SID2SNG_OPTIONS
   pb.multiplier = -1;
   pb.ntsc = 0;
   pb.adparam = -1;
+  pb.optimizepulse = -1;
+  pb.optimizerealtime = -1;
+  pb.basepitch = -1.0;
 
   buf = readfile(sidpath, &size);
   if (!buf)

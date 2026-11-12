@@ -290,6 +290,20 @@ void gui::drawcontrolbar(float height)
           stopsong();
           do_sound_init();
         }
+
+        // The tuning, when not the standard table (the SID import sets a
+        // base pitch for a tune tuned otherwise)
+        if (basepitch > 0.0f)
+        {
+          char tip[200];
+          float tw = ImGui::CalcTextSize("A000.0").x + 16.0f;
+          snprintf(text, sizeof text, "A%.1f", basepitch);
+          ImGui::SetCursorScreenPos(ImVec2(bx - cw - 6.0f - tw, rowy1));
+          if (ImGui::Button(text, ImVec2(tw, 0))) setbasepitch(0.0f);
+          snprintf(tip, sizeof tip, "Tuning: A-4 = %.2f Hz on a PAL C64 (base pitch, set by the SID import to match the "
+            "tune). Click for GoatTracker's standard frequency table", basepitch);
+          if (ImGui::IsItemHovered()) tooltip(tip);
+        }
       }
     }
   }

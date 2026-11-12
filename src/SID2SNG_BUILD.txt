@@ -39,14 +39,19 @@ sid2sng() returns 1/0; report gets e.g. "Exact: GoatTracker 2 song, 4
 subtunes, 41 patterns, 13 instruments" or "Approximate: 11 subtunes, 3845
 notes, 59 instruments, tempo 4-16, 84 patterns, 2 loop where they repeat,
 ..." or the error. How the song is to be played is not in the .sng: the
-editor settings speed multiplier, NTSC and hardrestart ADSR. sid2sng_play()
-gives them in SID2SNG_PLAYBACK (multiplier 1-16, 0 = 25Hz, -1 = none fits;
-ntsc; adparam, -1 = not known) and the report mentions them ("2x speed",
-"25Hz", "NTSC", "hardrestart ADSR 0000"). After a successful conversion load
-the .sng with loadsong() and set editorInfo.multiplier/ntsc/adparam (the
-tracker's SID import does, then do_sound_init()). NTSC tunes are converted
-for NTSC mode: APPROX takes the notes from the register values with the PAL
-frequency table, which NTSC mode plays at the NTSC clock.
+editor settings speed multiplier, NTSC, hardrestart ADSR, player
+optimizations and tuning. sid2sng_play() gives them in SID2SNG_PLAYBACK
+(multiplier 1-16, 0 = 25Hz, -1 = none fits; ntsc; adparam, -1 = not known;
+optimizepulse/optimizerealtime; basepitch, 0 = the standard frequency
+table, -1 = not known) and the report mentions them ("2x speed", "25Hz",
+"NTSC", "hardrestart ADSR 0000", "tuned to A-4 = 423.87 Hz"). After a
+successful conversion load the .sng with loadsong() and set editorInfo
+.multiplier/ntsc/adparam/optimize*, and setbasepitch() (goattrk2.c; the
+tracker's SID import does, then do_sound_init()). The tuning is
+GoatTracker's existing base pitch setting (config "Base pitch of A-4",
+gt2reloc -G, the harness -G): A-4 in Hz on the PAL clock, 12 notes an
+octave; the packer writes the table it makes. APPROX finds the one the
+tune's notes fit (see below); EXACT reads it back from the packed table.
 
 APPROX speed: a player that runs at a rate GoatTracker can't (a CIA timer
 that isn't a whole multiple of the frame rate, e.g. Ultima IV's 34.7 Hz, or
@@ -219,3 +224,197 @@ Ghosts'n Goblins subtune 2 0/13/0% within 1 -> 100%; Rambo subtune 1
 unchanged, the same detail levels as before (Rambo with all 23 subtunes is
 at the lowest either way; it doesn't pack yet: "pattern too complex").
 EXACT round trip unchanged.
+
+APPROX fixes (2026-11-11, from a test set of 64 game tunes, their exports
+from the tracker and screenshots of the failures). Checked by playing each
+original and its packed export on the importer's emulated C64 and matching
+the notes per voice (pitch, onset within 30 ms) over 40 s of every subtune:
+  - Silent songs and subtunes (James Pond II, Roland's Ratrace, Yie Ar Kung
+    Fu; 8 of Ultima V's 15 subtunes, 3 of Defender of the Crown's): the
+    players start each channel on instrument 1 at the default tempo and
+    read the rows up to the channel's first note with its gatetimer; one
+    longer than a row is never reached (the packed SID's player never reads
+    a row, the tracker stops the song). The packer numbers the instruments
+    hardrestart / no-HR / legato first, so the first used instrument of the
+    first kind becomes its instrument 1: that one is now instrument 1 in the
+    song too, one whose gatetimer fits the default tempo and every
+    subtune's (or its gatetimer is shortened). 49 silent subtunes -> 0.
+  - "PATTERN xx IS TOO COMPLEX (OVER 256 BYTES PACKED)" when exporting
+    (Gauntlet III, Green Beret, Katakis, Last Ninja, Rainbow Islands, Rambo,
+    Rocket Ranger, Speedball, Yie Ar Kung Fu II): a song needing too many
+    patterns gets 128-row ones, and busy ones pack to more than the
+    player's 256 bytes. Their packed size is worked out as packpattern()
+    does and too big ones are cut in two (64 rows always fit).
+  - RSID tunes were refused. They now run on the C64 (recordfull()): init,
+    which may not return (a main program), CIA 1/2 timers with IRQ/NMI, the
+    VIC-II raster interrupt, the KERNAL's interrupt entry and exit
+    ($EA31/$EA81/$FEBC, other KERNAL calls return). A 5 s run finds the
+    interrupt source that writes the SID's voice/filter registers most (a
+    CIA timer, a raster line, or the main program: then once a frame), then
+    the SID is recorded at the end of each of its interrupts, at their rate.
+    A main program waiting in a loop (the same CPU state again, nothing
+    written but the stack, no changing I/O read) skips to the next event.
+    Arkanoid, Beach Head II, Dark Castle, Great Giana Sisters, Master of the
+    Lamps import; subtunes of digitized speech (Beach Head II 2-12, Dark
+    Castle 2-4: samples through $D418 from an NMI or the main program)
+    come out empty. Slowest: Arkanoid's 20 subtunes, ~5 s.
+  - OSC3/ENV3 read as a constant: voice 3's oscillator (accumulator, noise
+    shift register) and envelope now run, ported from reSID 0.16 (the
+    engine in resid/, the same as https://github.com/simonowen/resid:
+    WaveformGenerator::clock/writeCONTROL_REG, EnvelopeGenerator::clock &
+    its rate/sustain tables), clocked by the CPU's cycles; reads come from
+    the addressing mode of the instruction about to run (memaccess()).
+    Paradroid, Hypa-Ball, Mutants and Master of the Lamps read them.
+  - Voice 3 switched off ($D418 bit 7, not filtered, not voice 1's ring/
+    sync source) is left out: GoatTracker can't switch it off, and
+    Paradroid's random-number voice (noise, gate on, SR $FF) played as a
+    loud constant hiss. Karateka also switches it off at times.
+  - Subtunes that stop (jingles, sound effects) started over every pattern
+    or so (Commando's: 12-16 notes for 2, 368 for 46); they end on empty
+    rows now. The last keyoff of a tune that doesn't loop was lost.
+  - Notes with pulse width 0 (silent): a pulse "going on" from before the
+    voice's first pulse note, and small start pulses rounded down to 0.
+  - The hardrestart ADSR was left at the editor's last setting (an earlier
+    EXACT import could leave $0000). APPROX now gives the one the tune has
+    in the gap before notes that start with a hardrestart (most common),
+    $0F00 if none.
+Results: all 64 import and pack (before: 50; 5 RSID refused, 9 failed to
+pack); on the 50 exported before, notes matched 65.2% -> 72.3% on average
+(the rest: slides, vibrato and arpeggios simplified, quantized to rows,
+programs at fitted speeds). EXACT round trip unchanged (462 byte-identical
+repacks, 70 structurally same, 0 failures). Not done: slides & vibrato as
+commands (Paradroid's sweeping notes become flat ones), combined waveforms
+read through OSC3 (an AND of the waveforms, not reSID's sampled tables).
+Found by the same day's accuracy check (Commando, Ghosts'n Goblins,
+Hypa-Ball, Beyond, Rambo, Ultima IV, first 120 s of each subtune) and
+worked on afterwards (2026-11-11 evening). Measured on all 64 tunes, up to
+8 subtunes each, 60 s, by the accuracy check's note compare (regcmp.py:
+119068 notes): notes at the right pitch 85.6% -> 87.0% (a semitone off
+7578 -> 6127), frames at the right pitch 79.3% -> 81.6%, vibrato kept on
+74 -> 541 of 3376 notes, silent pulse notes 288 -> 214; pulse differences
+33138 -> 33721 and gate length differences 15171 -> 16249 (the vibrato
+takes instruments: more tunes simplified further), slides 6902 -> 6925
+missing.
+  - slide ends a semitone off: the sticky pitch (STICKY, for vibrato)
+    kept the note before when a slide stopped a bit off a note. A pitch
+    that stays the same for RUNMIN frames is now the nearest note
+  - vibrato: findvibrato() fits GoatTracker's instrument vibrato to each
+    note that holds its pitch (simvib() runs the player's vibrato: speed
+    0-31, depth absolute or note-relative, the delay where the note starts
+    wobbling; the phase can't be had, many players' vibrato runs on through
+    the notes, so it's fitted at the best one). Instruments carry it (a
+    speedtable row) at all but the last detail level. Wave program rows
+    that keep the pitch are written as "no frequency change" (keeppitch()),
+    else they'd restart it. Ghosts'n Goblins 1: 0 -> 194 of 196 vibrato
+    notes. Not had: one-sided wobbles (Mutants), notes simplified at the
+    last level (Krakout, R-Type, Last Ninja)
+  - player optimizations: APPROX now sets pulse and realtime optimization
+    off (SID2SNG_PLAYBACK, the tracker's import sets them): the player
+    skips pulse steps on the frames it reads a row, and effects (vibrato)
+    on a row's first frame, so sweeps & vibrato fell out of step. Notes
+    joined by toneportamento (legato) now change on the row's first frame,
+    a frame earlier (Kung-Fu Master, Up'n Down a little worse)
+  - pulse sweeps: a note whose pulse goes on from the one before can't take
+    an instrument with a pulse program (while pulse detail matters), and
+    the note that starts such a sweep gets its program from the whole
+    stretch of notes that go on with it (pchain, up to where the pulse is
+    set anew): back-and-forth sweeps loop. The player still leaves out a
+    pulse step on each note's first frame, so a long sweep falls behind a
+    frame a note. Out of instruments, a note that sets the pulse goes to
+    an instrument with a pulse program before one with its ADSR (else
+    silent)
+  - sound effect pitch sweeps: each detail level is tried with the pitch
+    drift of long programs first (the last level without)
+  - callhz() uses 50.125/59.826 Hz
+  - Rambo: an AD/SR command the same on two notes is kept on the rows
+    between them (the packer then leaves it out): 3 -> 2 subtunes shortened
+Then open: slides in general (vibrato's one-sided relatives, portamento
+between notes, Hollywood Poker Pro's arpeggios at the last detail level:
+most of the "slides missing" are arpeggios lost to the instrument limit);
+filter sweeps (Beyond's cutoff 45%); NTSC tunes play about 0.35 semitone
+flat (GoatTracker's NTSC mode plays its PAL frequency table on the faster
+clock; the nearest note is that far); long multi-subtune files lose the
+ends of subtunes at the 208-pattern limit (Ultima V from ~20 s in some).
+
+APPROX, the four open points (2026-11-12). Measured as before (regcmp.py
+over all 64 tunes, up to 8 subtunes each, 60 s, 119068 notes; batch logs
+for the rest), the tree before -> after:
+  notes matched 91.7% -> 95.3%, at the right pitch 87.0% -> 93.3% (a
+  semitone off 6127 -> 1430), frames at the right pitch 81.6% -> 84.3%,
+  their pitch 21.7 -> 3.9 cents off on average; AD/SR differences 996/563
+  -> 461/459, gate length 16249 -> 8324, pulse 33721 -> 29242 (silent
+  214 -> 78), vibrato missing 2835 -> 2257 of 3376, slides missing 6925 ->
+  5817 of 10796, filter cutoff 63.9% -> 77.9% of the frames; subtunes cut
+  short 63 (11 tunes) -> 22 (4 tunes); notes left out as too close 12729 ->
+  3821; tunes at a simplified level 43 -> 31. EXACT round trip unchanged
+  (462 byte-identical, 70 same, 0 failures); 64 of 64 import and pack.
+  - Tuning: the notes' pitch beyond the nearest note, as they sound, is
+    averaged on a circle (tuneconsistent()); when they agree (resultant
+    >= 0.5) and the base pitch that fits is 0.1 semitone or more off
+    GoatTracker's table, the song gets it (findtuning(); notes again on
+    that table, settuning() as calculatefreqtable()). An NTSC tune for its
+    60 Hz C64 played in NTSC mode gets 423.87 Hz; many PAL tunes are ~0.35
+    semitone sharp (Ghosts'n Goblins, Bomb Jack 449 Hz) or flat. 35 of 64
+    get one. The speed choice no longer weighs pitch then. EXACT finds the
+    packed table ("lda lo-FIRSTNOTE,y; sta; lda hi-FIRSTNOTE,y" just before
+    the song table) and the base pitch that gives it (all 64 exports read
+    back right). The tracker: setbasepitch() (goattrk2.c) restores the
+    standard table for 0; the modern interface's control bar shows a base
+    pitch (A423.9), a click goes back to the standard table. The retro
+    interface only says it in the import message.
+  - Instruments: a note may share an instrument that differs in one thing
+    a command on its row sets: AD (5), SR (6), its own wave program (8,
+    set wavepointer; both players start the instrument and then take it)
+    or pulse program (9). Tried at each level after the plain match;
+    programs counted once against the tables (APROGS). Silent frames (no
+    waveform, test bit) keep the pitch (no note per program); noise off
+    the note's octaves is a fixed pitch also in tonal notes (drum attacks:
+    R-Type, Hollywood Poker Pro went from 1294 to 871 instruments needed at
+    full detail). A note ended by a keyoff whose sound still changes in the
+    release (an arpeggio going on) has it in its program, left out at a
+    level when it doesn't fit. A slide cut to fewer frames holds its last
+    tone pitch (an arpeggio coming back: the note), not the next frame's
+    (a semitone off). Hollywood Poker Pro: level 10 -> 9; its slides are
+    still lost (they need 4-row programs: ~200 different ones, the 255-row
+    wavetable holds ~50).
+  - Filter: filtertable programs that set the type/resonance/routing and
+    cutoff, then modulation steps (runs of the same change per frame),
+    looping when the steps repeat (the loop giving the most frames wins),
+    ending where the cutoff holds (a sweep that comes again is the same
+    program). Emulated frame by frame (fstep(), as gplay.c); a program is
+    started (Axx, in a channel with room) on a row where the running one
+    gives a cutoff more than 3 off, or other routing/type/resonance, and
+    on the loop's first row. At another speed the frames are resampled to
+    the song's. Table full: the cutoff (Cxx). Beyond 49% -> 99% of its
+    filter frames, Krakout 8% -> 100%, Last Ninja 44% -> 92%, Hollywood
+    Poker Pro 48% -> 80%. Low still: Katakis (cut-short subtunes), Yie Ar
+    Kung Fu II and Master of the Lamps (fitted speeds).
+  - Patterns: each channel is cut on its own into blocks (the song before
+    the loop and the loop each from their start), the same block also
+    when transposed (orderlist transpose -16..+14, set again at the loop's
+    start) one pattern; then patterns that always follow each other are
+    joined (both always together first: fewer patterns; then one of them:
+    fewer orderlist positions), repeats as orderlist repeats. Blocks of
+    64, 32, 16, 8 rows joined up to 64, then 128..8 up to 128: the first
+    that fits, else the fewest patterns and the longest subtune (or the
+    one with an orderlist over 254) cut, as before.
+  - Rows: a coarser row is taken unless it loses 1% more notes (two on a
+    row) than the finest, or has 5% more off its rows (before: 80% on
+    them). The tune's timing shifting a frame or two against the rows now
+    and then (Ultima V: a frame more every ~40 s; 177 of 570 subtunes had
+    no grid with 80% of their notes) is followed (finddrift(): 4 onsets in
+    a row off by the same 1-2 ticks): song ticks leave those frames out
+    (or double them), rows are on song ticks (warptick()/unwarptick()), the
+    loop is found with any period in the recording's ticks and whole rows
+    in the song's. Ultima V: tempo 3 -> 6, notes matched 78% -> 93%, frames
+    at the right pitch 55% -> 84%, 13 -> 6 subtunes cut short; Ultima IV
+    74% -> 93%, Booga-Boo 61% -> 100%. Worse: Rambo 98% -> 91% (subtune 1
+    gets rows twice as long).
+  - Import time: a tune that gets a base pitch or the other PAL/NTSC is
+    recorded twice (Ultima V 2.7 -> 4.5 s, Defender of the Crown 3.5 ->
+    7.1 s; Katakis, the slowest, 10.6 -> 11.7 s).
+Still open: Hollywood Poker Pro's arpeggios/slides (wavetable room);
+Katakis (7 subtunes), Last Ninja (8), Ultima V (6), Defender of the Crown
+(1) still lose the ends of subtunes; the filter of tunes played at a fitted
+speed; the base pitch is an editor setting (it stays for the songs after,
+like NTSC), shown only in the modern interface.

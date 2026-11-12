@@ -15,7 +15,7 @@ mkdir -p "$OUT"
 # greloc.c includes "goattrk2.h": a copy next to the stand-in picks it up
 cp "$SRC/greloc.c" "$HERE/goattrk2.h" "$HERE/harness.c" "$SRC/player.s" "$SRC/altplayer.s" "$OUT/"
 $CC -O2 -DGT2RELOC -I"$OUT" -I"$SRC" -I"$SRC/asm" -o "$OUT/relocharness" \
-  "$OUT/harness.c" "$OUT/greloc.c" "$SRC"/asm/*.c
+  "$OUT/harness.c" "$OUT/greloc.c" "$SRC"/asm/*.c -lm
 $CC -O2 -Wall -o "$OUT/sid2sng" \
   "$SRC/sid2sng.c" "$SRC/gsidimport.c" "$SRC/gsngwrite.c" "$SRC/cpu6502.c" -lm
 echo "Built $OUT/relocharness and $OUT/sid2sng"

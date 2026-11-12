@@ -368,9 +368,9 @@ int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt)
 }
 
 // Converts and loads a SID file, and sets the editor to play it as the SID
-// does: speed multiplier, PAL/NTSC, hardrestart ADSR (these are editor
-// settings, they stay for the songs after). How it went is shown in the
-// status bar (a box only when it fails)
+// does: speed multiplier, PAL/NTSC, hardrestart ADSR, tuning (base pitch;
+// these are editor settings, they stay for the songs after). How it went is
+// shown in the status bar (a box only when it fails)
 static int importsid(const char *path, const SID2SNG_OPTIONS *opt)
 {
   char temppath[MAX_PATHNAME];
@@ -395,6 +395,9 @@ static int importsid(const char *path, const SID2SNG_OPTIONS *opt)
   editorInfo.ntsc = pb.ntsc;
   if (pb.multiplier >= 0) editorInfo.multiplier = pb.multiplier;
   if (pb.adparam >= 0) editorInfo.adparam = pb.adparam;
+  if (pb.optimizepulse >= 0) editorInfo.optimizepulse = pb.optimizepulse;
+  if (pb.optimizerealtime >= 0) editorInfo.optimizerealtime = pb.optimizerealtime;
+  if (pb.basepitch >= 0.0) setbasepitch((float)pb.basepitch);
   do_sound_init();
   if (editorInfo.multiplier) snprintf(speed, sizeof speed, "%dx", editorInfo.multiplier);
   else snprintf(speed, sizeof speed, "25Hz");
