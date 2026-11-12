@@ -27,7 +27,7 @@ void onlinehelp(int standalone,int context)
     "CMD+1-9    Same as F1-F9",
     "CMD+X,C,V  Cut,copy,paste",
     "CMD+A      Mark all",
-    "CMD+R      Edit/jam mode",
+    "CMD+RET    Same as CTRL+RET",
     "CMD+F      Follow playback",
     "CMD+O,S    Load, save",
     "CMD+I      Import MIDI file",
@@ -79,10 +79,11 @@ void onlinehelp(int standalone,int context)
     "SHIFT+ESC Clear/optimize all musicdata",
     "ESC Exit program",
     "Mouse wheel over a value changes it",
-    "  (instrument parameters, orderlist",
-    "  pattern numbers, POS, octave, MIDI",
-    "  INPUT, STEPS...), over a table it",
-    "  scrolls the table",
+    "  (instrument parameters, tables,",
+    "  orderlist pattern numbers, POS",
+    "  (playing: the playback goes there),",
+    "  octave, MIDI INPUT, STEPS...)",
+    "CTRL+SHIFT+wheel Select instrument",
     NULL
   };
 
@@ -96,8 +97,9 @@ void onlinehelp(int standalone,int context)
     "  after each note entered (0-16)",
     "0-9 & A-F to enter commands",
     "SPC Play from cursor pos / stop",
-    "CMD+R Switch between jam/editmode",
-    "  (also the middle mouse button)",
+    "  (in all editors but song info)",
+    "NUMPAD . or middle mouse button",
+    "  Switch between jam/editmode",
     "BACKSPC Insert rest",
     "RET Keyoff (/w SHIFT = Keyon)",
     "- + < > Select instrument",
@@ -126,7 +128,9 @@ void onlinehelp(int standalone,int context)
 
   char *songkeys[] = {
     "0-9 & A-F to enter pattern numbers",
-    "SPC Set start position for F2 key",
+    "SPC Play from this position / stop",
+    "CTRL+RET Set start position for F2",
+    "  (/w SHIFT = all channels)",
     "BACKSPC Set end position for F2 key",
     "RET Go to pattern (/w SHIFT=all chns.)",
     "< > Select subtune",
@@ -141,8 +145,11 @@ void onlinehelp(int standalone,int context)
 
   char *instkeys[] = {
     "0-9 & A-F to enter parameters",
-    "SPC Play test note",
-    "SHIFT+SPC Silence test note",
+    "CTRL+RET Play test note",
+    "CTRL+SHIFT+RET Silence test note",
+    "SPC Play song from cursor / stop",
+    "Wheel over a value changes it",
+    "[EDIT] Instr. page (ESC: back)",
     "MIDI keyboard plays test notes",
     "RET Go to table",
     "- + < > Select instrument",

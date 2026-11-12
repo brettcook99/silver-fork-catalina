@@ -76,6 +76,7 @@ void playtestnote(int note, int ins, int chnnum);
 void releasenote(int chnnum);
 void mutechannel(int chnnum);
 int isplaying(void);
+int playstarting(void);
 // The filtertable row the player runs next (1-based, 0 = stopped)
 int playfilterptr(void);
 void playroutine(void);

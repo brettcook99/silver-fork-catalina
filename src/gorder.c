@@ -257,24 +257,6 @@ void orderlistcommands(void)
     break;
 
 
-    case KEY_SPACE:
-    if (!shiftpressed)
-    {
-      if (editorInfo.eseditpos < songlen[editorInfo.esnum][editorInfo.eschn]) editorUndoInfo.editorInfo[editorInfo.eschn].espos = editorInfo.eseditpos;
-      if (editorUndoInfo.editorInfo[editorInfo.eschn].esend < editorUndoInfo.editorInfo[editorInfo.eschn].espos)
-		  editorUndoInfo.editorInfo[editorInfo.eschn].esend = 0;
-    }
-    else
-    {
-      for (c = 0; c < MAX_CHN; c++)
-      {
-        if (editorInfo.eseditpos < songlen[editorInfo.esnum][c]) editorUndoInfo.editorInfo[c].espos = editorInfo.eseditpos;
-        if (editorUndoInfo.editorInfo[c].esend < editorUndoInfo.editorInfo[c].espos)
-			editorUndoInfo.editorInfo[c].esend = 0;
-      }
-    }
-    break;
-
     case KEY_BACKSPACE:
     if (!shiftpressed)
     {
@@ -301,6 +283,28 @@ void orderlistcommands(void)
     break;
 
     case KEY_ENTER:
+    // CTRL+RETURN (CMD+RETURN on macOS): start position for F2 (was SPACE,
+    // which now plays / stops in every editor). With SHIFT too: on all
+    // channels
+    if (ctrlpressed)
+    {
+      if (!shiftonlypressed)
+      {
+        if (editorInfo.eseditpos < songlen[editorInfo.esnum][editorInfo.eschn]) editorUndoInfo.editorInfo[editorInfo.eschn].espos = editorInfo.eseditpos;
+        if (editorUndoInfo.editorInfo[editorInfo.eschn].esend < editorUndoInfo.editorInfo[editorInfo.eschn].espos)
+          editorUndoInfo.editorInfo[editorInfo.eschn].esend = 0;
+      }
+      else
+      {
+        for (c = 0; c < MAX_CHN; c++)
+        {
+          if (editorInfo.eseditpos < songlen[editorInfo.esnum][c]) editorUndoInfo.editorInfo[c].espos = editorInfo.eseditpos;
+          if (editorUndoInfo.editorInfo[c].esend < editorUndoInfo.editorInfo[c].espos)
+            editorUndoInfo.editorInfo[c].esend = 0;
+        }
+      }
+      break;
+    }
     if (editorInfo.eseditpos < songlen[editorInfo.esnum][editorInfo.eschn])
     {
       if (!shiftpressed)

@@ -75,8 +75,8 @@ void gui::drawcontrolbar(float height)
   x += bw + 14.0f;
   ImGui::SetCursorScreenPos(ImVec2(x, y));
   if (iconbutton("##record", ICON_RECORD, recordmode != 0, theme.record, ImVec2(bw, bh),
-    recordmode ? "Edit mode: keys enter notes into the pattern (CMD+R or the middle mouse button switches to jam mode)" :
-                 "Jam mode: keys only play notes (CMD+R or the middle mouse button switches to edit mode)"))
+    recordmode ? "Edit mode: keys enter notes into the pattern (the middle mouse button or numpad . switches to jam mode)" :
+                 "Jam mode: keys only play notes (the middle mouse button or numpad . switches to edit mode)"))
     cmd_post(GTCMD_RECORD);
   x += bw + 4.0f;
   ImGui::SetCursorScreenPos(ImVec2(x, y));
@@ -487,6 +487,8 @@ void gui::drawmenubar(void)
     if (ImGui::MenuItem("Default Text Size", "CTRL+0")) cmd_post(GTCMD_ZOOMRESET);
     if (ImGui::MenuItem("Full Screen", "ALT+ENTER")) cmd_post(GTCMD_FULLSCREEN);
     ImGui::Separator();
+    // The retro screen has no menu bar on Windows / Linux: it is set here
+    if (ImGui::MenuItem("Gradient Background (Retro Interface)", NULL, retrogradient != 0)) cmd_post(GTCMD_RETROGRADIENT);
     if (ImGui::MenuItem("Ask for Interface at Next Launch")) cmd_post(GTCMD_ASKINTERFACE);
     ImGui::EndMenu();
   }

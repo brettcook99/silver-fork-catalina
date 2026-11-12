@@ -25,6 +25,49 @@ static char timechar[] = {':', ' '};
 #define POSCOLUMN (40 + 10 + 27)
 #define POSWIDTH 6
 
+// The [EDIT] button right of the instrument panel's title (instrument number
+// and name): opens the instrument page. On that page the same place has
+// [BACK]
+#define EDITBTNCOLUMN 92
+#define EDITBTNROW 7
+#define EDITBTNWIDTH 6
+
+// The page shown: the main screen or the instrument page
+int retropage = RETROPAGE_MAIN;
+
+// Opens the instrument page ([EDIT] next to the instrument). It is blank for
+// now: the new instrument editor will be on it. MIDI notes play the
+// instrument there
+void retro_openinstrpage(void)
+{
+  retropage = RETROPAGE_INSTRUMENT;
+  editorInfo.editmode = EDIT_INSTRUMENT;
+  if (editorInfo.eipos > 8) editorInfo.eipos = 0;
+  clearscreen();
+}
+
+// Back to the main screen ([BACK] or ESC on the instrument page)
+void retro_closepage(void)
+{
+  retropage = RETROPAGE_MAIN;
+  printmainscreen();
+}
+
+// [EDIT] / [BACK]: grey brackets, the word in green
+static void printbutton(int x, int y, const char *word)
+{
+  printtext(x, y, CNORMAL, "[");
+  printtext(x + 1, y, CEDIT, word);
+  printtext(x + 1 + (int)strlen(word), y, CNORMAL, "]");
+}
+
+// The instrument page: blank but for [BACK]
+static void printinstrpage(void)
+{
+  clearscreen();
+  printbutton(EDITBTNCOLUMN, EDITBTNROW, "BACK");
+}
+
 // Starts playing like F1-F3 (SHIFT: the other follow way)
 static void retroplay(int mode)
 {
@@ -38,6 +81,12 @@ void retro_printstatus(void)
   int c, d, color, color2;
   int cc = cursorcolortable[cursorflash];
   menu = 0;
+
+  if (retropage == RETROPAGE_INSTRUMENT)
+  {
+    printinstrpage();
+    return;
+  }
 
   if ((mouseb > MOUSEB_LEFT) && (mousey <= 1) && (!eamode)) menu = 1;
 
@@ -302,6 +351,7 @@ void retro_printstatus(void)
 
   sprintf(textbuffer, "INSTRUMENT NUM. %02X  %-16s", editorInfo.einum, instr[editorInfo.einum].name);
   printtext(40+10, 7, CTITLE, textbuffer);
+  printbutton(EDITBTNCOLUMN, EDITBTNROW, "EDIT");
 
   sprintf(textbuffer, "Attack/Decay    %02X", instr[editorInfo.einum].ad);
   if (editorInfo.eipos == 0) color = CEDIT; else color = CNORMAL;
@@ -528,6 +578,9 @@ void retro_printstatus(void)
 
   if (editorInfo.etlock) printtext(78, 36, CTITLE, " ");
     else printtext(78, 36, CTITLE, "U");
+
+  // The level meters (gui/gui_retro.cpp) may be drawn over the patterns
+  retromainshown = 1;
 }
 
 static int clampvalue(int value, int min, int max)
@@ -592,11 +645,48 @@ static void retrotablescroll(int num, int steps)
   }
 }
 
+// Mouse wheel over a table value changes it (up = bigger), over its left
+// digit in steps of $10. Over the row numbers (and between the tables) the
+// table scrolls. Returns nonzero if the wheel was over a table
+static int retrotablewheel(int d)
+{
+  int num, x, pos, column, v;
+  unsigned char *ptr;
+
+  if ((mousey < 15) || (mousey >= 15 + VISIBLETABLEROWS) || (mousex < 40 + 10) || (mousex >= 40 + 10 + MAX_TABLES * 10))
+    return 0;
+
+  // Each table is "nn:LL RR" and two spaces
+  num = (mousex - 40 - 10) / 10;
+  x = (mousex - 40 - 10) % 10;
+  if ((x < 3) || (x > 7))
+  {
+    retrotablescroll(num, mousewheel);
+    return 1;
+  }
+  if (x == 5) return 1;
+
+  pos = editorInfo.etview[num] + mousey - 15;
+  if ((pos < 0) || (pos >= MAX_TABLELEN)) return 1;
+  column = (x < 5) ? x - 3 : x - 4;
+  ptr = (column < 2) ? &ltable[num][pos] : &rtable[num][pos];
+  v = clampvalue(*ptr + d * ((column & 1) ? 1 : 0x10), 0, 0xff);
+  *ptr = (unsigned char)v;
+  undoAreaSetCheckForChange(UNDO_AREA_TABLES + num, (column < 2) ? 0 : 1, UNDO_AREA_DIRTY_CHECK);
+
+  // The value changed gets the table cursor (its row is highlighted)
+  editorInfo.etnum = num;
+  editorInfo.etpos = pos;
+  editorInfo.etcolumn = column;
+  return 1;
+}
+
 // Mouse wheel over a value changes it (up = bigger): the values that the
 // mouse buttons change (pattern, subtune & instrument numbers, octave, MIDI
-// input, steps), the instrument parameters, the song position ("POS xx")
-// and the pattern numbers in the orderlist. Over a table it scrolls the
-// table. Returns nonzero if the wheel was over one of them
+// input, steps), the instrument parameters, the table values, the song
+// position ("POS xx"; while playing, the playback goes there too) and the
+// pattern numbers in the orderlist. Returns nonzero if the wheel was over
+// one of them
 static int retrowheel(void)
 {
   int d = -mousewheel;
@@ -626,19 +716,21 @@ static int retrowheel(void)
     return 1;
   }
 
-  // "POS xx": goes through the song positions
+  // "POS xx": goes through the song positions. While the song plays, the
+  // playback jumps to the start of the position (and follows as before)
   if ((mousey == 2) && (mousex >= POSCOLUMN) && (mousex < POSCOLUMN + POSWIDTH))
   {
     retrosongpos(d);
+    if (isplaying())
+    {
+      playfromrow(0, followplay);
+      followsuspended = 0;
+    }
     return 1;
   }
 
-  // The tables scroll
-  if ((mousey >= 15) && (mousey < 15 + VISIBLETABLEROWS) && (mousex >= 40 + 10) && (mousex < 40 + 10 + MAX_TABLES * 10))
-  {
-    retrotablescroll((mousex - 40 - 10) / 10, mousewheel);
-    return 1;
-  }
+  // Table values
+  if (retrotablewheel(d)) return 1;
 
   // Pattern numbers in the orderlist. The channel's pattern editor shows the
   // pattern chosen (as RETURN on it does)
@@ -746,6 +838,20 @@ void retro_mousecommands(void)
 {
   int c;
 
+  // The instrument page: [BACK] and the middle button (edit/jam mode)
+  if (retropage == RETROPAGE_INSTRUMENT)
+  {
+    if ((mouseb & MOUSEB_MIDDLE) && (!(prevmouseb & MOUSEB_MIDDLE)))
+    {
+      recordmode ^= 1;
+      gui_message(recordmode ? "Edit mode: notes are entered" : "Jam mode: notes are only played");
+    }
+    if ((mouseb & MOUSEB_LEFT) && (!prevmouseb) && (mousey == EDITBTNROW) &&
+      (mousex >= EDITBTNCOLUMN) && (mousex < EDITBTNCOLUMN + EDITBTNWIDTH))
+      retro_closepage();
+    return;
+  }
+
   // Mouse wheel over a value changes it. Over the patterns it scrolls the
   // pattern editor. While the song plays, the view then stops following the
   // playback (as in the modern interface) until playback is started again
@@ -837,8 +943,10 @@ void retro_mousecommands(void)
     }
   }
 
-  // Song editpos & songnumber selection
-  if ((mousey >= 3) && (mousey <= 8) && (mousex >= 40 + 10))
+  // Song editpos & songnumber selection. Only the orderlist rows: the rows
+  // below are the instrument's (the 6-channel layout this came from had 6
+  // orderlist rows, and a click there chose a channel that doesn't exist)
+  if ((mousey >= 3) && (mousey < 3 + MAX_CHN) && (mousex >= 40 + 10))
   {
     int newpos = editorInfo.esview + (mousex - 44 - 10) / 3;
     int newcolumn = (mousex - 44 - 10) % 3;
@@ -887,6 +995,14 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_RIGHT) prevsong();
   }
 
+  // [EDIT]: the instrument page
+  if ((mouseb & MOUSEB_LEFT) && (!prevmouseb) && (mousey == EDITBTNROW) &&
+    (mousex >= EDITBTNCOLUMN) && (mousex < EDITBTNCOLUMN + EDITBTNWIDTH))
+  {
+    retro_openinstrpage();
+    return;
+  }
+
   // Instrument editpos & instrument number selection
   if ((mousey >= 8) && (mousey <= 12) && (mousex >= 56 + 10) && (mousex <= 57 + 10))
   {
@@ -900,7 +1016,7 @@ void retro_mousecommands(void)
     editorInfo.eipos = mousey - 8 + 5;
     editorInfo.eicolumn = mousex - 76 - 10;
   }
-  if ((mousey == 7) && (mousex >= 60 + 10))
+  if ((mousey == 7) && (mousex >= 60 + 10) && (mousex < EDITBTNCOLUMN))
   {
     editorInfo.editmode = EDIT_INSTRUMENT;
     editorInfo.eipos = 9;

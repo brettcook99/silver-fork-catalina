@@ -21,6 +21,27 @@ static Uint32 *pixels = NULL;        // BASE_XSIZE * BASE_YSIZE
 static unsigned *prevscreen = NULL;  // The screen as last drawn into pixels
 static bool mouseblocked = false;
 
+// Level meters on the main screen: a gradient bar behind each channel's
+// instrument & command digits ("04000"), rising from the bottom of the
+// pattern view with the voice's envelope, up to METERROWS rows. Dark blue at
+// the top, nearly white at the bottom
+#define METERROWS 7
+#define METERCOLUMN 10                      // In each channel's 15 columns
+#define METERWIDTH 5
+#define METERBOTTOM (3 + VISIBLEPATTROWS)   // The row below the patterns
+#define METERHEIGHT (METERROWS * FONT_YSIZE)
+#define METERFALL 300.0f                    // Pixels per second
+
+static float meterlevel[MAX_CHN];           // Height shown, in pixels
+static bool meterdrawn = false;             // Drawn into pixels last time
+static Uint32 metertime = 0;
+static Uint32 metercolor[METERHEIGHT];      // From the bottom up
+
+static void makemetercolors(void);
+
+// The background the pixels were drawn for (retrogradient)
+static unsigned drawngradient = 0;
+
 // 6-bit VGA palette value to 8 bits, as the classic version did
 static Uint32 expand6(int c)
 {
@@ -166,12 +187,123 @@ static bool createtexture(SDL_Renderer *renderer)
     freeretroscreen();
     return false;
   }
-  // Sharp pixels at any size (the interface uses smooth scaling otherwise)
+  // Sharp pixels at any size (the interface uses smooth scaling otherwise).
+  // With the gradient background the black background pixels are clear
   SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+  SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
   texturerenderer = renderer;
+  makemetercolors();
+  meterdrawn = false;
   // Everything is drawn the first time
   memset(prevscreen, 0xff, MAX_COLUMNS * MAX_ROWS * sizeof(unsigned));
   return true;
+}
+
+// The meter gradient: dark blue at the top, light blue in the middle, nearly
+// white at the bottom
+static void makemetercolors(void)
+{
+  static const int stops[3][3] = { { 220, 246, 255 }, { 72, 150, 236 }, { 22, 44, 160 } };
+  int i, k;
+
+  for (i = 0; i < METERHEIGHT; i++)
+  {
+    float t = (float)i / (float)(METERHEIGHT - 1) * 2.0f;
+    int s = (t < 1.0f) ? 0 : 1;
+    float f = t - (float)s;
+    int rgb[3];
+
+    for (k = 0; k < 3; k++) rgb[k] = (int)(stops[s][k] + (stops[s + 1][k] - stops[s][k]) * f + 0.5f);
+    metercolor[i] = 0xff000000 | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+  }
+}
+
+// The meter heights for this frame: they jump up with the envelope and fall
+// back smoothly. Only on the retro main screen
+static void updatemeterlevels(void)
+{
+  Uint32 now = SDL_GetTicks();
+  float fall = (metertime) ? (float)(now - metertime) * METERFALL / 1000.0f : 0.0f;
+  int c;
+
+  metertime = now;
+  if (fall > METERHEIGHT) fall = METERHEIGHT;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    float target = 0.0f;
+
+    // Sounding: the envelope, unless the voice has no waveform, the volume
+    // is 0 or the channel is muted
+    if ((retromainshown) && (!chn[c].mute) && (sidreg[0x04 + c * 7] & 0xf0) && (sidreg[0x18] & 0x0f))
+      target = (float)sid_envelope(c) * METERHEIGHT / 255.0f;
+    if (!retromainshown) meterlevel[c] = 0.0f;
+    meterlevel[c] -= fall;
+    if (meterlevel[c] < target) meterlevel[c] = target;
+    if (meterlevel[c] < 0.0f) meterlevel[c] = 0.0f;
+  }
+}
+
+static bool metershown(void)
+{
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if (meterlevel[c] >= 1.0f) return true;
+  }
+  return false;
+}
+
+// The characters under the meters are drawn again (without them) when the
+// meters are or were shown
+static void invalidatemeters(void)
+{
+  int c, x, y;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    for (y = METERBOTTOM - METERROWS; y < METERBOTTOM; y++)
+    {
+      for (x = 0; x < METERWIDTH; x++)
+        prevscreen[y * MAX_COLUMNS + c * 15 + METERCOLUMN + x] = 0xffffffff;
+    }
+  }
+}
+
+// Paints the meters into the background pixels of the characters (those
+// without a background color of their own: marks and the cursor stay)
+static void drawmeters(void)
+{
+  int c, i, x;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    int h = (int)meterlevel[c];
+
+    for (i = 0; i < h; i++)
+    {
+      int py = METERBOTTOM * FONT_YSIZE - 1 - i;
+      int row = py / FONT_YSIZE;
+      int line = py % FONT_YSIZE;
+      Uint32 *dptr = pixels + py * BASE_XSIZE + (c * 15 + METERCOLUMN) * FONT_XSIZE;
+
+      for (x = 0; x < METERWIDTH; x++)
+      {
+        unsigned cell = scrbuffer[row * MAX_COLUMNS + c * 15 + METERCOLUMN + x];
+        unsigned char bits = chardata[(cell & 0xff) * 16 + 1 + line];
+        int px;
+
+        if (!((cell >> 20) & 0xf))
+        {
+          for (px = 0; px < FONT_XSIZE; px++)
+          {
+            if (!((bits >> (7 - px)) & 1)) dptr[px] = metercolor[i];
+          }
+        }
+        dptr += FONT_XSIZE;
+      }
+    }
+  }
 }
 
 // Draws the changed characters into the pixel buffer and updates the
@@ -181,6 +313,18 @@ static void updatetexture(void)
   int firstrow = MAX_ROWS;
   int lastrow = -1;
   int x, y;
+  bool meters;
+
+  // Switching the background draws everything again
+  if (retrogradient != drawngradient)
+  {
+    memset(prevscreen, 0xff, MAX_COLUMNS * MAX_ROWS * sizeof(unsigned));
+    drawngradient = retrogradient;
+  }
+
+  updatemeterlevels();
+  meters = metershown();
+  if ((meters) || (meterdrawn)) invalidatemeters();
 
   for (y = 0; y < MAX_ROWS; y++)
   {
@@ -200,6 +344,8 @@ static void updatetexture(void)
       glyph = chardata + (cell & 0xff) * 16 + 1;
       fg = palette[(cell >> 16) & 0xf];
       bg = palette[(cell >> 20) & 0xf];
+      // Black background: clear over the gradient
+      if ((retrogradient) && (!((cell >> 20) & 0xf))) bg = 0;
       dptr = pixels + (y * FONT_YSIZE) * BASE_XSIZE + x * FONT_XSIZE;
       for (py = 0; py < FONT_YSIZE; py++)
       {
@@ -211,6 +357,9 @@ static void updatetexture(void)
     }
   }
 
+  if (meters) drawmeters();
+  meterdrawn = meters;
+
   if (lastrow >= firstrow)
   {
     SDL_Rect r;
@@ -219,6 +368,41 @@ static void updatetexture(void)
     r.w = BASE_XSIZE;
     r.h = (lastrow - firstrow + 1) * FONT_YSIZE;
     SDL_UpdateTexture(texture, &r, pixels + r.y * BASE_XSIZE, BASE_XSIZE * sizeof(Uint32));
+  }
+}
+
+// The gradient background (View > Gradient Background) behind the whole
+// window, margins too: black down to GRADIENTSTART of the height, then
+// rising (fast at first, as in Scott's picture) to GRADIENTEND at the bottom
+#define GRADIENTSTART 0.68f
+#define GRADIENTBANDS 32
+static const int gradientend[3] = { 0x0b, 0x0e, 0x1b };
+
+static ImU32 gradientcolor(float t)
+{
+  float f = 1.0f - powf(1.0f - t, 1.4f);
+
+  return IM_COL32((int)(gradientend[0] * f + 0.5f), (int)(gradientend[1] * f + 0.5f), (int)(gradientend[2] * f + 0.5f), 255);
+}
+
+static void drawgradient(void)
+{
+  ImGuiIO &io = ImGui::GetIO();
+  ImDrawList *dl = ImGui::GetBackgroundDrawList();
+  float w = io.DisplaySize.x;
+  float h = io.DisplaySize.y;
+  float y0 = h * GRADIENTSTART;
+  int i;
+
+  dl->AddRectFilled(ImVec2(0.0f, 0.0f), ImVec2(w, y0), IM_COL32(0, 0, 0, 255));
+  for (i = 0; i < GRADIENTBANDS; i++)
+  {
+    float t0 = (float)i / GRADIENTBANDS;
+    float t1 = (float)(i + 1) / GRADIENTBANDS;
+    ImU32 c0 = gradientcolor(t0);
+    ImU32 c1 = gradientcolor(t1);
+
+    dl->AddRectFilledMultiColor(ImVec2(0.0f, y0 + (h - y0) * t0), ImVec2(w, y0 + (h - y0) * t1), c0, c0, c1, c1);
   }
 }
 
@@ -249,6 +433,7 @@ void gui::drawretroscreen(SDL_Renderer *renderer)
   // ImGui draws in points
   p0 = ImVec2(gridx / sx, gridy / sy);
   p1 = ImVec2((gridx + cellw * MAX_COLUMNS) / sx, (gridy + cellh * MAX_ROWS) / sy);
+  if (retrogradient) drawgradient();
   ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)(intptr_t)texture), p0, p1);
 
   // Mouse position as character cells. Positions in the margins go to the

@@ -88,6 +88,7 @@ enum
   GTCMD_OPENFILEPLAY,     // Open the file given as path and play it (Finder, command line)
   GTCMD_ASKINTERFACE,     // Show the modern / retro choice again at the next start
   GTCMD_DESIGNER,         // Switch between the tracker and the instrument designer
+  GTCMD_RETROGRADIENT,    // Retro screen background: black / gradient
 
   GTCMD_COUNT
 };

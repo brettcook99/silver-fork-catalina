@@ -955,15 +955,6 @@ void patterncommands(void)
     }
     break;
 
-    case KEY_SPACE:
-    // SPACE starts & stops playing (from the cursor), SHIFT+SPACE plays from
-    // the cursor without following. CMD+R switches edit/jam mode
-    if (!shiftpressed)
-      playstop();
-    else
-      playfromcursor(0);
-    break;
-
     case KEY_RIGHT:
     if (!shiftpressed)
     {

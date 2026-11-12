@@ -1580,7 +1580,7 @@ void relocator(void)
       char savepath[MAX_PATHNAME];
 
       // Native save panel
-      if (!filedialog_save("Export the song with its player", ext + 1, packedsongname, savepath, MAX_PATHNAME))
+      if (!filedialog_save(FOLDER_EXPORT, "Export the song with its player", ext + 1, packedsongname, savepath, MAX_PATHNAME))
         goto PRCLEANUP;
       strcpy(packedsongname, savepath);
 #else

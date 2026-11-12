@@ -89,13 +89,6 @@ void tablecommands(void)
     }
     break;
 
-    case KEY_SPACE:
-    if (!shiftpressed)
-      playtestnote(FIRSTNOTE + editorInfo.epoctave * 12, editorInfo.einum, editorInfo.epchn);
-    else
-      releasenote(editorInfo.epchn);
-    break;
-
     case KEY_RIGHT:
     editorInfo.etcolumn++;
     if (editorInfo.etcolumn > 3)
@@ -393,6 +386,16 @@ void tablecommands(void)
     break;
 
     case KEY_ENTER:
+    // CTRL+RETURN (CMD+RETURN on macOS) plays a test note, with SHIFT too
+    // it silences it. SPACE plays / stops the song in every editor
+    if (ctrlpressed)
+    {
+      if (!shiftonlypressed)
+        playtestnote(FIRSTNOTE + editorInfo.epoctave * 12, editorInfo.einum, editorInfo.epchn);
+      else
+        releasenote(editorInfo.epchn);
+      break;
+    }
     if (editorInfo.etnum == WTBL)
     {
       int table = -1;

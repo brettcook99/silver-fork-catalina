@@ -65,6 +65,8 @@ void followplayback(void)
     return;
   }
   if ((!followplay) || (followsuspended)) return;
+  // Just started from another place: the channels are still where they were
+  if (playstarting()) return;
 
   for (c = 0; c < MAX_CHN; c++)
   {

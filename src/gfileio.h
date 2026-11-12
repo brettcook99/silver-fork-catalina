@@ -49,8 +49,17 @@ int gt_openfile_direct(const char *path);
 // File dialogs: the native ones on macOS, the classic file selector
 // elsewhere. exts is a list of extensions without dots, separated by ';'.
 // Return 1 with the chosen full path, 0 if cancelled.
-int filedialog_open(const char *title, const char *exts, char *path, int pathsize);
-int filedialog_save(const char *title, const char *ext, const char *suggestedname, char *path, int pathsize);
+// The file dialogs start in the folder last used for their kind of file
+// (remembered in the config file): songs, instruments, imports (SID, MIDI,
+// chipsynth patches) and exports
+#define FOLDER_SONG 0
+#define FOLDER_INSTR 1
+#define FOLDER_IMPORT 2
+#define FOLDER_EXPORT 3
+#define FOLDER_KINDS 4
+int filedialog_open(int kind, const char *title, const char *exts, char *path, int pathsize);
+int filedialog_save(int kind, const char *title, const char *ext, const char *suggestedname, char *path, int pathsize);
+char *gt_folder(int kind);
 
 // Pieces of a path
 const char *gt_basename(const char *path);

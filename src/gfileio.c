@@ -309,7 +309,6 @@ static int loadconvertedsong(const char *temppath, const char *sourcepath)
   strcpy(loadedsongfilename, name);
   strcpy(songfilename, name);
   currentsongpath[0] = 0;
-  setsongpath(sourcepath);
   // An imported song counts as modified: it has not been saved yet
   gui_addrecentfile(sourcepath);
   return 1;
@@ -490,10 +489,37 @@ int gt_openfile_direct(const char *path)
  * File dialogs
  */
 
-int filedialog_open(const char *title, const char *exts, char *path, int pathsize)
+// The folder last used for a kind of file (FOLDER_SONG...)
+char *gt_folder(int kind)
+{
+  switch (kind)
+  {
+    case FOLDER_INSTR: return instrpath;
+    case FOLDER_IMPORT: return importpath;
+    case FOLDER_EXPORT: return packedpath;
+  }
+  return songpath;
+}
+
+#ifdef __APPLE__
+// The folder of a file chosen in a dialog is used next time
+static void rememberfolder(int kind, const char *path)
+{
+  char dir[MAX_PATHNAME];
+
+  gt_dirname(path, dir, MAX_PATHNAME);
+  if (dir[0]) strcpy(gt_folder(kind), dir);
+}
+#endif
+
+int filedialog_open(int kind, const char *title, const char *exts, char *path, int pathsize)
 {
 #ifdef __APPLE__
-  return macfile_open(title, exts, songpath[0] ? songpath : NULL, path, pathsize);
+  char *folder = gt_folder(kind);
+
+  if (!macfile_open(title, exts, folder[0] ? folder : NULL, path, pathsize)) return 0;
+  rememberfolder(kind, path);
+  return 1;
 #else
   // The classic file selector. It shows one extension at a time
   static char name[MAX_FILENAME] = "";
@@ -508,18 +534,22 @@ int filedialog_open(const char *title, const char *exts, char *path, int pathsiz
     filter[3 + c] = 0;
   }
   if ((!exts) || (!exts[0])) strcpy(filter, "*");
-  strcpy(dir, songpath);
+  strcpy(dir, gt_folder(kind));
   if (!fileselector(name, dir, filter, (char *)title, 0)) return 0;
-  strcpy(songpath, dir);
+  strcpy(gt_folder(kind), dir);
   snprintf(path, pathsize, "%s/%s", dir, name);
   return 1;
 #endif
 }
 
-int filedialog_save(const char *title, const char *ext, const char *suggestedname, char *path, int pathsize)
+int filedialog_save(int kind, const char *title, const char *ext, const char *suggestedname, char *path, int pathsize)
 {
 #ifdef __APPLE__
-  return macfile_save(title, ext, suggestedname, songpath[0] ? songpath : NULL, path, pathsize);
+  char *folder = gt_folder(kind);
+
+  if (!macfile_save(title, ext, suggestedname, folder[0] ? folder : NULL, path, pathsize)) return 0;
+  rememberfolder(kind, path);
+  return 1;
 #else
   static char name[MAX_FILENAME] = "";
   char filter[MAX_FILENAME];
@@ -531,9 +561,9 @@ int filedialog_save(const char *title, const char *ext, const char *suggestednam
     strncpy(name, gt_basename(suggestedname), MAX_FILENAME - 1);
     name[MAX_FILENAME - 1] = 0;
   }
-  strcpy(dir, songpath);
+  strcpy(dir, gt_folder(kind));
   if (!fileselector(name, dir, filter, (char *)title, 3)) return 0;
-  strcpy(songpath, dir);
+  strcpy(gt_folder(kind), dir);
   snprintf(path, pathsize, "%s/%s", dir, name);
   // Add the extension if there is none
   if (!strrchr(gt_basename(path), '.'))

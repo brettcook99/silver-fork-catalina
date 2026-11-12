@@ -51,6 +51,9 @@ public:
   void write(reg8 offset, reg8 value);
   void mute(reg8 channel, bool enable);
 
+  // Envelope level (0-255) of a voice, for level meters (GoatTracker)
+  reg8 envelope_level(int v) { return voice[v].envelope.envelope_counter; }
+
   // 16-bit input (EXT IN).
   void input(int sample);
 

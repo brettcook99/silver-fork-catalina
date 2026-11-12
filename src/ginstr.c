@@ -126,17 +126,19 @@ void instrumentcommands(void)
     }
     break;
 
-    case KEY_SPACE:
-    if (editorInfo.eipos != 9)
+    case KEY_ENTER:
+    // CTRL+RETURN (CMD+RETURN on macOS) plays a test note, with SHIFT too
+    // it silences it. SPACE plays / stops the song in every editor
+    if (ctrlpressed)
     {
-      if (!shiftpressed)
+      if (!shiftonlypressed)
         playtestnote(FIRSTNOTE + editorInfo.epoctave * 12, editorInfo.einum, editorInfo.epchn);
       else
         releasenote(editorInfo.epchn);
+      rawkey = 0;
+      key = 0;
+      break;
     }
-    break;
-
-    case KEY_ENTER:
     if (!editorInfo.einum) break;
     switch(editorInfo.eipos)
     {

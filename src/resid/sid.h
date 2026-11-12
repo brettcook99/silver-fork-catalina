@@ -52,6 +52,9 @@ public:
   reg8 read(reg8 offset);
   void write(reg8 offset, reg8 value);
 
+  // Envelope level (0-255) of a voice, for level meters (GoatTracker)
+  reg8 envelope_level(int v) { return voice[v].envelope.envelope_counter; }
+
   // Read/write state.
   class State
   {

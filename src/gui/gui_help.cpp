@@ -29,7 +29,7 @@ struct HelpSection
 static const HelpLine interfacelines[] = {
   { "Panels", "Arrangement (top), Pattern Editor (middle), Library and Inspector (left), Tables and Song (right). Drag a panel's tab to move or dock it elsewhere; View > Reset Layout restores the default." },
   { "Keyboard focus", "The panel with the blue frame gets the keys. Click a panel, or use F5-F8 / TAB, to move the focus." },
-  { "Mouse wheel", "Scrolls the panel under the pointer without moving the edit cursor. Scrolling the pattern editor while the song plays stops following the playback until you click the Follow button or stop." },
+  { "Mouse wheel", "Scrolls the panel under the pointer without moving the edit cursor. Scrolling the pattern editor while the song plays stops following the playback until you click the Follow button or stop. CTRL+SHIFT+wheel (or " CMD "+SHIFT+wheel) selects the instrument, anywhere." },
   { "Arrangement", "Patterns are regions as long as they play. Click to select, double-click to edit the pattern, SHIFT+click to mark, right-click for more. " CMD "+wheel zooms." },
   { "Pattern editor", "Click a cell to move the cursor, drag to select rows, SHIFT+click to extend, right-click for editing commands. M / S mute and solo a voice." },
   { "Instruments", "Pick an instrument in the Library (double-click to rename). The Inspector has knobs for the envelope, waveform buttons, and the arrows jump to the instrument's tables. Hold the speaker / Hold to Play to hear it." },
@@ -80,7 +80,6 @@ static const HelpLine generallines[] = {
   { "/ *", "Select octave" },
   { CMD "+Z", "Undo" },
   { CMD "+1-9", "Same as F1-F9" },
-  { CMD "+R", "Edit mode / jam mode" },
   { CMD "+F", "Follow playback" },
   { "SHIFT+ESC", "Clear / optimize the song" },
   { "ESC", "Quit" },
@@ -90,7 +89,7 @@ static const HelpLine generallines[] = {
 static const HelpLine patternlines[] = {
   { "Note keys", "Enter notes like on a piano (MIDI keyboard too)" },
   { "0-9, A-F", "Instrument number, command and its data" },
-  { "SPACE", "Play from the cursor / stop (SHIFT+SPACE: without follow)" },
+  { "SPACE", "Play from the cursor / stop, in every panel but the song info (SHIFT+SPACE: without follow)" },
   { "BACKSPACE", "Insert a rest" },
   { "RETURN", "Keyoff (SHIFT+RETURN: keyon)" },
   { "INS / DEL", "Insert / delete a row (on the end mark: change the length)" },
@@ -116,7 +115,8 @@ static const HelpLine patternlines[] = {
 
 static const HelpLine orderlines[] = {
   { "0-9, A-F", "Enter pattern numbers" },
-  { "SPACE", "Set the start position for F2" },
+  { "SPACE", "Play from this position / stop" },
+  { "CTRL+RETURN", "Set the start position for F2 (SHIFT too: all channels; CMD+RETURN on macOS)" },
   { "BACKSPACE", "Set the end position for F2" },
   { "RETURN", "Edit the pattern (SHIFT: all channels)" },
   { "< >", "Select subtune" },
@@ -131,7 +131,8 @@ static const HelpLine orderlines[] = {
 
 static const HelpLine instrumentlines[] = {
   { "0-9, A-F", "Enter values" },
-  { "SPACE", "Play a test note (SHIFT+SPACE: silence)" },
+  { "CTRL+RETURN", "Play a test note (SHIFT too: silence; CMD+RETURN on macOS)" },
+  { "SPACE", "Play the song from the pattern cursor / stop" },
   { "RETURN", "Go to the table" },
   { "BACKQUOTE", "Select table" },
   { "SHIFT+CURSOR", "Mark table rows" },

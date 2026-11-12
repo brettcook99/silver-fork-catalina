@@ -256,6 +256,11 @@ SID registers. Note keys, a MIDI keyboard and the on-screen keyboard play the
 patch. A C64 character ROM named chargen in the settings folder replaces the
 built-in characters.
 
+The file dialogs start in the folder used last time for their kind of file,
+also after a restart: one folder for songs (open, save, merge), one for
+instruments (load, save), one for imports (SID, MIDI, chipsynth patches) and
+one for exports. The folders are kept in the config file.
+
 A song or SID file given on the command line (or double-clicked in the macOS
 Finder) is loaded and starts playing. A SID file is converted into a song
 with the import options used last. A file dropped on the window is only
@@ -339,7 +344,9 @@ parameter to zero to achieve the maximum stability (less accurate GUI).
 This program is mainly operated on keyboard. For a list of keyboard commands
 press F12 (online help) in the tracker or see the table below:
 
-NOTE: SHIFT & CTRL are interchangeable in the commands. In the song edit mode
+NOTE: SHIFT & CTRL are interchangeable in the commands, except CTRL+RETURN
+(CMD+RETURN on macOS) in the song, instrument and table editors, which sets
+the start position / plays a test note. In the song edit mode
 you can also use [ ] or ( ) instead of < >. In the pattern edit mode < > select
 the instrument and [ ] the pattern.
 
@@ -376,7 +383,11 @@ DEL       Delete row
 SHIFT+ESC Optimize musicdata, or clear musicdata & set default pattern length
 ESC       Exit program
 NUMPAD 0  Play from the start of the pattern / stop
-NUMPAD .  Switch between jam/editmode (also the middle mouse button)
+NUMPAD .  Switch between jam/editmode (also the middle mouse button; CMD+R no
+          longer does)
+SPACE     Play from the cursor / stop, in every editor except the songname
+          editor and the instrument name (SHIFT+SPACE: play without following)
+CTRL+SHIFT+mouse wheel Select the instrument, with the pointer anywhere
 CTRL+NUMPAD 1,2,3 Put the cursor on track (channel) 1, 2 or 3 in the pattern
           editor
 ALT+NUMPAD 1,2,3 MIDI INPUT 1, 2 or 3 PATTERNS (OPTION on macOS)
@@ -389,7 +400,7 @@ ALT+NUMPAD 1,2,3 MIDI INPUT 1, 2 or 3 PATTERNS (OPTION on macOS)
 [ ]         Select pattern
 BACKQUOTE   Select channel
 0-9 & A-F   Enter parameters
-SPACE       Switch between jam/editmode
+SPACE       Play from cursor position / stop
 RETURN      (also CAPSLOCK) Insert keyoff
             Enter table (when cursor is over a table-utilizing command)
             Enter instrument (when cursor is over a nonzero instrument number)
@@ -400,7 +411,7 @@ SHIFT+RET.  Insert keyon
             table-utilizing command)
 BACKSPACE   Insert rest
 SHIFT+BKSP. Insert rest and clear commands
-SHIFT+SPACE Play from cursor position
+SHIFT+SPACE Play from cursor position without following
 SHIFT+Q     Transpose halfstep up
 SHIFT+A     Transpose halfstep down
 SHIFT+W     Transpose octave up
@@ -515,7 +526,8 @@ RED - Do not advance automatically
 < >         Select subtune
 - +         Insert Transpose down/up command (shown as -/+ in the orderlist)
 0-9 & A-F   Enter pattern numbers
-SPACE       Set start position for F2 key
+SPACE       Play from the position under the cursor / stop
+CTRL+RET.   Set start position for F2 key (CMD+RETURN on macOS)
 BACKSPACE   Set end position for F2 key
 RETURN      Go to pattern
 SHIFT+R     Insert Repeat command (shown as "R" in the order-list)
@@ -523,10 +535,10 @@ SHIFT+CRSR LEFT/RIGHT Mark orderlist
 SHIFT+1,2,3 Swap current channel orderlist with channel 1,2,3
 SHIFT+X,C,V Cut,copy,paste channel orderlist
 SHIFT+L     Mark/unmark entire orderlist
-SHIFT+SPACE Set start position on all channels
+CTRL+SHIFT+RET. Set start position on all channels
 SHIFT+RET.  Go to pattern on all channels
 
-SHIFT+SPACE or SHIFT+BACKSPACE set the start/end mark on all channels to
+CTRL+SHIFT+RETURN or SHIFT+BACKSPACE set the start/end mark on all channels to
 the same position. To clear the endmark, press BACKSPACE again on it or
 at/before the startmark.
 
@@ -538,8 +550,9 @@ at/before the startmark.
 / *         Select octave
 F7          Go to table editor
 0-9 & A-F   Enter parameters
-SPACE       Play test note
-SHIFT+SPACE Silence test note
+CTRL+RET.   Play test note (CMD+RETURN on macOS)
+CTRL+SHIFT+RET. Silence test note
+SPACE       Play the song from the pattern editor cursor / stop
 RETURN      Go to table position indicated by wave/pulse/filter/vibratopos.
 SHIFT+N     Edit instrument name
 SHIFT+S     Smart paste an instrument
@@ -577,8 +590,9 @@ instrument by cut/pasting it.
 BACKQUOTE   Select table
 F7          Go to instrument editor
 0-9 & A-F   Enter parameters
-SPACE       Play test note
-SHIFT+SPACE Silence test note
+CTRL+RET.   Play test note (CMD+RETURN on macOS)
+CTRL+SHIFT+RET. Silence test note
+SPACE       Play the song from the pattern editor cursor / stop
 RETURN      Go back to wave/pulse/filterpos. parameter
 SHIFT+Q,A   Transpose speedtable portamento speed halfstep up/down
 SHIFT+W,S   Transpose speedtable portamento speed octave up/down,
@@ -636,10 +650,29 @@ bigger): the instrument number and parameters (over the left digit in steps
 of $10; the attack, decay, sustain and release digits each on their own), the
 pattern numbers in the orderlist (the channel's pattern editor then shows the
 pattern), the PATT. numbers above the patterns, the subtune, the octave, MIDI
-INPUT and STEPS. Over "POS xx" in the orderlist title it goes through the song
+INPUT and STEPS, and the values in the wave, pulse, filter and speed tables
+(over the left digit in steps of $10; over the row numbers the table
+scrolls). Over "POS xx" in the orderlist title it goes through the song
 positions, and the pattern editor shows the patterns at the position (as
-SHIFT+RETURN in the orderlist). Over the wave, pulse, filter and speed tables
-it scrolls the table. Each change of a value can be undone.
+SHIFT+RETURN in the orderlist); while the song plays, the playback jumps to
+the start of that position. Each change of a value can be undone.
+
+CTRL+SHIFT+wheel (CMD+SHIFT+wheel on macOS too) selects the instrument, with
+the pointer anywhere, in both interfaces.
+
+[EDIT] right of the instrument number and name on the retro screen opens the
+instrument page, where the new instrument editor will be. For now it is
+blank; [BACK] or ESC returns. SPACE, F1-F4 and the MIDI keyboard work there.
+
+Level meters behind each channel's instrument and command columns, at the
+bottom of the patterns, show how loud the channel's voice is (its envelope):
+up to 7 rows high, dark blue at the top, nearly white at the bottom.
+
+View > Gradient Background (macOS menu bar) switches the retro screen's black
+background to a gradient: black at the top, dark navy (#0B0E1B) at the
+bottom. On Windows and Linux, where the retro screen has no menu bar, the
+same item is in the View menu of the modern interface. The choice is kept in
+the config file.
 
 
 3. Song data

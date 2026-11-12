@@ -113,6 +113,9 @@ char instrfilename[MAX_FILENAME];
 char instrfilter[MAX_FILENAME];
 char instrpath[MAX_PATHNAME];
 char packedpath[MAX_PATHNAME];
+char importpath[MAX_PATHNAME];
+// The folders read from the config file (see gt_folder())
+static char configfolder[FOLDER_KINDS][MAX_PATHNAME];
 
 extern char *notename[];
 char *programname = PROGRAMNAME;
@@ -165,6 +168,21 @@ char* usage[] = {
 };
 
 int usagelen = (sizeof usage / sizeof usage[0]);
+
+// Nonzero if the path is an existing folder (a slash at the end is fine)
+static int isfolder(const char *path)
+{
+	char dir[MAX_PATHNAME];
+	struct stat st;
+	int len;
+
+	if ((!path) || (!path[0])) return 0;
+	snprintf(dir, sizeof dir, "%s", path);
+	len = (int)strlen(dir);
+	while ((len > 1) && ((dir[len - 1] == '/') || (dir[len - 1] == '\\')) && (dir[len - 2] != ':')) dir[--len] = 0;
+	if (stat(dir, &st)) return 0;
+	return (st.st_mode & S_IFDIR) != 0;
+}
 
 int main(int argc, char **argv)
 {
@@ -258,6 +276,9 @@ int main(int argc, char **argv)
 		getparam(configfile, (unsigned *)&followmode);
 		getparam(configfile, &textsizepercent);
 		getparam(configfile, &uimode);
+		for (c = 0; c < FOLDER_KINDS; c++)
+			getpathparam(configfile, configfolder[c]);
+		getparam(configfile, &retrogradient);
 		fclose(configfile);
 
 		// A config file saved with the old default sound buffer gets the
@@ -265,8 +286,14 @@ int main(int argc, char **argv)
 		if (b == OLDDEFAULTBUF) b = DEFAULTBUF;
 	}
 
-	// Init pathnames
+	// Init pathnames. The file dialogs start in the folders used last time
 	initpaths();
+	strcpy(importpath, songpath);
+	for (c = 0; c < FOLDER_KINDS; c++)
+	{
+		if ((strcmp(configfolder[c], "0")) && (isfolder(configfolder[c])))
+			strcpy(gt_folder(c), configfolder[c]);
+	}
 
 	// Scan command line
 	for (c = 1; c < argc; c++)
@@ -457,6 +484,7 @@ int main(int argc, char **argv)
 	if (midiinput > 1) midiinput = 1;
 	if (followmode) followmode = 1;
 	if (uimode > UI_RETRO) uimode = UI_ASK;
+	if (retrogradient) retrogradient = 1;
 
 	// removing 'usefinevib' since it's not actually being used and is
 	// not being saved. Code suggests FV not to be used for multi-speed. 
@@ -611,7 +639,12 @@ int main(int argc, char **argv)
 			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n"
 			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n"
 			";Text size in percent (100 = default)\n%d\n\n"
-			";Interface (0 = ask at startup, 1 = modern, 2 = retro)\n%d\n\n",
+			";Interface (0 = ask at startup, 1 = modern, 2 = retro)\n%d\n\n"
+			";Folder of the song file dialogs (0 = none)\n%s\n\n"
+			";Folder of the instrument file dialogs (0 = none)\n%s\n\n"
+			";Folder of the import dialogs: SID, MIDI, chipsynth (0 = none)\n%s\n\n"
+			";Folder of the export dialog (0 = none)\n%s\n\n"
+			";Retro screen background (0 = black, 1 = gradient)\n%d\n\n",
 			b,
 			mr,
 			hardsid,
@@ -659,7 +692,12 @@ int main(int argc, char **argv)
 			midiinput,
 			followmode,
 			textsizepercent,
-			uimode);
+			uimode,
+			songpath[0] ? songpath : "0",
+			instrpath[0] ? instrpath : "0",
+			importpath[0] ? importpath : "0",
+			packedpath[0] ? packedpath : "0",
+			retrogradient);
 		fclose(configfile);
 	}
 
@@ -910,6 +948,53 @@ void toggle_interpolation_mode() {
 	do_sound_init();
 }
 
+// SPACE starts playing from the cursor / stops, in every editor except where
+// text is typed (the song name, author & copyright and the instrument name).
+// In the orderlist the playback starts at the position under the cursor.
+// SHIFT+SPACE plays without following. Returns nonzero if it was SPACE
+static int spacecommand(void)
+{
+	if (rawkey != KEY_SPACE) return 0;
+	if ((altpressed) || (metapressed)) return 0;
+	if (editorInfo.editmode == EDIT_NAMES) return 0;
+	if ((editorInfo.editmode == EDIT_INSTRUMENT) && (editorInfo.eipos >= 9)) return 0;
+
+	if (shiftpressed)
+	{
+		if (editorInfo.editmode == EDIT_ORDERLIST) playfromrow(0, 0);
+		else playfromcursor(0);
+	}
+	else if (isplaying())
+		stopsong();
+	else if (editorInfo.editmode == EDIT_ORDERLIST)
+		playfromrow(0, followmode);
+	else
+		playfromcursor(followmode);
+	followsuspended = 0;
+	key = 0;
+	rawkey = 0;
+	return 1;
+}
+
+// Keys on the retro interface's instrument page: ESC goes back, F1-F4 play
+// and stop
+static void retropagecommands(void)
+{
+	switch (rawkey)
+	{
+	case KEY_ESC:
+		retro_closepage();
+		break;
+
+	case KEY_F1:
+	case KEY_F2:
+	case KEY_F3:
+	case KEY_F4:
+		generalcommands();
+		break;
+	}
+}
+
 void docommand(void)
 {
 	// Where a MIDI note goes (MIDI chord input)
@@ -920,6 +1005,19 @@ void docommand(void)
 
 	// Numpad play/stop, pattern row jumps, edit/jam mode & channel select
 	if (numpadcommands()) return;
+
+	// SPACE plays / stops in every editor
+	if (spacecommand()) return;
+
+	// The retro interface's instrument page has only its own keys and mouse
+	// controls. MIDI notes play the instrument there
+	if ((retromode) && (retropage != RETROPAGE_MAIN))
+	{
+		retro_mousecommands();
+		retropagecommands();
+		midicommands();
+		return;
+	}
 
 	// Mouse operation is handled by the GUI panels (gui/), in the retro
 	// interface by the classic main screen
@@ -1559,7 +1657,7 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_OPEN:
-		if (filedialog_open("Open a song, or import a SID, MIDI or chipsynth file", "sng;sid;mid;midi;ins;fermatax", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_SONG, "Open a song, or import a SID, MIDI or chipsynth file", "sng;sid;mid;midi;ins;fermatax", newpath, MAX_PATHNAME))
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
@@ -1601,7 +1699,7 @@ void runcommand(int cmd, const char *path)
 			const char *suggest = "Untitled.sng";
 			if (currentsongpath[0]) suggest = currentsongpath;
 			else if (suggestedsongname[0]) suggest = suggestedsongname;
-			if (filedialog_save("Save the song", "sng", suggest, newpath, MAX_PATHNAME))
+			if (filedialog_save(FOLDER_SONG, "Save the song", "sng", suggest, newpath, MAX_PATHNAME))
 				gui_savefinished(gt_savesong(newpath));
 			else
 				gui_savefinished(0);
@@ -1609,17 +1707,17 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_MERGE:
-		if (filedialog_open("Merge a song into this one", "sng", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_SONG, "Merge a song into this one", "sng", newpath, MAX_PATHNAME))
 			gt_mergesong(newpath);
 		break;
 
 	case GTCMD_IMPORTMIDI:
-		if (filedialog_open("Import a MIDI file", "mid;midi", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_IMPORT, "Import a MIDI file", "mid;midi", newpath, MAX_PATHNAME))
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
 	case GTCMD_IMPORTSID:
-		if (filedialog_open("Import a SID file", "sid", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_IMPORT, "Import a SID file", "sid", newpath, MAX_PATHNAME))
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
@@ -1628,12 +1726,12 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_IMPORTPATCH:
-		if (filedialog_open("Import a chipsynth C64 patch into the current instrument", "fermatax", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_IMPORT, "Import a chipsynth C64 patch into the current instrument", "fermatax", newpath, MAX_PATHNAME))
 			gt_importpatch(newpath);
 		break;
 
 	case GTCMD_LOADINSTR:
-		if (filedialog_open("Load an instrument or a chipsynth C64 patch into the current slot", "ins;fermatax", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_INSTR, "Load an instrument or a chipsynth C64 patch into the current slot", "ins;fermatax", newpath, MAX_PATHNAME))
 		{
 			if (gt_filetype(newpath) == GTFILE_PATCH)
 				gt_importpatch(newpath);
@@ -1654,7 +1752,7 @@ void runcommand(int cmd, const char *path)
 				snprintf(suggest, MAX_PATHNAME, "%s.ins", instr[editorInfo.einum].name);
 			else
 				snprintf(suggest, MAX_PATHNAME, "Instrument %02X.ins", editorInfo.einum);
-			if (filedialog_save("Save the instrument", "ins", suggest, newpath, MAX_PATHNAME))
+			if (filedialog_save(FOLDER_INSTR, "Save the instrument", "ins", suggest, newpath, MAX_PATHNAME))
 				gt_saveinstrument(newpath, editorInfo.einum);
 		}
 		break;
@@ -1675,7 +1773,7 @@ void runcommand(int cmd, const char *path)
 			else if (suggestedsongname[0]) base = suggestedsongname;
 			snprintf(dotext, sizeof dotext, ".%s", ext);
 			gt_replaceext(base, dotext, suggest, MAX_PATHNAME);
-			if (!filedialog_save("Export the song with its player", ext, suggest, newpath, MAX_PATHNAME))
+			if (!filedialog_save(FOLDER_EXPORT, "Export the song with its player", ext, suggest, newpath, MAX_PATHNAME))
 				break;
 			stopsong();
 			strcpy(reloctarget, newpath);
@@ -1960,6 +2058,24 @@ void getfloatparam(FILE *handle, float *value)
 	configptr = configbuf;
 	*value = 0.0f;
 	sscanf(configptr, "%f", value);
+}
+
+// A whole line (a folder may have spaces in its name), without the line end
+void getpathparam(FILE *handle, char *value)
+{
+	int len;
+
+	for (;;)
+	{
+		if (feof(handle)) return;
+		if (!fgets(configbuf, MAX_PATHNAME, handle)) return;
+		if ((configbuf[0]) && (configbuf[0] != ';') && (configbuf[0] != ' ') && (configbuf[0] != 13) && (configbuf[0] != 10)) break;
+	}
+
+	len = (int)strlen(configbuf);
+	while ((len > 0) && ((configbuf[len - 1] == 13) || (configbuf[len - 1] == 10))) len--;
+	configbuf[len] = 0;
+	strcpy(value, configbuf);
 }
 
 void getstringparam(FILE *handle, char *value)

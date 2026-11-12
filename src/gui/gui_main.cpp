@@ -545,6 +545,9 @@ extern "C" int gui_command(int cmd)
       if (showdesigner) closedesigner();
       else opendesigner();
       return 1;
+    case GTCMD_RETROGRADIENT:
+      retrogradient ^= 1;
+      return 1;
   }
   return 0;
 }
@@ -591,11 +594,11 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
 
   // Holding CTRL/CMD+C or X doesn't repeat: the first copy / cut takes the
   // selection away, so a repeat would copy (or clear!) the whole pattern.
-  // Neither do the CMD+A/R/F toggles (they would flip back and forth)
+  // Neither do the CMD+A/F toggles (they would flip back and forth)
   if ((k.repeat) && (mod & (KMOD_CTRL | KMOD_GUI)) && (!(mod & KMOD_ALT)))
   {
     if ((sym == SDLK_c) || (sym == SDLK_x)) return;
-    if ((mod & KMOD_GUI) && ((sym == SDLK_a) || (sym == SDLK_r) || (sym == SDLK_f))) return;
+    if ((mod & KMOD_GUI) && ((sym == SDLK_a) || (sym == SDLK_f))) return;
   }
 
   // ALT/OPTION + numpad 5: the instrument designer, from anywhere (also while
@@ -713,6 +716,24 @@ static int utf8first(const char *text)
   return 0;
 }
 
+// CTRL+SHIFT+wheel (CMD+SHIFT+wheel too on macOS): the next / previous
+// instrument, with the pointer anywhere. Returns true if the wheel event was
+// used for that
+static bool instrumentwheel(const SDL_MouseWheelEvent &w, int textscreen)
+{
+  SDL_Keymod mod = SDL_GetModState();
+  int up;
+
+  if ((!(mod & KMOD_SHIFT)) || (!(mod & (KMOD_CTRL | KMOD_GUI)))) return false;
+  if ((textscreen) || (designerwanted(textscreen)) || (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup))) return false;
+
+  // macOS turns SHIFT+wheel into a sideways wheel (wheel down = right)
+  up = w.y ? w.y : -w.x;
+  if (up > 0) nextinstr();
+  if (up < 0) previnstr();
+  return true;
+}
+
 static void pollevents(int textscreen)
 {
   SDL_Event e;
@@ -724,6 +745,10 @@ static void pollevents(int textscreen)
   tsmousewheel = 0;
   while (SDL_PollEvent(&e))
   {
+    // The instrument wheel doesn't scroll or zoom the panels too
+    if ((e.type == SDL_MOUSEWHEEL) && (e.wheel.windowID == SDL_GetWindowID(window)) && (instrumentwheel(e.wheel, textscreen)))
+      continue;
+
     ImGui_ImplSDL2_ProcessEvent(&e);
 
     switch (e.type)

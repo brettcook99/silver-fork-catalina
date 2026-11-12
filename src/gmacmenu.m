@@ -10,6 +10,9 @@
 #include "gmacmenu.h"
 #include "gcommand.h"
 
+// Retro screen background (gconsole.c): 0 = black, 1 = gradient
+extern unsigned retrogradient;
+
 // Recent files list, kept by the GUI
 extern int gui_recentfilecount(void);
 extern const char *gui_recentfile(int index);
@@ -72,6 +75,8 @@ static int designerstate = 0;
     [item setState:followstate ? NSControlStateValueOn : NSControlStateValueOff];
   if (tag == GTCMD_DESIGNER)
     [item setState:designerstate ? NSControlStateValueOn : NSControlStateValueOff];
+  if (tag == GTCMD_RETROGRADIENT)
+    [item setState:retrogradient ? NSControlStateValueOn : NSControlStateValueOff];
 
   // Tag 0 = not available
   if (([item action] == @selector(itemSelected:)) && (tag == 0)) return NO;
@@ -79,6 +84,9 @@ static int designerstate = 0;
   // The panels are only in the modern interface
   if ((retrostate) && ((tag == GTCMD_TOGGLELIBRARY) || (tag == GTCMD_TOGGLEINSPECTOR) || (tag == GTCMD_TOGGLETRACKS) ||
       (tag == GTCMD_TOGGLETABLES) || (tag == GTCMD_TOGGLESONG) || (tag == GTCMD_RESETLAYOUT)))
+    return NO;
+  // The background gradient is the retro screen's
+  if ((!retrostate) && (tag == GTCMD_RETROGRADIENT))
     return NO;
   return YES;
 }
@@ -235,7 +243,7 @@ void macmenu_init(void)
     addfkeyitem(control, @"Play Pattern", 3, 0, GTCMD_PLAYPATTERN);
     addfkeyitem(control, @"Stop", 4, 0, GTCMD_STOP);
     [control addItem:[NSMenuItem separatorItem]];
-    additem(control, @"Record (Edit Mode)", @"r", MOD_CMD, GTCMD_RECORD);
+    additem(control, @"Record (Edit Mode)", @"", 0, GTCMD_RECORD);
     additem(control, @"Follow Playback", @"f", MOD_CMD, GTCMD_FOLLOW);
     [control addItem:[NSMenuItem separatorItem]];
     additem(control, @"Octave Up", @"", 0, GTCMD_OCTAVEUP);
@@ -264,6 +272,7 @@ void macmenu_init(void)
     [view addItem:[NSMenuItem separatorItem]];
     additem(view, @"Enter Full Screen", @"f", MOD_CMD | MOD_CTRL, GTCMD_FULLSCREEN);
     [view addItem:[NSMenuItem separatorItem]];
+    additem(view, @"Gradient Background", @"", 0, GTCMD_RETROGRADIENT);
     additem(view, @"Ask for Interface at Next Launch", @"", 0, GTCMD_ASKINTERFACE);
 
     help = newmenu(@"Help");

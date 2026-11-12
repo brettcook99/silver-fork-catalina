@@ -77,6 +77,7 @@ extern int retromode;
 // Set by the retro main loop while it waits for input on the main screen
 // (not in a classic dialog such as the file selector or the online help)
 extern int retroatmainscreen;
+extern int retromainshown;
 // The mouse position on the text screen, as character cells (set by the GUI
 // while the text screen is shown)
 extern int textscreenmousex, textscreenmousey;
@@ -95,6 +96,7 @@ extern unsigned bigwindowcmdline;
 extern unsigned windowedxsize;
 extern unsigned windowedysize;
 extern unsigned textsizepercent;
+extern unsigned retrogradient;
 
 #ifdef __cplusplus
 }

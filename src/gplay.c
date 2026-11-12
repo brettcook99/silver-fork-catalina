@@ -177,6 +177,13 @@ int isplaying(void)
   return (songinit != PLAY_STOPPED);
 }
 
+// Nonzero while a start of playback waits for the player: the channels
+// still show where the playback was before
+int playstarting(void)
+{
+  return (songinit > PLAY_PLAYING) && (songinit < PLAY_STOP);
+}
+
 // Starts the channel's new note (cptr->newnote) with instrument iptr: its
 // first wave, wave/pulse/filter table positions and ADSR. With toneporta
 // (tone portamento command on the row) only the note changes

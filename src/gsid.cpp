@@ -122,6 +122,16 @@ void sid_init(int speed, unsigned m, unsigned ntsc, unsigned interpolate, unsign
   }
 }
 
+// Envelope level (0-255) of a voice of the emulated SID, for the level
+// meters. 0 without reSID (HardSID / CatWeasel output)
+int sid_envelope(int voice)
+{
+  if ((voice < 0) || (voice > 2)) return 0;
+  if (sid) return sid->envelope_level(voice);
+  if (sidfp) return sidfp->envelope_level(voice);
+  return 0;
+}
+
 unsigned char sid_getorder(unsigned char index, unsigned int adparam)
 {
   if (adparam >= 0xf000)

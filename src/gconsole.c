@@ -19,6 +19,10 @@ unsigned *scrbuffer = NULL;
 int textscreenactive = 0;
 int retromode = 0;
 int retroatmainscreen = 0;
+// Set when the retro interface's main screen has been drawn on the text
+// screen; cleared when a page or a classic dialog is drawn over it. The level
+// meters are drawn only on the main screen
+int retromainshown = 0;
 int textscreenmousex = 0;
 int textscreenmousey = 0;
 
@@ -47,6 +51,8 @@ unsigned bigwindowcmdline = 0;    // -w was given on the command line
 unsigned windowedxsize = 0;       // Size of the window when not fullscreen,
 unsigned windowedysize = 0;       // 0 = automatic
 unsigned textsizepercent = 100;   // Text size (CTRL/CMD + and -)
+unsigned retrogradient = 0;       // Retro screen background: 0 = black,
+                                  // 1 = gradient (View menu)
 
 /*
  * Key event queue
@@ -167,9 +173,11 @@ int input_nextkey(void)
       rawkey = 0;
       break;
 
-      case SDLK_r:
-      menucommand = MENUCMD_RECORD;
-      rawkey = 0;
+      case SDLK_RETURN:
+      case SDLK_KP_ENTER:
+      // CMD+RETURN = CTRL+RETURN (test note, start position)
+      ctrlpressed = 1;
+      shiftpressed = 1;
       break;
 
       case SDLK_f:
@@ -302,6 +310,7 @@ void clearscreen(void)
   int c;
   unsigned *dptr = scrbuffer;
 
+  retromainshown = 0;
   if (!dptr) return;
   for (c = 0; c < MAX_ROWS * MAX_COLUMNS; c++)
   {
@@ -370,6 +379,7 @@ void drawbox(int x, int y, int color, int sx, int sy)
   if (!scrbuffer) return;
   if ((y < 0) || (y + sy > MAX_ROWS) || (x < 0) || (x + sx > MAX_COLUMNS)) return;
   textscreenactive = 1;
+  retromainshown = 0;
   dptr = scrbuffer + (x + y * MAX_COLUMNS);
   dptr2 = scrbuffer + ((x + sx - 1) + y * MAX_COLUMNS);
   counter = sy;

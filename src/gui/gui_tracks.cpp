@@ -440,7 +440,7 @@ void gui::drawtracks(bool *open)
     if (ImGui::BeginPopup("##trackcontext"))
     {
       if (ImGui::MenuItem("Edit Pattern", "RETURN")) sendkey(KEY_ENTER, 13, false);
-      if (ImGui::MenuItem("Set Start Position for F2", "SPACE")) sendkey(KEY_SPACE, ' ', false);
+      if (ImGui::MenuItem("Set Start Position for F2", "CTRL+RETURN")) input_pushkey(KEY_ENTER, 13, KMOD_GT_CTRL);
       if (ImGui::MenuItem("Set End Position for F2", "BACKSPACE")) sendkey(KEY_BACKSPACE, 8, false);
       ImGui::Separator();
       if (ImGui::MenuItem("Insert Position", "INS")) sendkey(KEY_INS, 0, false);
