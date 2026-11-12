@@ -83,6 +83,8 @@ extern int textscreenmousex, textscreenmousey;
 
 extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shiftonlypressed, cursorflashdelay;
 extern int midinoteon, midinoteoff;
+// When the MIDI note event arrived (milliseconds, SDL_GetTicks())
+extern unsigned midinotetime;
 extern int menucommand;
 extern int mouseb, prevmouseb;
 extern int mousewheel;

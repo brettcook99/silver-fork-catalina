@@ -608,6 +608,15 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     return;
   }
 
+  // ALT/OPTION + numpad 1-3: MIDI INPUT 1-3 PATTERNS (by scancode: works
+  // with NumLock on and off)
+  if ((k.keysym.scancode >= SDL_SCANCODE_KP_1) && (k.keysym.scancode <= SDL_SCANCODE_KP_3) &&
+    (mod & KMOD_ALT) && (!(mod & (KMOD_CTRL | KMOD_GUI))))
+  {
+    if ((!k.repeat) && (!textscreen)) setmidichord(k.keysym.scancode - SDL_SCANCODE_KP_1 + 1);
+    return;
+  }
+
   // CTRL+D (CMD+D on macOS): the instrument designer
 #ifdef __APPLE__
   if ((sym == SDLK_d) && (mod & KMOD_GUI) && (!(mod & (KMOD_ALT | KMOD_SHIFT | KMOD_CTRL))))
@@ -772,6 +781,14 @@ static void pollevents(int textscreen)
       case SDL_MOUSEWHEEL:
       if (e.wheel.y > 0) tsmousewheel--;
       if (e.wheel.y < 0) tsmousewheel++;
+      break;
+
+      case SDL_MOUSEBUTTONDOWN:
+      // Middle button: switch between edit mode and jam mode. The retro
+      // interface's main screen does this itself
+      if ((e.button.button == SDL_BUTTON_MIDDLE) && (e.button.windowID == SDL_GetWindowID(window)) && (!retromode) &&
+        (!textscreen) && (!designerwanted(textscreen)) && (!editorsblocked()))
+        cmd_post(GTCMD_RECORD);
       break;
     }
   }

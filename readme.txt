@@ -376,9 +376,10 @@ DEL       Delete row
 SHIFT+ESC Optimize musicdata, or clear musicdata & set default pattern length
 ESC       Exit program
 NUMPAD 0  Play from the start of the pattern / stop
-NUMPAD .  Switch between jam/editmode
+NUMPAD .  Switch between jam/editmode (also the middle mouse button)
 CTRL+NUMPAD 1,2,3 Put the cursor on track (channel) 1, 2 or 3 in the pattern
           editor
+ALT+NUMPAD 1,2,3 MIDI INPUT 1, 2 or 3 PATTERNS (OPTION on macOS)
 
 2.3.2 Pattern edit mode
 -----------------------
@@ -421,13 +422,28 @@ SHIFT+Z     Cycle autoadvance-mode
 NUMPAD 1-8  Go to row 0, 8, 16, 24, 32, 40, 48 or 56
 Mouse wheel Scroll the pattern
 
-A MIDI keyboard enters notes like the note keys. For chords, set INPUT (at
-the bottom of the retro screen; CHORD in the control bar of the modern
-interface) to 2 or 3 PATTERNS by clicking it (right-click: back) or with the
-mouse wheel: the notes held down together then go to that many channels, the
-first to the cursor's channel and the others to the next channels, all on one
-row, and the cursor advances once per chord. Keys beyond the last channel are
-left out. With 1 PATTERN every note goes to the cursor's channel.
+A MIDI keyboard enters notes like the note keys. MIDI INPUT (at the bottom
+of the retro screen; CHORD in the control bar of the modern interface) sets
+how many channels the MIDI notes go to: click it (right-click: back), use the
+mouse wheel over it or ALT/OPTION + numpad 1, 2 or 3. With 1 PATTERN every
+note goes to the cursor's channel. With 2 or 3 PATTERNS the notes go to that
+many channels, from the cursor's channel on, so that they can ring on
+together:
+- notes played one by one go to the next channel in turn (ping-pong), each
+  on the cursor's row, and the cursor moves down after each note
+- keys struck together (within about 60 ms, a chord) go to the next channels
+  too, all on one row; keys beyond the last channel are left out
+The turn starts again at the cursor's channel when you move the cursor. This
+works in jam mode too: the notes then only play, on their channels.
+
+STEPS (next to MIDI INPUT; STEP in the modern control bar) sets how many rows
+are skipped after a note is entered, 0-16: with 1 the cursor moves from row
+00 to 02, with 2 from 00 to 03 and so on. It works for the note keys and the
+MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
+
+Notes played (keys or MIDI) while the song plays start at once, after the
+instrument's hardrestart frames, on their channel. A note of the pattern on
+that row doesn't take their place.
 
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and
@@ -600,13 +616,13 @@ other keys to edit them.
 
 By clicking with the left mouse button, you can select the data to edit.
 
-By dragging with middle or right mouse button, you can mark orderlist/pattern/
-tabledata.
+By dragging with the right mouse button, you can mark orderlist/pattern/
+tabledata. The middle mouse button switches between edit mode and jam mode.
 
 Some values like octave or subtune/pattern numbers can be incremented with
 the left mouse button and decremented with the right.
 
-By holding the middle/right mouse button in the status bar, a menu becomes
+By holding the right mouse button in the status bar, a menu becomes
 active. Continue to hold and click with left button to select options.
 
 In the fileselector, confirm loading or entering a directory by double-
@@ -619,8 +635,11 @@ In the retro interface the mouse wheel over a value changes it (wheel up =
 bigger): the instrument number and parameters (over the left digit in steps
 of $10; the attack, decay, sustain and release digits each on their own), the
 pattern numbers in the orderlist (the channel's pattern editor then shows the
-pattern), the PATT. numbers above the patterns, the subtune, the octave and
-INPUT. Each step can be undone.
+pattern), the PATT. numbers above the patterns, the subtune, the octave, MIDI
+INPUT and STEPS. Over "POS xx" in the orderlist title it goes through the song
+positions, and the pattern editor shows the patterns at the position (as
+SHIFT+RETURN in the orderlist). Over the wave, pulse, filter and speed tables
+it scrolls the table. Each change of a value can be undone.
 
 
 3. Song data

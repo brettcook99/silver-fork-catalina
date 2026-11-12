@@ -10,6 +10,7 @@
 #define GMIDI_C
 
 #include <string.h>
+#include <SDL.h>
 #include "gmidi.h"
 
 unsigned midiinput = 1;
@@ -24,6 +25,9 @@ unsigned midiinput = 1;
 #define MIDI_MAXDEVICES 64
 
 static volatile int midiqueue[MIDI_QUEUESIZE];
+// When each event arrived (SDL_GetTicks() milliseconds)
+static volatile unsigned midiqueuetime[MIDI_QUEUESIZE];
+static unsigned midilasttime = 0;
 static volatile unsigned midiqueuewrite = 0;
 static volatile unsigned midiqueueread = 0;
 static volatile int midiqueuelock = 0;
@@ -40,6 +44,7 @@ static void midi_pushevent(int type, int note)
   if (next != midiqueueread)
   {
     midiqueue[midiqueuewrite] = (type << 8) | (note & 0x7f);
+    midiqueuetime[midiqueuewrite] = SDL_GetTicks();
     __sync_synchronize();
     midiqueuewrite = next;
   }
@@ -68,11 +73,17 @@ int midi_getevent(int *note)
   if (midiqueueread == midiqueuewrite) return 0;
   __sync_synchronize();
   event = midiqueue[midiqueueread];
+  midilasttime = midiqueuetime[midiqueueread];
   __sync_synchronize();
   midiqueueread = (midiqueueread + 1) % MIDI_QUEUESIZE;
 
   *note = event & 0x7f;
   return event >> 8;
+}
+
+unsigned midi_eventtime(void)
+{
+  return midilasttime;
 }
 
 int midi_devicecount(void)
@@ -292,6 +303,11 @@ void midi_uninit(void)
 int midi_getevent(int *note)
 {
   (void)note;
+  return 0;
+}
+
+unsigned midi_eventtime(void)
+{
   return 0;
 }
 

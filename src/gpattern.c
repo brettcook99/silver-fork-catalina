@@ -81,26 +81,35 @@ int notekeytonote(int key)
   return newnote;
 }
 
-// A note of a MIDI chord after the first (see midichord): in edit mode it is
-// entered on its channel, on the row of the chord's first note, and it is
-// played on that channel. Keys beyond the chord's channels do nothing
-static void midichordnote(int note)
+// Moves the cursor down after a note has been entered: 1 + STEPS rows,
+// around to the start at the end of the pattern
+static void noteadvance(void)
+{
+  int len = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+
+  editorInfo.eppos += 1 + editstep;
+  if (editorInfo.eppos > len) editorInfo.eppos %= len + 1;
+}
+
+// A MIDI note when the notes go to 2-3 channels (see midichord): in edit
+// mode it is entered on its channel and row, and it is played on that
+// channel. A note that starts a row moves the cursor down. A note struck
+// together with earlier ones (a chord) isn't entered over one of them when
+// two of the chord's channels show the same pattern. Keys left out of a
+// chord do nothing
+static void midipolynote(int note)
 {
   int c = midichordchn;
-  int p, i, slot;
+  int p, c2;
 
   if ((c < 0) || (c >= MAX_CHN)) return;
   p = editorUndoInfo.editorInfo[c].epnum;
   if ((recordmode) && (midichordrow >= 0) && (midichordrow < pattlen[p]))
   {
-    // Not over an earlier note of the chord: a channel before this one in
-    // the chord may show the same pattern
     int shared = -1;
-    slot = (c - midichordbase + MAX_CHN) % MAX_CHN;
-    for (i = 0; i < slot; i++)
+    for (c2 = 0; c2 < MAX_CHN; c2++)
     {
-      int c2 = (midichordbase + i) % MAX_CHN;
-      if (editorUndoInfo.editorInfo[c2].epnum == p) shared = c2;
+      if ((c2 != c) && (midichordmask & (1 << c2)) && (editorUndoInfo.editorInfo[c2].epnum == p)) shared = c2;
     }
     if (shared < 0)
     {
@@ -110,6 +119,7 @@ static void midichordnote(int note)
     else
       gui_message("Chord note not entered: channels %d and %d show the same pattern", shared + 1, c + 1);
   }
+  if ((recordmode) && (midichordfirst) && (autoadvance < 2)) noteadvance();
   playtestnote(note, editorInfo.einum, c);
 }
 
@@ -182,12 +192,12 @@ void patterncommands(void)
     }
 
     if (newnote > LASTNOTE) newnote = -1;
-    // A note from a MIDI keyboard works like a note key, in any column. The
-    // other notes of a chord (MIDI chord input) go to the next channels
+    // A note from a MIDI keyboard works like a note key, in any column. With
+    // MIDI INPUT 2-3 PATTERNS the notes go to 2-3 channels (see midichord)
     if (midinoteon)
     {
-      if (midichordfirst) newnote = midinoteon;
-      else midichordnote(midinoteon);
+      if (midichord <= 1) newnote = midinoteon;
+      else midipolynote(midinoteon);
     }
     if ((rawkey == 0x08) && (!editorInfo.epcolumn)) newnote = REST;
     if ((rawkey == 0x14) && (!editorInfo.epcolumn)) newnote = KEYOFF;
@@ -393,14 +403,7 @@ void patterncommands(void)
       }
       if (recordmode)
       {
-        if (autoadvance < 2)
-        {
-          editorInfo.eppos++;
-          if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
-          {
-            editorInfo.eppos = 0;
-          }
-        }
+        if (autoadvance < 2) noteadvance();
       }
       playtestnote(newnote, editorInfo.einum, editorInfo.epchn);
     }

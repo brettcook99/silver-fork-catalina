@@ -50,6 +50,12 @@ typedef struct
   unsigned char mute;
   unsigned char advance;
   unsigned char gatetimer;
+  // A note played from the keyboard or MIDI while the song plays: it starts
+  // when jamtime counts down to 0 (after the hardrestart frames), whatever
+  // the row timing of the channel
+  unsigned char jamnote;
+  unsigned char jaminstr;
+  unsigned char jamtime;
 } CHN;
 
 #ifndef GPLAY_C

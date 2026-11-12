@@ -51,6 +51,8 @@
 
 #define PGUPDNREPEAT 8
 #define WHEELSCROLLROWS 1
+// STEPS: at most this many rows are skipped after a note is entered
+#define MAX_EDITSTEP 16
 
 #ifndef GOATTRK2_C
 extern int menu;
@@ -60,7 +62,8 @@ extern int midichord;
 extern int midichordchn;
 extern int midichordrow;
 extern int midichordfirst;
-extern int midichordbase;
+extern int midichordmask;
+extern int editstep;
 extern int followplay;
 extern int followmode;
 extern int hexnybble;
@@ -124,6 +127,7 @@ void docommand(void);
 void generalcommands(void);
 void midicommands(void);
 void setmidichord(int channels);
+void seteditstep(int steps);
 int menucommands(void);
 int numpadcommands(void);
 void load(void);

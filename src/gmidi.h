@@ -17,6 +17,10 @@ void midi_uninit(void);
 // MIDI_NOTEON or MIDI_NOTEOFF with the MIDI note number (0-127) in *note
 int midi_getevent(int *note);
 
+// When the event midi_getevent() returned last arrived, in milliseconds
+// (SDL_GetTicks())
+unsigned midi_eventtime(void);
+
 // Number of MIDI input devices currently open
 int midi_devicecount(void);
 

@@ -32,6 +32,7 @@ int metapressed = 0;
 int cursorflashdelay = 0;
 int midinoteon = 0;
 int midinoteoff = 0;
+unsigned midinotetime = 0;
 int menucommand = 0;
 int mouseb = 0;
 int prevmouseb = 0;
@@ -241,6 +242,7 @@ int input_nextmidi(void)
   }
   if (event == MIDI_NOTEON) midinoteon = note;
   else midinoteoff = note;
+  midinotetime = midi_eventtime();
   return 1;
 }
 

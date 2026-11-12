@@ -222,7 +222,10 @@ int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsig
 
   if (firsttimeinit)
   {
-    if (!snd_init(mr, SIXTEENBIT|MONO, b, 1, 0)) return 0;
+    // Stereo, with the same sound on the left and the right: a mono stream
+    // goes to the center speaker, which on an audio interface with more
+    // than 2 outputs (macOS) is the 3rd output instead of the main pair
+    if (!snd_init(mr, SIXTEENBIT|STEREO, b, 1, 0)) return 0;
     firsttimeinit = 0;
   }
   playspeed = snd_mixrate;
@@ -504,8 +507,16 @@ void sound_mixer(Sint32 *dest, unsigned samples)
   if (writehandle)
     fwrite(buffer, samples * sizeof(Uint16), 1, writehandle);
 
-  for (c = 0; c < samples; c++)
-    dest[c] = buffer[c];
+  if (snd_mixmode & STEREO)
+  {
+    for (c = 0; c < samples; c++)
+      dest[c*2] = dest[c*2+1] = buffer[c];
+  }
+  else
+  {
+    for (c = 0; c < samples; c++)
+      dest[c] = buffer[c];
+  }
 }
 
 #ifdef __WIN32__

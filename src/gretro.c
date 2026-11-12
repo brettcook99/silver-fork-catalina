@@ -12,9 +12,18 @@
 
 static char timechar[] = {':', ' '};
 
-// The message area on the bottom two rows, right of the INPUT setting
-#define MSGCOLUMN 29
-#define MSGWIDTH 48
+// The bottom rows: OCTAVE, PLAYING/STOPPED, MIDI INPUT and STEPS, each two
+// columns after the one before, then the message area
+#define INPUTCOLUMN 19
+#define INPUTWIDTH 10
+#define STEPSCOLUMN (INPUTCOLUMN + INPUTWIDTH + 2)
+#define STEPSWIDTH 5
+#define MSGCOLUMN (STEPSCOLUMN + STEPSWIDTH + 2)
+#define MSGWIDTH (77 - MSGCOLUMN)
+
+// "POS xx" in the orderlist title
+#define POSCOLUMN (40 + 10 + 27)
+#define POSWIDTH 6
 
 // Starts playing like F1-F3 (SHIFT: the other follow way)
 static void retroplay(int mode)
@@ -442,14 +451,19 @@ void retro_printstatus(void)
   if (isplaying()) printtext(10, 35, CTITLE, "PLAYING");
   else printtext(10, 35, CTITLE, "STOPPED");
 
-  // MIDI chord input: how many patterns (channels) the notes of a chord
-  // played on the MIDI keyboard go to. Click or wheel to change
-  printtext(18, 35, CTITLE, "INPUT");
+  // MIDI input: how many patterns (channels) the notes played on the MIDI
+  // keyboard go to. Click or wheel to change
+  printtext(INPUTCOLUMN, 35, CTITLE, "MIDI INPUT");
   if (midichord > 1)
     sprintf(textbuffer, "%d PATTERNS", midichord);
   else
     sprintf(textbuffer, "%d PATTERN ", midichord);
-  printtext(18, 36, CEDIT, textbuffer);
+  printtext(INPUTCOLUMN, 36, CEDIT, textbuffer);
+
+  // STEPS: rows skipped after a note is entered. Click or wheel to change
+  printtext(STEPSCOLUMN, 35, CTITLE, "STEPS");
+  sprintf(textbuffer, "%-2d", editstep);
+  printtext(STEPSCOLUMN, 36, CEDIT, textbuffer);
   if (editorInfo.multiplier)
   {
     if (!editorInfo.ntsc)
@@ -523,10 +537,66 @@ static int clampvalue(int value, int min, int max)
   return value;
 }
 
+// Moves the orderlist cursor steps song positions on (wheel over "POS xx").
+// The pattern editor shows the patterns at the new position, as SHIFT+RETURN
+// does in the orderlist
+static void retrosongpos(int steps)
+{
+  int len = songlen[editorInfo.esnum][editorInfo.eschn];
+  int pos = editorInfo.eseditpos;
+  int c, d;
+
+  if (len < 1) return;
+  if (pos >= len) pos = len - 1;
+  pos = clampvalue(pos + steps, 0, len - 1);
+  editorInfo.eseditpos = pos;
+  editorInfo.escolumn = 0;
+  if (editorInfo.eseditpos - editorInfo.esview < 0)
+    editorInfo.esview = editorInfo.eseditpos;
+  if (editorInfo.eseditpos - editorInfo.esview >= VISIBLEORDERLIST)
+    editorInfo.esview = editorInfo.eseditpos - VISIBLEORDERLIST + 1;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    for (d = pos; d < songlen[editorInfo.esnum][c]; d++)
+    {
+      if (songorder[editorInfo.esnum][c][d] < MAX_PATT)
+      {
+        editorUndoInfo.editorInfo[c].epnum = songorder[editorInfo.esnum][c][d];
+        break;
+      }
+    }
+  }
+  editorInfo.epmarkchn = -1;
+  if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
+    editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+}
+
+// Scrolls a table (wheel down = on). The edit cursor stays in view. With the
+// table views locked together they all scroll
+static void retrotablescroll(int num, int steps)
+{
+  int view = clampvalue(editorInfo.etview[num] + steps * WHEELSCROLLROWS, 0, MAX_TABLELEN - VISIBLETABLEROWS);
+  int c;
+
+  if (editorInfo.etlock)
+  {
+    for (c = 0; c < MAX_TABLES; c++) editorInfo.etview[c] = view;
+  }
+  else editorInfo.etview[num] = view;
+
+  if ((editorInfo.etlock) || (num == editorInfo.etnum))
+  {
+    view = editorInfo.etview[editorInfo.etnum];
+    editorInfo.etpos = clampvalue(editorInfo.etpos, view, view + VISIBLETABLEROWS - 1);
+  }
+}
+
 // Mouse wheel over a value changes it (up = bigger): the values that the
 // mouse buttons change (pattern, subtune & instrument numbers, octave, MIDI
-// input), the instrument parameters and the pattern numbers in the
-// orderlist. Returns nonzero if the wheel was over one of them
+// input, steps), the instrument parameters, the song position ("POS xx")
+// and the pattern numbers in the orderlist. Over a table it scrolls the
+// table. Returns nonzero if the wheel was over one of them
 static int retrowheel(void)
 {
   int d = -mousewheel;
@@ -553,6 +623,20 @@ static int retrowheel(void)
   {
     for (; d > 0; d--) nextsong();
     for (; d < 0; d++) prevsong();
+    return 1;
+  }
+
+  // "POS xx": goes through the song positions
+  if ((mousey == 2) && (mousex >= POSCOLUMN) && (mousex < POSCOLUMN + POSWIDTH))
+  {
+    retrosongpos(d);
+    return 1;
+  }
+
+  // The tables scroll
+  if ((mousey >= 15) && (mousey < 15 + VISIBLETABLEROWS) && (mousex >= 40 + 10) && (mousex < 40 + 10 + MAX_TABLES * 10))
+  {
+    retrotablescroll((mousex - 40 - 10) / 10, mousewheel);
     return 1;
   }
 
@@ -641,10 +725,17 @@ static int retrowheel(void)
     return 1;
   }
 
-  // MIDI input (chords on 1-3 patterns)
-  if ((mousey >= 35) && (mousex >= 18) && (mousex <= 27))
+  // MIDI input (notes on 1-3 patterns)
+  if ((mousey >= 35) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH))
   {
     setmidichord(clampvalue(midichord + d, 1, MAX_CHN));
+    return 1;
+  }
+
+  // STEPS
+  if ((mousey >= 35) && (mousex >= STEPSCOLUMN) && (mousex < STEPSCOLUMN + STEPSWIDTH))
+  {
+    seteditstep(clampvalue(editstep + d, 0, MAX_EDITSTEP));
     return 1;
   }
 
@@ -666,6 +757,18 @@ void retro_mousecommands(void)
   }
 
   if (!mouseb) return;
+
+  // Middle button, anywhere: switch between edit mode and jam mode. It does
+  // nothing else
+  if (mouseb & MOUSEB_MIDDLE)
+  {
+    if (!(prevmouseb & MOUSEB_MIDDLE))
+    {
+      recordmode ^= 1;
+      gui_message(recordmode ? "Edit mode: notes are entered" : "Jam mode: notes are only played");
+    }
+    return;
+  }
 
   // Pattern editpos & pattern number selection
   for (c = 0; c < MAX_CHN; c++)
@@ -697,7 +800,7 @@ void retro_mousecommands(void)
 
         editorInfo.editmode = EDIT_PATTERN;
 
-        if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb))
+        if ((mouseb & MOUSEB_RIGHT) && (!prevmouseb))
         {
           if ((editorInfo.epmarkchn != c) || (newpos != editorInfo.epmarkend))
           {
@@ -729,7 +832,7 @@ void retro_mousecommands(void)
         if (editorInfo.eppos < 0) editorInfo.eppos = 0;
         if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
 
-        if (mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) editorInfo.epmarkend = newpos;
+        if (mouseb & MOUSEB_RIGHT) editorInfo.epmarkend = newpos;
       }
     }
   }
@@ -760,7 +863,7 @@ void retro_mousecommands(void)
 
     editorInfo.editmode = EDIT_ORDERLIST;
 
-    if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn]))
+    if ((mouseb & MOUSEB_RIGHT) && (!prevmouseb) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn]))
     {
       if ((editorInfo.esmarkchn != newchn) || (newpos != editorInfo.esmarkend))
       {
@@ -776,7 +879,7 @@ void retro_mousecommands(void)
       editorInfo.escolumn = newcolumn;
     }
 
-    if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn])) editorInfo.esmarkend = newpos;
+    if ((mouseb & MOUSEB_RIGHT) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn])) editorInfo.esmarkend = newpos;
   }
   if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 2) && (mousex >= 63 + 10) && (mousex <= 64 + 10))
   {
@@ -819,7 +922,7 @@ void retro_mousecommands(void)
 
       editorInfo.editmode = EDIT_TABLES;
 
-      if ((mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) && (!prevmouseb))
+      if ((mouseb & MOUSEB_RIGHT) && (!prevmouseb))
       {
         if ((editorInfo.etmarknum != editorInfo.etnum) || (newpos != editorInfo.etmarkend))
         {
@@ -837,7 +940,7 @@ void retro_mousecommands(void)
       if (editorInfo.etpos < 0) editorInfo.etpos = 0;
       if (editorInfo.etpos > MAX_TABLELEN - 1) editorInfo.etpos = MAX_TABLELEN - 1;
 
-      if (mouseb & (MOUSEB_RIGHT | MOUSEB_MIDDLE)) editorInfo.etmarkend = newpos;
+      if (mouseb & MOUSEB_RIGHT) editorInfo.etmarkend = newpos;
     }
   }
 
@@ -860,11 +963,17 @@ void retro_mousecommands(void)
   {
     recordmode ^= 1;
   }
-  // MIDI input (chords on 1-3 patterns): left button = more, right = fewer
-  if ((!prevmouseb) && (mousex >= 18) && (mousex <= 27) && (mousey >= 23 + 3 + 9))
+  // MIDI input (notes on 1-3 patterns): left button = more, right = fewer
+  if ((!prevmouseb) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH) && (mousey >= 23 + 3 + 9))
   {
     if (mouseb & MOUSEB_LEFT) setmidichord(midichord < MAX_CHN ? midichord + 1 : 1);
     if (mouseb & MOUSEB_RIGHT) setmidichord(midichord > 1 ? midichord - 1 : MAX_CHN);
+  }
+  // STEPS: left button = more, right = fewer (held down: repeats)
+  if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousex >= STEPSCOLUMN) && (mousex < STEPSCOLUMN + STEPSWIDTH) && (mousey >= 23 + 3 + 9))
+  {
+    if (mouseb & MOUSEB_LEFT) seteditstep(editstep < MAX_EDITSTEP ? editstep + 1 : 0);
+    if (mouseb & MOUSEB_RIGHT) seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
   }
   for (c = 0; c < MAX_CHN; c++)
   {

@@ -75,8 +75,8 @@ void gui::drawcontrolbar(float height)
   x += bw + 14.0f;
   ImGui::SetCursorScreenPos(ImVec2(x, y));
   if (iconbutton("##record", ICON_RECORD, recordmode != 0, theme.record, ImVec2(bw, bh),
-    recordmode ? "Edit mode: keys enter notes into the pattern (CMD+R switches to jam mode)" :
-                 "Jam mode: keys only play notes (CMD+R switches to edit mode)"))
+    recordmode ? "Edit mode: keys enter notes into the pattern (CMD+R or the middle mouse button switches to jam mode)" :
+                 "Jam mode: keys only play notes (CMD+R or the middle mouse button switches to edit mode)"))
     cmd_post(GTCMD_RECORD);
   x += bw + 4.0f;
   ImGui::SetCursorScreenPos(ImVec2(x, y));
@@ -101,18 +101,42 @@ void gui::drawcontrolbar(float height)
     cmd_post(GTCMD_DESIGNER);
   x += bw + 12.0f;
 
-  // MIDI chord input: notes held together on the MIDI keyboard go to 1-3
-  // tracks. Click = more, right-click = fewer
+  // MIDI input: MIDI notes go to 1-3 tracks (ALT/OPTION + numpad 1-3).
+  // Click = more, right-click = fewer, or the wheel
   ImGui::SetCursorScreenPos(ImVec2(x, y + (bh - (fs + 4.0f)) * 0.5f));
   snprintf(text, sizeof text, "CHORD %d##midichord", midichord);
   if (togglechip(text, midichord > 1,
-    midichord > 1 ? "MIDI chords: the notes you hold down together on the MIDI keyboard go to this many tracks, "
-                    "starting at the cursor's track, all on one row. Click for more, right-click for fewer" :
-                    "MIDI chords off: every MIDI note goes to the cursor's track. Click to send the notes of a chord "
-                    "to 2 or 3 tracks, right-click for fewer"))
+    midichord > 1 ? "MIDI input on this many tracks, from the cursor's track: notes played one by one go to the next track "
+                    "in turn (so they ring on together), keys struck together (a chord) to the tracks on one row. "
+                    "Click for more, right-click for fewer (ALT/OPTION + numpad 1-3)" :
+                    "MIDI input on one track: every MIDI note goes to the cursor's track. Click to spread the notes "
+                    "over 2 or 3 tracks, right-click for fewer (ALT/OPTION + numpad 1-3)"))
     setmidichord(midichord < MAX_CHN ? midichord + 1 : 1);
   if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
     setmidichord(midichord > 1 ? midichord - 1 : MAX_CHN);
+  if (ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY))
+  {
+    ImGuiIO &io = ImGui::GetIO();
+    if ((io.MouseWheel > 0.0f) && (midichord < MAX_CHN)) setmidichord(midichord + 1);
+    if ((io.MouseWheel < 0.0f) && (midichord > 1)) setmidichord(midichord - 1);
+  }
+  x += ImGui::GetItemRectSize().x + 6.0f;
+
+  // STEPS: rows skipped after a note is entered (0-16)
+  ImGui::SetCursorScreenPos(ImVec2(x, y + (bh - (fs + 4.0f)) * 0.5f));
+  snprintf(text, sizeof text, "STEP %d##editstep", editstep);
+  if (togglechip(text, editstep > 0,
+    "Steps: rows skipped after a note is entered (1 = every 2nd row, 2 = every 3rd row...). "
+    "Click for more, right-click for fewer, or the mouse wheel"))
+    seteditstep(editstep < MAX_EDITSTEP ? editstep + 1 : 0);
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
+    seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
+  if (ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY))
+  {
+    ImGuiIO &io = ImGui::GetIO();
+    if (io.MouseWheel > 0.0f) seteditstep(editstep + 1);
+    if (io.MouseWheel < 0.0f) seteditstep(editstep - 1);
+  }
   x += ImGui::GetItemRectSize().x + 16.0f;
 
   // The display

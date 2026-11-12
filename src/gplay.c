@@ -46,6 +46,9 @@ unsigned char funktable[2];
 unsigned char masterfader = 0x0f;
 int psnum = 0;
 int songinit = 0;
+// A note played while the song plays sounds at least this many frames
+// before the pattern's next note (see playroutine())
+#define JAMMINFRAMES 3
 int lastsonginit = 0;
 int startpattpos = 0;
 
@@ -136,12 +139,21 @@ void playtestnote(int note, int ins, int chnnum)
     }
   }
 
-  chn[chnnum].instr = ins;
-  chn[chnnum].newnote = note;
   if (songinit == PLAY_STOPPED)
   {
+    chn[chnnum].instr = ins;
+    chn[chnnum].newnote = note;
     chn[chnnum].tick = (instr[ins].gatetimer & 0x3f)+1;
     chn[chnnum].gatetimer = instr[ins].gatetimer & 0x3f;
+  }
+  else
+  {
+    // While the song plays the note starts after the hardrestart frames, not
+    // on the channel's next row, and the pattern's note of that row can't
+    // take its place (see playroutine())
+    chn[chnnum].jamnote = note;
+    chn[chnnum].jaminstr = ins;
+    chn[chnnum].jamtime = (instr[ins].gatetimer & 0x3f)+1;
   }
 }
 
@@ -163,6 +175,61 @@ int playfilterptr(void)
 int isplaying(void)
 {
   return (songinit != PLAY_STOPPED);
+}
+
+// Starts the channel's new note (cptr->newnote) with instrument iptr: its
+// first wave, wave/pulse/filter table positions and ADSR. With toneporta
+// (tone portamento command on the row) only the note changes
+static void startnewnote(int c, CHN *cptr, INSTR *iptr, int toneporta)
+{
+  cptr->note = cptr->newnote-FIRSTNOTE;
+  cptr->command = 0;
+  cptr->vibdelay = iptr->vibdelay;
+  cptr->cmddata = iptr->ptr[STBL];
+  if (toneporta) return;
+
+  if (iptr->firstwave)
+  {
+    if (iptr->firstwave >= 0xfe) cptr->gate = iptr->firstwave;
+    else
+    {
+      cptr->wave = iptr->firstwave;
+      cptr->gate = 0xff;
+    }
+  }
+
+  cptr->ptr[WTBL] = iptr->ptr[WTBL];
+
+  if (cptr->ptr[WTBL])
+  {
+    // Stop the song in case of jumping into a jump
+    if (ltable[WTBL][cptr->ptr[WTBL]-1] == 0xff)
+      stopsong();
+  }
+  if (iptr->ptr[PTBL])
+  {
+    cptr->ptr[PTBL] = iptr->ptr[PTBL];
+    cptr->pulsetime = 0;
+    if (cptr->ptr[PTBL])
+    {
+      // Stop the song in case of jumping into a jump
+      if (ltable[PTBL][cptr->ptr[PTBL]-1] == 0xff)
+        stopsong();
+    }
+  }
+  if (iptr->ptr[FTBL])
+  {
+    filterptr = iptr->ptr[FTBL];
+    filtertime = 0;
+    if (filterptr)
+    {
+      // Stop the song in case of jumping into a jump
+      if (ltable[FTBL][filterptr-1] == 0xff)
+        stopsong();
+    }
+  }
+  sidreg[0x5+7*c] = iptr->ad;
+  sidreg[0x6+7*c] = iptr->sr;
 }
 
 void playroutine(void)
@@ -200,6 +267,8 @@ void playroutine(void)
       cptr->wave = 0;
       cptr->ptr[WTBL] = 0;
       cptr->newnote = 0;
+      cptr->jamnote = 0;
+      cptr->jamtime = 0;
       cptr->repeat = 0;
       if (editorInfo.multiplier)
         cptr->tick = 6* editorInfo.multiplier-1;
@@ -310,6 +379,8 @@ void playroutine(void)
 
     for (c = 0; c < MAX_CHN; c++)
     {
+      int jam = 0;
+
       iptr = &instr[cptr->instr];
 
       // Reset tempo in jammode
@@ -319,6 +390,14 @@ void playroutine(void)
           cptr->tempo = 6* editorInfo.multiplier-1;
         else
           cptr->tempo = 6-1;
+      }
+
+      // A note played from the keyboard or MIDI while the song plays starts
+      // on this frame (see playtestnote())
+      if (cptr->jamtime)
+      {
+        cptr->jamtime--;
+        if (!cptr->jamtime) jam = 1;
       }
 
       // Decrease tick
@@ -341,6 +420,35 @@ void playroutine(void)
         if (chn->gatetimer > cptr->tick)
           stopsong();
       }
+
+      // The played note starts between rows (no effects on this frame). In
+      // the hardrestart frames just before a row (where the row is read) it
+      // waits for the row instead, and takes the place of the row's note. So
+      // it does when the row's note would cut it within JAMMINFRAMES
+      if (jam)
+      {
+        int wait = (cptr->tick <= cptr->gatetimer);
+
+        if ((!wait) && (cptr->tick <= cptr->gatetimer + JAMMINFRAMES) && (cptr->pattptr != 0x7fffffff))
+        {
+          unsigned char *row = &pattern[cptr->pattnum][cptr->pattptr];
+          if ((row[0] <= LASTNOTE) && (row[2] != CMD_TONEPORTA)) wait = 1;
+        }
+        if (wait)
+        {
+          cptr->jamtime = cptr->tick;
+          jam = 0;
+        }
+        else
+        {
+          cptr->instr = cptr->jaminstr;
+          cptr->newnote = cptr->jamnote;
+          cptr->jamnote = 0;
+          startnewnote(c, cptr, &instr[cptr->instr], 0);
+          cptr->newnote = 0;
+          goto NEXTCHN;
+        }
+      }
       goto WAVEEXEC;
 
       // Tick 0
@@ -348,63 +456,21 @@ void playroutine(void)
       // Advance in sequencer
       sequencer(c, cptr);
 
+      // A played note starting on a row goes before the pattern's note
+      if (jam)
+      {
+        cptr->instr = cptr->jaminstr;
+        cptr->newnote = cptr->jamnote;
+        cptr->jamnote = 0;
+        iptr = &instr[cptr->instr];
+      }
+
       // Get gatetimer compare-value
       cptr->gatetimer = iptr->gatetimer & 0x3f;
 
       // New note init
       if (cptr->newnote)
-      {
-        cptr->note = cptr->newnote-FIRSTNOTE;
-        cptr->command = 0;
-        cptr->vibdelay = iptr->vibdelay;
-        cptr->cmddata = iptr->ptr[STBL];
-        if (cptr->newcommand != CMD_TONEPORTA)
-        {
-          if (iptr->firstwave)
-          {
-            if (iptr->firstwave >= 0xfe) cptr->gate = iptr->firstwave;
-            else
-            {
-              cptr->wave = iptr->firstwave;
-              cptr->gate = 0xff;
-            }
-          }
-
-
-          cptr->ptr[WTBL] = iptr->ptr[WTBL];
-
-          if (cptr->ptr[WTBL])
-          {
-            // Stop the song in case of jumping into a jump
-            if (ltable[WTBL][cptr->ptr[WTBL]-1] == 0xff)
-              stopsong();
-          }
-          if (iptr->ptr[PTBL])
-          {
-            cptr->ptr[PTBL] = iptr->ptr[PTBL];
-            cptr->pulsetime = 0;
-            if (cptr->ptr[PTBL])
-            {
-              // Stop the song in case of jumping into a jump
-              if (ltable[PTBL][cptr->ptr[PTBL]-1] == 0xff)
-                stopsong();
-            }
-          }
-          if (iptr->ptr[FTBL])
-          {
-            filterptr = iptr->ptr[FTBL];
-            filtertime = 0;
-            if (filterptr)
-            {
-              // Stop the song in case of jumping into a jump
-              if (ltable[FTBL][filterptr-1] == 0xff)
-                stopsong();
-            }
-          }
-          sidreg[0x5+7*c] = iptr->ad;
-          sidreg[0x6+7*c] = iptr->sr;
-        }
-      }
+        startnewnote(c, cptr, iptr, (!jam) && (cptr->newcommand == CMD_TONEPORTA));
 
       // Tick 0 effects
 
@@ -517,7 +583,7 @@ void playroutine(void)
       if (cptr->newnote)
       {
         cptr->newnote = 0;
-        if (cptr->newcommand != CMD_TONEPORTA) goto NEXTCHN;
+        if ((jam) || (cptr->newcommand != CMD_TONEPORTA)) goto NEXTCHN;
       }
 
       WAVEEXEC:

@@ -38,21 +38,27 @@ int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
 int recordmode = 1;
 
-// MIDI chord input: with 2 or 3, the notes of a chord (keys held down
-// together on the MIDI keyboard) go to that many channels: the first note to
-// the cursor's channel, the next ones to the following channels (after
-// channel 3 comes channel 1), all on the row of the first note. Keys beyond
-// the last of these channels are left out. 1 = the usual input: every note
-// goes to the cursor's channel
+// MIDI input (MIDI INPUT 1-3 PATTERNS). With 2 or 3 the MIDI notes go to
+// that many channels, from the cursor's channel on (after channel 3 comes
+// channel 1), so that they can ring on together:
+// - a note played on its own goes to the next of these channels in turn
+//   (ping-pong), on the cursor's row, and the cursor moves down
+// - keys struck together (a chord) go to the next channels too, all on the
+//   row of the first one; keys beyond the last channel are left out
+// The turn starts again at the cursor's channel when the cursor has been
+// moved. 1 = the usual input: every note goes to the cursor's channel
 int midichord = 1;
+// STEPS (0-16): rows skipped after a note is entered, so that the cursor
+// moves down 1 + editstep rows
+int editstep = 0;
 // Where the current MIDI note-on goes (set by midichordassign()): the
-// channel (-1 = left out) and the row. The first note of a chord works
-// exactly like a note key
+// channel (-1 = left out), the row, whether it starts a new row (the
+// cursor moves down after it) and the channels of the chord's earlier notes
+// (bit per channel)
 int midichordchn = 0;
 int midichordrow = 0;
 int midichordfirst = 1;
-// The channel of the chord's first note
-int midichordbase = 0;
+int midichordmask = 0;
 int followplay = 0;
 int followmode = 1;
 int hexnybble = -1;
@@ -1079,9 +1085,21 @@ static int midiheldchn[LASTNOTE + 1];
 static int midiheldcount = 0;
 // The MIDI note each channel plays (0 = none)
 static int midichnnote[MAX_CHN];
-// The chord being played: notes so far, row of the first note
+// The chord being played: notes so far, row of the first note, its channels
+// (bits) and when its first key was struck
 static int chordnotes = 0;
 static int chordrow = 0;
+static int chordmask = 0;
+static unsigned chordtime = 0;
+// Keys struck within this many milliseconds of the first one, while it is
+// held, make a chord. A later key is a note of its own, even if the earlier
+// ones are still held (legato playing)
+#define MIDICHORDTIME 60
+// The next channel in turn (0 = the cursor's) for MIDI input on 2-3
+// channels, and where the cursor was after the last note
+static int midinextslot = 0;
+static int miditurnchn = -1;
+static int miditurnrow = -1;
 
 // Sets the number of channels MIDI chords go to (1-3, see midichord). The
 // notes still sounding from the MIDI keyboard are released, and the keys
@@ -1101,41 +1119,70 @@ void setmidichord(int channels)
 	}
 	memset(midiheldchn, 0, sizeof midiheldchn);
 	midiheldcount = 0;
+	chordnotes = 0;
+	midinextslot = 0;
 
 	if (midichord > 1)
-		gui_message("MIDI chords: held notes go to %d channels", midichord);
+		gui_message("MIDI input: notes go to %d channels in turn, chords to %d channels", midichord, midichord);
 	else
 		gui_message("MIDI input: notes go to the cursor's channel");
 }
 
-// Decides where the MIDI note-on midinoteon goes. A note played while no
-// other key is held starts a chord and goes to the cursor (like a note key);
-// the others go to the next channels, on the chord's row
+// Sets STEPS (0-16): rows skipped after a note is entered
+void seteditstep(int steps)
+{
+	if (steps < 0) steps = 0;
+	if (steps > MAX_EDITSTEP) steps = MAX_EDITSTEP;
+	editstep = steps;
+}
+
+// Decides where the MIDI note-on midinoteon goes (see midichord)
 static void midichordassign(void)
 {
 	int note = midinoteon;
 
 	if ((note < 0) || (note > LASTNOTE)) return;
 
-	if ((midichord <= 1) || (!midiheldcount))
+	if (midichord <= 1)
 	{
+		// Every note to the cursor, like a note key
 		midichordfirst = 1;
 		midichordchn = editorInfo.epchn;
 		midichordrow = editorInfo.eppos;
-		midichordbase = editorInfo.epchn;
-		chordrow = editorInfo.eppos;
-		chordnotes = 1;
+		midichordmask = 0;
+		chordnotes = 0;
 	}
-	else
+	else if ((midiheldcount) && (chordnotes) && (midinotetime - chordtime <= MIDICHORDTIME))
 	{
+		// Struck together with the chord's first key: the next channel, on the
+		// chord's row
 		midichordfirst = 0;
 		midichordrow = chordrow;
+		midichordmask = chordmask;
 		if (chordnotes < midichord)
 		{
-			midichordchn = (midichordbase + chordnotes) % MAX_CHN;
+			midichordchn = (editorInfo.epchn + midinextslot) % MAX_CHN;
+			midinextslot = (midinextslot + 1) % midichord;
+			chordmask |= 1 << midichordchn;
 			chordnotes++;
 		}
 		else midichordchn = -1;
+	}
+	else
+	{
+		// A note of its own (or the first of a chord): the next channel in
+		// turn, on the cursor's row. If the cursor has been moved, the turn
+		// starts again at its channel
+		if ((editorInfo.epchn != miditurnchn) || (editorInfo.eppos != miditurnrow)) midinextslot = 0;
+		midichordfirst = 1;
+		midichordrow = editorInfo.eppos;
+		midichordchn = (editorInfo.epchn + midinextslot) % MAX_CHN;
+		midinextslot = (midinextslot + 1) % midichord;
+		midichordmask = 0;
+		chordmask = 1 << midichordchn;
+		chordnotes = 1;
+		chordrow = editorInfo.eppos;
+		chordtime = midinotetime;
 	}
 
 	// A key that sends note-on twice is counted once
@@ -1160,6 +1207,14 @@ void midicommands(void)
 		// the notes of a chord on their channels
 		if ((editorInfo.editmode != EDIT_PATTERN) && (editorInfo.editmode != EDIT_NAMES))
 			playtestnote(midinoteon, editorInfo.einum, midichordchn);
+	}
+
+	// Where the cursor is after the note: the next channel in turn is used
+	// while the cursor stays there
+	if (midinoteon)
+	{
+		miditurnchn = editorInfo.epchn;
+		miditurnrow = editorInfo.eppos;
 	}
 
 	// Releasing a key releases its note, like on a synth, unless another
