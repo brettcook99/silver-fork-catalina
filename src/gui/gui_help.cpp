@@ -39,17 +39,18 @@ static const HelpLine interfacelines[] = {
   { "Files", "File > Open (F10) opens songs and imports SID, MIDI and chipsynth files. You can also drop files onto the window" FINDERTEXT "." },
   { "Opening and playing", OPENPLAYTEXT },
   { "Text size", CMD " + = bigger, " CMD " + - smaller, " CMD " + 0 default. ALT/OPTION+ENTER toggles full screen." },
-  { "Retro interface", "The classic GoatTracker screen is available too: hold Shift (or Option on macOS) while the program starts, or use View > Ask for Interface at Next Launch." },
-  { "Instrument designer", "A C64 screen laid out like chipsynth C64 for designing instruments: the rainbow button in the control bar, View > Instrument Designer, " CMD "+D or ALT/OPTION+numpad 5 (from anywhere). See below." },
+  { "Retro interface", "GoatTracker Ultimate starts with the classic GoatTracker screen. Hold Shift (or Option on macOS) while it starts to choose this interface for that time." },
+  { "SID Designer", "A C64 screen laid out like chipsynth C64 for designing instruments: CTRL+numpad 7 (from anywhere), the rainbow button in the control bar, View > SID Designer, " CMD "+D or ALT/OPTION+numpad 5. See below." },
   { NULL, NULL }
 };
 
 static const HelpLine designerlines[] = {
-  { "Opening / closing", CMD "+D, ALT/OPTION+numpad 5, the TRACKER tab or ESC (RUN/STOP). It opens on the current instrument; the tracker returns to it." },
+  { "Opening / closing", "CTRL+numpad 7, " CMD "+D, ALT/OPTION+numpad 5, Tracker at the right of the title bar or ESC (RUN/STOP). It opens on the current instrument; the tracker returns to it. The title bar's settings work there too." },
   { "Patch", "Up to three oscillators, each an instrument played on SID voice 1, 2 or 3 together, so that sync and ring modulation work between them. The oscillators of the patch BASS are the instruments named BASS:1, BASS:2 and BASS:3 (as chipsynth patches are imported). Click an oscillator's light to add it (a copy of the first, in the next empty instrument) or mute it." },
   { "PATCH page", "Waveforms, FILT / SYNC / RING / TEST, hard restart and legato, pulse width and the envelope (drag the bars, SHIFT+drag for fine steps, or the wheel), transpose / fixed pitch, vibrato and the gate timer. The filter panel sets cutoff, resonance, type and the voices it filters; click the chip display to switch 6581 / 8580 and PAL / NTSC." },
   { "WAVE / PULSE / FILTER", "The instrument's wave, pulse and filter table rows as steps: waveform bits and arpeggio notes, pulse width and filter sweeps with a graph of the result, where the table loops, presets and sweep makers. SHARED: other instruments use the same rows; UNSHARE gives this one its own copy." },
   { "EMU page", "SID chip, clock, player speed, hard restart, reSID mode, the SID registers and the voices." },
+  { "CLEAR", "Makes the patch an init patch: one oscillator playing a plain sawtooth with full sustain. The other oscillators' instruments are emptied and the table rows only the patch used are deleted. " CMD "+Z undoes it." },
   { "Keys", "Note keys play the patch (MIDI too), PAGE UP / DOWN = octave, TAB = next page, cursor LEFT / RIGHT = next control, UP / DOWN = change it, RETURN / SPACE = press it, F1-F4 = play / stop the song, " CMD "+Z = undo." },
   { "Characters", "Built in. A C64 character ROM file named chargen (e.g. from VICE) in the settings folder is used instead." },
   { NULL, NULL }
@@ -66,7 +67,8 @@ static const HelpLine generallines[] = {
   { "F9", "Export (pack, relocate & save SID, PRG or BIN)" },
   { "F10 / F11", "Open / save (in the instrument editor: the instrument)" },
   { "F12", "This help" },
-  { CMD "+D, ALT+NUMPAD 5", "Instrument designer (and back)" },
+  { "CTRL+NUMPAD 7", "SID Designer and back (" CMD "+D, ALT+NUMPAD 5 too)" },
+  { "CTRL+[ / ] / \\", "Mute or unmute channel 1 / 2 / 3 (" CMD " too on macOS)" },
   { "SHIFT+F5 / F6", "Speed multiplier down / up" },
   { "SHIFT+F7", "Hard restart ADSR" },
   { "SHIFT+F8", "Switch between 6581 and 8580" },
@@ -182,7 +184,7 @@ static const HelpLine tablelines[] = {
 
 static const HelpSection sections[] = {
   { "Using the interface", interfacelines },
-  { "Instrument designer", designerlines },
+  { "SID Designer", designerlines },
   { "General keys", generallines },
   { "Pattern editor", patternlines },
   { "Arrangement (orderlist)", orderlines },

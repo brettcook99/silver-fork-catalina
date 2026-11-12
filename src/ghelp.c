@@ -41,10 +41,10 @@ void onlinehelp(int standalone,int context)
     "CTRL/CMD + -  Smaller text",
     "CTRL/CMD + 0  Default size",
     "ALT/OPTION+ENTER Fullscreen",
-    "Right-click top bar: A- A+",
-    "CTRL/CMD+D, ALT+NUMPAD 5 or",
-    "right-click top bar, C64:",
-    "  Instrument designer (ESC: back)",
+    "Right-click top bar: A-A+,",
+    "  VIEW (meter colors...)",
+    "CTRL+NUMPAD 7 SID Designer",
+    "  (top bar too; ESC: back)",
     NULL
   };
 
@@ -67,6 +67,7 @@ void onlinehelp(int standalone,int context)
     "MIDDLE MOUSE BUTTON Edit / jam mode",
     "ALT/OPTION+NUMPAD 1-3 MIDI INPUT 1-3",
     "SHIFT+F4 Mute current channel",
+    "CTRL+[ ] \\ Mute channel 1, 2, 3",
     "SHIFT+F5-F6 Change speed multiplier",
     "SHIFT+F7 Change hardrestart ADSR",
     "SHIFT+F8 Switch between 6581/8580 SID",
@@ -149,7 +150,6 @@ void onlinehelp(int standalone,int context)
     "CTRL+SHIFT+RET Silence test note",
     "SPC Play song from cursor / stop",
     "Wheel over a value changes it",
-    "[EDIT] Instr. page (ESC: back)",
     "MIDI keyboard plays test notes",
     "RET Go to table",
     "- + < > Select instrument",

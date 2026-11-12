@@ -97,6 +97,10 @@ extern unsigned windowedxsize;
 extern unsigned windowedysize;
 extern unsigned textsizepercent;
 extern unsigned retrogradient;
+#define DEFAULT_METERBOTTOM 0xffdcf6ffu
+#define DEFAULT_METERMIDDLE 0xff4896ecu
+#define DEFAULT_METERTOP 0xff162ca0u
+extern unsigned retrometercolors[3];
 
 #ifdef __cplusplus
 }

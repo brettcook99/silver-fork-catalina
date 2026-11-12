@@ -17,11 +17,11 @@ void gui_shutdown(void);
 #define UI_MODERN 1
 #define UI_RETRO 2
 
-// Shows the startup window that asks for the modern or the retro interface.
-// current is the choice selected at first (UI_MODERN or UI_RETRO). remember
-// is the "Don't ask again" checkbox (in: its first state, out: the user's
-// choice). Returns UI_MODERN or UI_RETRO, or UI_ASK if the window was closed
-int gui_chooseinterface(int current, int *remember);
+// Shows the startup window that asks for the modern or the retro interface
+// (only when SHIFT / OPTION is held at startup, or with -u0). current is the
+// choice selected at first (UI_MODERN or UI_RETRO). Returns UI_MODERN or
+// UI_RETRO, or UI_ASK if the window was closed
+int gui_chooseinterface(int current);
 // Switches the window between the modern and the retro interface (minimum
 // window size, background)
 void gui_setretro(int on);
@@ -47,9 +47,14 @@ void gui_togglefullscreen(void);
 // Returns 0 if the command is not a view command
 int gui_command(int cmd);
 
-// Nonzero while the instrument designer is shown. MIDI notes go to it then
+// Nonzero while the SID designer is shown. MIDI notes go to it then
 // (noteon / noteoff as midinoteon / midinoteoff)
 int gui_designeractive(void);
+// Nonzero while the SID designer is open (also under a classic dialog)
+int gui_designershown(void);
+// Opens the retro menu bar's VIEW menu (SID designer, background, meter
+// colors, About) at the mouse pointer
+void gui_openviewmenu(void);
 void gui_designermidi(int noteon, int noteoff);
 
 // Shows a message in the status bar for a few seconds

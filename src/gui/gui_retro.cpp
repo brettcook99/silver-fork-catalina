@@ -23,8 +23,10 @@ static bool mouseblocked = false;
 
 // Level meters on the main screen: a gradient bar behind each channel's
 // instrument & command digits ("04000"), rising from the bottom of the
-// pattern view with the voice's envelope, up to METERROWS rows. Dark blue at
-// the top, nearly white at the bottom
+// pattern view with the voice's envelope, up to METERROWS rows. The colors
+// at the bottom, middle and top, and how opaque they are, are set with
+// View > Meter Colors (retrometercolors); by default nearly white at the
+// bottom, dark blue at the top
 #define METERROWS 7
 #define METERCOLUMN 10                      // In each channel's 15 columns
 #define METERWIDTH 5
@@ -36,6 +38,7 @@ static float meterlevel[MAX_CHN];           // Height shown, in pixels
 static bool meterdrawn = false;             // Drawn into pixels last time
 static Uint32 metertime = 0;
 static Uint32 metercolor[METERHEIGHT];      // From the bottom up
+static unsigned metermade[3];               // retrometercolors they were made of
 
 static void makemetercolors(void);
 
@@ -199,22 +202,29 @@ static bool createtexture(SDL_Renderer *renderer)
   return true;
 }
 
-// The meter gradient: dark blue at the top, light blue in the middle, nearly
-// white at the bottom
+// The meter gradient from the bottom color through the middle one to the top
+// one, opacity too. A pixel that isn't fully opaque lets the background
+// (black, or the gradient background) show through when the texture is drawn
 static void makemetercolors(void)
 {
-  static const int stops[3][3] = { { 220, 246, 255 }, { 72, 150, 236 }, { 22, 44, 160 } };
   int i, k;
 
+  memcpy(metermade, retrometercolors, sizeof metermade);
   for (i = 0; i < METERHEIGHT; i++)
   {
     float t = (float)i / (float)(METERHEIGHT - 1) * 2.0f;
     int s = (t < 1.0f) ? 0 : 1;
     float f = t - (float)s;
-    int rgb[3];
+    Uint32 c = 0;
 
-    for (k = 0; k < 3; k++) rgb[k] = (int)(stops[s][k] + (stops[s + 1][k] - stops[s][k]) * f + 0.5f);
-    metercolor[i] = 0xff000000 | (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+    // Alpha, red, green, blue
+    for (k = 24; k >= 0; k -= 8)
+    {
+      int a = (int)((retrometercolors[s] >> k) & 0xff);
+      int b = (int)((retrometercolors[s + 1] >> k) & 0xff);
+      c |= (Uint32)((int)(a + (b - a) * f + 0.5f) & 0xff) << k;
+    }
+    metercolor[i] = c;
   }
 }
 
@@ -322,6 +332,9 @@ static void updatetexture(void)
     drawngradient = retrogradient;
   }
 
+  // New colors (View > Meter Colors) are drawn at once
+  if (memcmp(metermade, retrometercolors, sizeof metermade)) makemetercolors();
+
   updatemeterlevels();
   meters = metershown();
   if ((meters) || (meterdrawn)) invalidatemeters();
@@ -406,19 +419,15 @@ static void drawgradient(void)
   }
 }
 
-void gui::drawretroscreen(SDL_Renderer *renderer)
+// Where the text screen goes in the window (ImGui points): whole-pixel
+// character cells in the window's real pixels, centered with black margins
+static void screenrect(SDL_Renderer *renderer, ImVec2 *p0, ImVec2 *p1)
 {
   ImGuiIO &io = ImGui::GetIO();
   float sx = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
   float sy = io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
   int outw, outh, cellw, cellh, gridx, gridy;
-  ImVec2 p0, p1;
 
-  if ((!scrbuffer) || (!createtexture(renderer))) return;
-  updatetexture();
-
-  // Whole-pixel character cells in the window's real pixels, centered with
-  // black margins
   if (SDL_GetRendererOutputSize(renderer, &outw, &outh) != 0)
   {
     outw = (int)(io.DisplaySize.x * sx);
@@ -431,8 +440,45 @@ void gui::drawretroscreen(SDL_Renderer *renderer)
   if (gridy < 0) gridy = 0;
 
   // ImGui draws in points
-  p0 = ImVec2(gridx / sx, gridy / sy);
-  p1 = ImVec2((gridx + cellw * MAX_COLUMNS) / sx, (gridy + cellh * MAX_ROWS) / sy);
+  *p0 = ImVec2(gridx / sx, gridy / sy);
+  *p1 = ImVec2((gridx + cellw * MAX_COLUMNS) / sx, (gridy + cellh * MAX_ROWS) / sy);
+}
+
+void gui::retroblockmouse(void)
+{
+  mouseblocked = true;
+}
+
+int gui::drawretrotitlebar(SDL_Renderer *renderer, ImVec2 *screen0, ImVec2 *screen1)
+{
+  ImGuiIO &io = ImGui::GetIO();
+  ImVec2 p0, p1;
+  float cw, ch;
+
+  screenrect(renderer, &p0, &p1);
+  *screen0 = p0;
+  *screen1 = p1;
+  cw = (p1.x - p0.x) / MAX_COLUMNS;
+  ch = (p1.y - p0.y) / MAX_ROWS;
+  if ((!scrbuffer) || (!createtexture(renderer))) return -1;
+  updatetexture();
+  ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)(intptr_t)texture), p0, ImVec2(p1.x, p0.y + ch),
+    ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f / MAX_ROWS));
+
+  if ((!ImGui::IsMousePosValid()) || (io.MousePos.x < p0.x) || (io.MousePos.x >= p1.x) || (io.MousePos.y < p0.y) || (io.MousePos.y >= p0.y + ch))
+    return -1;
+  return (int)((io.MousePos.x - p0.x) / cw);
+}
+
+void gui::drawretroscreen(SDL_Renderer *renderer)
+{
+  ImGuiIO &io = ImGui::GetIO();
+  ImVec2 p0, p1;
+
+  if ((!scrbuffer) || (!createtexture(renderer))) return;
+  updatetexture();
+
+  screenrect(renderer, &p0, &p1);
   if (retrogradient) drawgradient();
   ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)(intptr_t)texture), p0, p1);
 

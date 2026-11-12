@@ -96,7 +96,8 @@ unsigned interpolate = 3;
 unsigned residdelay = 0;
 unsigned hardsidbufinteractive = 20;
 unsigned hardsidbufplayback = 400;
-unsigned uimode = UI_ASK;  // Interface: ask at startup, modern or retro
+unsigned uimode = UI_RETRO;  // Interface in use: modern or retro
+static int uiarg = -1;       // -u on the command line (-1 = not given)
 float basepitch = 0.0f;
 float equaldivisionsperoctave = 12.0f;
 int tuningcount = 0;
@@ -119,6 +120,8 @@ static char configfolder[FOLDER_KINDS][MAX_PATHNAME];
 
 extern char *notename[];
 char *programname = PROGRAMNAME;
+// For the macOS About panel (gmacmenu.m)
+const char abouttext[] = ABOUTTEXT;
 char specialnotenames[186];
 char scalatuningfilepath[MAX_PATHNAME];
 char tuningname[64];
@@ -159,7 +162,7 @@ char* usage[] = {
 	"-wxx Set initial window size (1 to 4 = 1 to 4 times 800x518). The window can be resized freely",
 	"-mxx MIDI keyboard input (0 = off, 1 = on) DEFAULT=on",
 	"-fxx Follow playback in the pattern editor (0 = off, 1 = on) DEFAULT=on",
-	"-uxx Interface (0 = ask at startup, 1 = modern, 2 = retro) DEFAULT=ask",
+	"-uxx Interface (0 = ask at startup, 1 = modern, 2 = retro) DEFAULT=retro",
 	"-N   Use NTSC timing",
 	"-P   Use PAL timing (DEFAULT)",
 	"-W   Write sound output to a file SIDAUDIO.RAW",
@@ -279,6 +282,8 @@ int main(int argc, char **argv)
 		for (c = 0; c < FOLDER_KINDS; c++)
 			getpathparam(configfile, configfolder[c]);
 		getparam(configfile, &retrogradient);
+		for (c = 0; c < 3; c++)
+			getparam(configfile, &retrometercolors[c]);
 		fclose(configfile);
 
 		// A config file saved with the old default sound buffer gets the
@@ -421,7 +426,7 @@ int main(int argc, char **argv)
 				break;
 
 			case 'u':
-				sscanf(&argv[c][2], "%u", &uimode);
+				sscanf(&argv[c][2], "%d", &uiarg);
 				break;
 
 			case 'C':
@@ -483,7 +488,10 @@ int main(int argc, char **argv)
 	if (keypreset > 2) keypreset = 0;
 	if (midiinput > 1) midiinput = 1;
 	if (followmode) followmode = 1;
-	if (uimode > UI_RETRO) uimode = UI_ASK;
+	// The retro interface, always: the one used last (in the config file) is
+	// not chosen again. -u (or SHIFT / OPTION held at startup) chooses
+	if ((uiarg >= UI_ASK) && (uiarg <= UI_RETRO)) uimode = uiarg;
+	else uimode = UI_RETRO;
 	if (retrogradient) retrogradient = 1;
 
 	// removing 'usefinevib' since it's not actually being used and is
@@ -639,12 +647,13 @@ int main(int argc, char **argv)
 			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n"
 			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n"
 			";Text size in percent (100 = default)\n%d\n\n"
-			";Interface (0 = ask at startup, 1 = modern, 2 = retro)\n%d\n\n"
+			";Interface used last (1 = modern, 2 = retro; the program always starts retro)\n%d\n\n"
 			";Folder of the song file dialogs (0 = none)\n%s\n\n"
 			";Folder of the instrument file dialogs (0 = none)\n%s\n\n"
 			";Folder of the import dialogs: SID, MIDI, chipsynth (0 = none)\n%s\n\n"
 			";Folder of the export dialog (0 = none)\n%s\n\n"
-			";Retro screen background (0 = black, 1 = gradient)\n%d\n\n",
+			";Retro screen background (0 = black, 1 = gradient)\n%d\n\n"
+			";Retro level meter colors at the bottom, middle and top ($AARRGGBB, AA = opacity)\n$%08X\n$%08X\n$%08X\n\n",
 			b,
 			mr,
 			hardsid,
@@ -697,7 +706,10 @@ int main(int argc, char **argv)
 			instrpath[0] ? instrpath : "0",
 			importpath[0] ? importpath : "0",
 			packedpath[0] ? packedpath : "0",
-			retrogradient);
+			retrogradient,
+			retrometercolors[0],
+			retrometercolors[1],
+			retrometercolors[2]);
 		fclose(configfile);
 	}
 
@@ -770,19 +782,19 @@ static int startupmodifierheld(void)
 #endif
 }
 
-// Asks for the modern or the retro interface unless it has been chosen for
-// good, and sets it up. Returns 0 if the window was closed instead
+// Sets up the interface: the retro one, unless -u chose another. With -u0,
+// or SHIFT / OPTION held while the program starts, the user picks one for
+// this time. Returns 0 if the window was closed instead
 static int chooseinterface(void)
 {
 	int choice = uimode;
 
 	if ((choice == UI_ASK) || (startupmodifierheld()))
 	{
-		int remember = (uimode != UI_ASK);
-		choice = gui_chooseinterface(uimode != UI_ASK ? uimode : UI_MODERN, &remember);
+		choice = gui_chooseinterface(choice == UI_MODERN ? UI_MODERN : UI_RETRO);
 		if (choice == UI_ASK) return 0;
-		uimode = remember ? choice : UI_ASK;
 	}
+	uimode = choice;
 	retromode = (choice == UI_RETRO);
 	gui_setretro(retromode);
 	return 1;
@@ -976,25 +988,6 @@ static int spacecommand(void)
 	return 1;
 }
 
-// Keys on the retro interface's instrument page: ESC goes back, F1-F4 play
-// and stop
-static void retropagecommands(void)
-{
-	switch (rawkey)
-	{
-	case KEY_ESC:
-		retro_closepage();
-		break;
-
-	case KEY_F1:
-	case KEY_F2:
-	case KEY_F3:
-	case KEY_F4:
-		generalcommands();
-		break;
-	}
-}
-
 void docommand(void)
 {
 	// Where a MIDI note goes (MIDI chord input)
@@ -1008,16 +1001,6 @@ void docommand(void)
 
 	// SPACE plays / stops in every editor
 	if (spacecommand()) return;
-
-	// The retro interface's instrument page has only its own keys and mouse
-	// controls. MIDI notes play the instrument there
-	if ((retromode) && (retropage != RETROPAGE_MAIN))
-	{
-		retro_mousecommands();
-		retropagecommands();
-		midicommands();
-		return;
-	}
 
 	// Mouse operation is handled by the GUI panels (gui/), in the retro
 	// interface by the classic main screen
@@ -1947,11 +1930,6 @@ void runcommand(int cmd, const char *path)
 			onlinehelp(0, 0);
 		else
 			gui_command(cmd);
-		break;
-
-	case GTCMD_ASKINTERFACE:
-		uimode = UI_ASK;
-		gui_message("The choice of modern or retro interface will be shown at the next start");
 		break;
 
 	default:

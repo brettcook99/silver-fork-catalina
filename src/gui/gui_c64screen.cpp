@@ -1,4 +1,4 @@
-// The instrument designer's C64 style text screen (see gui_c64.h). The
+// The SID designer's C64 style text screen (see gui_c64.h). The
 // characters are drawn into a texture like the retro interface's screen:
 // only the characters that changed are drawn again. The texture is made an
 // integer number of times larger than the 640x400 screen and scaled from
@@ -12,7 +12,13 @@
 namespace c64
 {
   // The C64 colors (Pepto's PAL palette)
-  static const Uint32 palette[16] =
+  static const Uint32 c64palette[16] =
+  {
+    0xff000000, 0xffffffff, 0xff68372b, 0xff70a4b2, 0xff6f3d86, 0xff588d43, 0xff352879, 0xffb8c76f,
+    0xff6f4f25, 0xff433900, 0xff9a6759, 0xff444444, 0xff6c6c6c, 0xff9ad284, 0xff6c5eb5, 0xff959595
+  };
+  // The colors in use (setcolor() may change some)
+  static Uint32 palette[16] =
   {
     0xff000000, 0xffffffff, 0xff68372b, 0xff70a4b2, 0xff6f3d86, 0xff588d43, 0xff352879, 0xffb8c76f,
     0xff6f4f25, 0xff433900, 0xff9a6759, 0xff444444, 0xff6c6c6c, 0xff9ad284, 0xff6c5eb5, 0xff959595
@@ -27,7 +33,6 @@ namespace c64
   static unsigned short drawn[ROWS][COLS];
   static int screenbg = BLUE;
   static int screenfg = LIGHTBLUE;
-  static int bordercolor = LIGHTBLUE;
 
   static SDL_Texture *texture = NULL;
   static SDL_Renderer *texturerenderer = NULL;
@@ -149,9 +154,35 @@ void c64::clear(int bg, int fg)
   }
 }
 
-void c64::setborder(int c)
+void c64::setcolor(int index, int rgb)
 {
-  bordercolor = c & 15;
+  Uint32 c;
+
+  index &= 15;
+  c = (rgb < 0) ? c64palette[index] : (0xff000000u | (Uint32)(rgb & 0xffffff));
+  if (palette[index] == c) return;
+  palette[index] = c;
+  // Everything is drawn again with the new color
+  memset(drawn, 0xff, sizeof drawn);
+}
+
+ImU32 c64::colorof(int index)
+{
+  Uint32 c = palette[index & 15];
+  return IM_COL32((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff, 255);
+}
+
+ImVec2 c64::screenmin(void)
+{
+  return screenpos;
+}
+
+ImVec2 c64::screenmax(void)
+{
+  ImGuiIO &io = ImGui::GetIO();
+  float sx = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
+  float sy = io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
+  return ImVec2(screenpos.x + cellsize * COLS, screenpos.y + cellsize * sx / sy * ROWS);
 }
 
 int c64::background(void)
@@ -395,32 +426,28 @@ static void updatetexture(void)
   }
 }
 
-void c64::layout(SDL_Renderer *renderer)
+void c64::layout(SDL_Renderer *renderer, ImVec2 a, ImVec2 b)
 {
   ImGuiIO &io = ImGui::GetIO();
   float sx = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
   float sy = io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
-  int outw, outh;
+  float areaw = (b.x - a.x) * sx;
+  float areah = (b.y - a.y) * sy;
   float scale, pixel;
   int sw = COLS * CHARSIZE;
   int sh = ROWS * CHARSIZE;
-  // Smallest border around the screen, in C64 pixels
-  const float minborderx = 24.0f;
-  const float minbordery = 20.0f;
 
-  if ((!renderer) || (SDL_GetRendererOutputSize(renderer, &outw, &outh) != 0))
-  {
-    outw = (int)(io.DisplaySize.x * sx);
-    outh = (int)(io.DisplaySize.y * sy);
-  }
-  if ((outw < 1) || (outh < 1)) return;
+  (void)renderer;
+  if ((areaw < 1.0f) || (areah < 1.0f)) return;
 
-  scale = (float)outw / (sw + minborderx * 2.0f);
-  if ((float)outh / (sh + minbordery * 2.0f) < scale) scale = (float)outh / (sh + minbordery * 2.0f);
+  // In the area's real pixels
+  scale = areaw / sw;
+  if (areah / sh < scale) scale = areah / sh;
 
-  // Whole pixels when that wastes little room, otherwise a smooth scale
+  // Whole pixels when that wastes hardly any room, otherwise a smooth scale
+  // (from a texture made larger first, so the characters stay crisp)
   pixel = floorf(scale);
-  if ((pixel >= 1.0f) && (pixel >= scale * 0.86f))
+  if ((pixel >= 1.0f) && (pixel >= scale * 0.97f))
   {
     scale = pixel;
     sharp = true;
@@ -428,7 +455,7 @@ void c64::layout(SDL_Renderer *renderer)
   else sharp = (scale == floorf(scale));
 
   cellsize = scale * CHARSIZE / sx;
-  screenpos = ImVec2(floorf((outw - sw * scale) * 0.5f) / sx, floorf((outh - sh * scale) * 0.5f) / sy);
+  screenpos = ImVec2(floorf((a.x * sx + (areaw - sw * scale) * 0.5f)) / sx, floorf((a.y * sy + (areah - sh * scale) * 0.5f)) / sy);
 
   if (cellsize > 0.0f)
   {
@@ -444,12 +471,8 @@ void c64::present(SDL_Renderer *renderer)
   ImDrawList *dl = ImGui::GetBackgroundDrawList();
   float sx = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
   float sy = io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
-  Uint32 b = palette[bordercolor];
   float cellh = cellsize * sx / sy;
   int scale;
-
-  // The border fills the window
-  dl->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32((b >> 16) & 0xff, (b >> 8) & 0xff, b & 0xff, 255));
 
   // The texture: as many times larger as the screen is drawn (up to 4x)
   scale = (int)ceilf(cellsize * sx / CHARSIZE - 0.001f);

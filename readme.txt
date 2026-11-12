@@ -228,33 +228,39 @@ model 8580 and to load "dojo.sng" on startup.
 -Xxx Set window type (0 = window, 1 = fullscreen) DEFAULT=window
 -Yxx Path to a Scala tuning file .scl
 -Zxx Set random reSID write delay in cycles (0 = off) DEFAULT=off
--uxx Interface (0 = ask at startup, 1 = modern, 2 = retro) DEFAULT=ask
+-uxx Interface (0 = ask at startup, 1 = modern, 2 = retro) DEFAULT=retro
 -N   Use NTSC timing
 -P   Use PAL timing (DEFAULT)
 -W   Write emulated sound output to a file SIDAUDIO.RAW
 -?   Show command line options
 -??  Standalone online help window
 
-GoatTracker Ultimate asks at startup whether to use the modern interface
-(panels, arrangement timeline, mouse-friendly editors) or the retro one (the
-classic 100x37 text screen described in this file, in its original font and
-colors). Tick "Don't ask again" to keep the choice. Holding SHIFT (or OPTION
-on macOS) while the program starts, View > Ask for Interface at Next Launch,
-or the -u option bring the choice back.
+GoatTracker Ultimate starts with the retro interface (the classic 100x37
+text screen described in this file, in its original font and colors).
+Holding SHIFT (or OPTION on macOS) while the program starts, or -u0, shows a
+choice between it and the modern interface (panels, arrangement timeline,
+mouse-friendly editors) for that time; -u1 starts the modern one.
 
-The instrument designer is a full-window editor that looks like a C64 screen
-and is laid out like Plogue chipsynth C64's patch page. CTRL+D (CMD+D on
-macOS) or ALT/OPTION+numpad 5 open it from anywhere, also the rainbow button
-in the control bar, View > Instrument Designer and, in the retro interface,
-C64 in the right-click menu bar. ESC or the same keys return to the tracker.
-A patch has up to three oscillators, the instruments named NAME:1, NAME:2 and
-NAME:3, played together on SID voices 1-3. The PATCH page has the waveforms,
-sync / ring / test, pulse width, envelope, tuning, vibrato and the filter; the
-WAVE, PULSE and FILTER pages show the instrument's table rows as steps with
-graphs, presets and sweep makers; the EMU page has the chip settings and the
-SID registers. Note keys, a MIDI keyboard and the on-screen keyboard play the
-patch. A C64 character ROM named chargen in the settings folder replaces the
-built-in characters.
+The SID Designer is a full-window editor for instruments: under the
+tracker's title bar, a C64 screen in a frame like the C64's nameplate, laid
+out like Plogue chipsynth C64's patch page. CTRL+numpad 7 opens it from
+anywhere and returns to the tracker, as do "SID Designer" / "Tracker" at the
+right end of the title bar, CTRL+D (CMD+D on macOS), ALT/OPTION+numpad 5,
+the rainbow button in the modern control bar and View > SID Designer; ESC
+returns too. The title bar's settings can be clicked there as on the
+tracker. A patch has up to three oscillators, the instruments named NAME:1,
+NAME:2 and NAME:3, played together on SID voices 1-3. The PATCH page has the
+waveforms, sync / ring / test, pulse width, envelope, tuning, vibrato and
+the filter; the WAVE, PULSE and FILTER pages show the instrument's table
+rows as steps with graphs, presets and sweep makers; the EMU page has the
+chip settings and the SID registers. Note keys and a MIDI keyboard play the
+patch. CLEAR makes the patch an init patch: one oscillator with a plain
+sawtooth and full sustain (the other oscillators' instruments are emptied;
+CTRL/CMD+Z undoes it). A C64 character ROM named chargen in the settings
+folder replaces the built-in characters.
+
+CTRL+[, CTRL+] and CTRL+\ (CMD too on macOS) mute or unmute channel 1, 2 and
+3, from any editor.
 
 The file dialogs start in the folder used last time for their kind of file,
 also after a restart: one folder for songs (open, save, merge), one for
@@ -660,19 +666,21 @@ the start of that position. Each change of a value can be undone.
 CTRL+SHIFT+wheel (CMD+SHIFT+wheel on macOS too) selects the instrument, with
 the pointer anywhere, in both interfaces.
 
-[EDIT] right of the instrument number and name on the retro screen opens the
-instrument page, where the new instrument editor will be. For now it is
-blank; [BACK] or ESC returns. SPACE, F1-F4 and the MIDI keyboard work there.
-
 Level meters behind each channel's instrument and command columns, at the
 bottom of the patterns, show how loud the channel's voice is (its envelope):
-up to 7 rows high, dark blue at the top, nearly white at the bottom.
+up to 7 rows high, by default dark blue at the top and nearly white at the
+bottom. View > Meter Colors picks the colors at the bottom, in the middle and
+at the top, each with its opacity (how much of the background shows
+through); they are kept in the config file.
 
 View > Gradient Background (macOS menu bar) switches the retro screen's black
 background to a gradient: black at the top, dark navy (#0B0E1B) at the
-bottom. On Windows and Linux, where the retro screen has no menu bar, the
-same item is in the View menu of the modern interface. The choice is kept in
-the config file.
+bottom. The choice is kept in the config file.
+
+On Windows and Linux, where the retro screen has no menu bar, VIEW at the
+right end of the menu bar (hold the right button on the title bar) has the
+SID Designer, Gradient Background, Meter Colors and About; the modern
+interface's View menu has them too.
 
 
 3. Song data

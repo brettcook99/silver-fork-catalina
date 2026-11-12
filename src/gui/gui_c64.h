@@ -1,7 +1,8 @@
-// A Commodore 64 style text screen for the instrument designer: 80x50
-// characters of 8x8 pixels in the C64's 16 colors, with a border around it.
-// Characters are C64 screen codes (see c64font.h); 128-255 are reverse video.
-// Unlike a real C64 each character may also have its own background color.
+// A Commodore 64 style text screen for the SID designer: 80x40 characters
+// of 8x8 pixels in 16 colors (the C64's; some can be changed to suit the
+// designer's frame). Characters are C64 screen codes (see c64font.h);
+// 128-255 are reverse video. Unlike a real C64 each character may also have
+// its own background color.
 
 #ifndef GUI_C64_H
 #define GUI_C64_H
@@ -10,7 +11,7 @@
 
 namespace c64
 {
-  enum { COLS = 80, ROWS = 50, CHARSIZE = 8 };
+  enum { COLS = 80, ROWS = 40, CHARSIZE = 8 };
 
   enum Color
   {
@@ -79,8 +80,10 @@ namespace c64
 
   // Starts a new screen: everything blank in background color bg, text in fg
   void clear(int bg, int fg);
-  void setborder(int color);
   int background(void);
+  // Changes one of the 16 colors (0xRRGGBB); -1 = the C64's color again
+  void setcolor(int index, int rgb);
+  ImU32 colorof(int index);
 
   // Puts one character. bg -1 = the screen background
   void put(int x, int y, int code, int fg, int bg = -1);
@@ -102,11 +105,15 @@ namespace c64
   void vbar(int x, int y, int w, int h, float frac, int fg, int track = -1);
   void hbar(int x, int y, int w, float frac, int fg, int track = -1);
 
-  // Works out the size and position of the screen in the window and the
-  // mouse position on it. Call before drawing a frame
-  void layout(SDL_Renderer *renderer);
-  // Draws the screen and the border (behind all ImGui windows)
+  // Works out the size and position of the screen, as large as fits into
+  // the area a-b (ImGui points, centered), and the mouse position on it.
+  // Call before drawing a frame
+  void layout(SDL_Renderer *renderer, ImVec2 a, ImVec2 b);
+  // Draws the screen (behind all ImGui windows)
   void present(SDL_Renderer *renderer);
+  // Where the screen is (ImGui points)
+  ImVec2 screenmin(void);
+  ImVec2 screenmax(void);
   void freescreen(void);
 
   // The mouse position in characters (with fractions), and whether it is on

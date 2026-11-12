@@ -53,6 +53,9 @@ unsigned windowedysize = 0;       // 0 = automatic
 unsigned textsizepercent = 100;   // Text size (CTRL/CMD + and -)
 unsigned retrogradient = 0;       // Retro screen background: 0 = black,
                                   // 1 = gradient (View menu)
+// Retro level meter colors at the bottom, middle and top, 0xAARRGGBB (AA =
+// opacity: 00 clear, FF solid). View > Meter Colors
+unsigned retrometercolors[3] = { DEFAULT_METERBOTTOM, DEFAULT_METERMIDDLE, DEFAULT_METERTOP };
 
 /*
  * Key event queue

@@ -227,6 +227,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>2.82</string>
     <key>CFBundleVersion</key>
     <string>2.82</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>An Ultimate rework by Scott Lee &amp; Brett Cook</string>
     <key>LSMinimumSystemVersion</key>
     <string>$MACOS_MIN</string>
     <key>NSHighResolutionCapable</key>

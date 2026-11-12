@@ -10,12 +10,9 @@ void retro_printstatus(void);
 // Handles the mouse on the main screen (mousex/mousey/mouseb/mousewheel)
 void retro_mousecommands(void);
 
-// The pages: the main screen, and the instrument page ([EDIT] right of the
-// instrument; blank for now)
-#define RETROPAGE_MAIN 0
-#define RETROPAGE_INSTRUMENT 1
-extern int retropage;
-void retro_openinstrpage(void);
-void retro_closepage(void);
+// The title bar (top row), also shown on the SID designer, and a left click
+// on it at column x
+void retro_printtitlebar(void);
+void retro_titlebarclick(int x);
 
 #endif

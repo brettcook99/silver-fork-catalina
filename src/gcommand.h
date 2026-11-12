@@ -86,9 +86,11 @@ enum
 
   // Added later: kept at the end so that the numbers above stay the same
   GTCMD_OPENFILEPLAY,     // Open the file given as path and play it (Finder, command line)
-  GTCMD_ASKINTERFACE,     // Show the modern / retro choice again at the next start
+  GTCMD_ASKINTERFACE,     // (No longer used: the program always starts retro)
   GTCMD_DESIGNER,         // Switch between the tracker and the instrument designer
   GTCMD_RETROGRADIENT,    // Retro screen background: black / gradient
+  GTCMD_METERCOLORS,      // Retro level meter colors dialog
+  GTCMD_ABOUT,            // About GoatTracker Ultimate (Windows / Linux; macOS has its own)
 
   GTCMD_COUNT
 };

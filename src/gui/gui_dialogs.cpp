@@ -536,8 +536,215 @@ static void sidimportdialog(void)
   ImGui::EndPopup();
 }
 
+/*
+ * VIEW menu of the retro menu bar, About, level meter colors
+ */
+
+static bool wantviewmenu = false;
+static bool wantabout = false;
+static bool wantmetercolors = false;
+
+extern "C" void gui_openviewmenu(void)
+{
+  wantviewmenu = true;
+}
+
+void gui::openabout(void)
+{
+  wantabout = true;
+}
+
+void gui::openmetercolors(void)
+{
+  wantmetercolors = true;
+}
+
+// The retro screen has no menu bar on Windows / Linux: VIEW in the menu bar
+// shown while the right button is held on the title bar opens this
+static void viewmenu(void)
+{
+  if (wantviewmenu)
+  {
+    ImGui::OpenPopup("##viewmenu");
+    wantviewmenu = false;
+  }
+  if (ImGui::BeginPopup("##viewmenu"))
+  {
+    if (ImGui::MenuItem(showdesigner ? "Tracker" : "SID Designer", "CTRL+NUMPAD 7")) cmd_post(GTCMD_DESIGNER);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Gradient Background", NULL, retrogradient != 0)) cmd_post(GTCMD_RETROGRADIENT);
+    if (ImGui::MenuItem("Meter Colors...")) cmd_post(GTCMD_METERCOLORS);
+    ImGui::Separator();
+    if (ImGui::MenuItem("About GoatTracker Ultimate")) cmd_post(GTCMD_ABOUT);
+    ImGui::EndPopup();
+  }
+}
+
+static void aboutdialog(void)
+{
+  if (wantabout)
+  {
+    ImGui::OpenPopup("##about");
+    wantabout = false;
+  }
+  if (beginmodal("##about", ImGui::GetFontSize() * 24.0f))
+  {
+    const char *labels[] = { "OK" };
+    title(programname);
+    ImGui::TextWrapped("%s", ABOUTTEXT);
+    ImGui::Spacing();
+    body("Based on GoatTracker 2 by Lasse \xc3\x96\xc3\xb6rni and contributors. reSID by Dag Lem, reSID-fp by Antti S. Lankila.");
+    if (buttons(labels, 1, 0) >= 0) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+}
+
+// Level meter colors: bottom, middle and top of the gradient, each with its
+// opacity. Changes show at once; Cancel puts the old colors back
+static ImVec4 metertovec(unsigned argb)
+{
+  return ImVec4(((argb >> 16) & 0xff) / 255.0f, ((argb >> 8) & 0xff) / 255.0f, (argb & 0xff) / 255.0f, ((argb >> 24) & 0xff) / 255.0f);
+}
+
+static unsigned vectometer(const ImVec4 &v)
+{
+  unsigned r = (unsigned)(v.x * 255.0f + 0.5f);
+  unsigned g = (unsigned)(v.y * 255.0f + 0.5f);
+  unsigned b = (unsigned)(v.z * 255.0f + 0.5f);
+  unsigned a = (unsigned)(v.w * 255.0f + 0.5f);
+  return (a << 24) | (r << 16) | (g << 8) | b;
+}
+
+// A sample of the meter: the gradient over a checkerboard (where it shows
+// through) with pattern digits on top, as on the retro screen
+static void meterpreview(ImVec2 size)
+{
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  ImVec2 a = ImGui::GetCursorScreenPos();
+  ImVec2 b(a.x + size.x, a.y + size.y);
+  float cell = size.x / 6.0f;
+  int x, y, i;
+  const int bands = 24;
+
+  ImGui::Dummy(size);
+  dl->PushClipRect(a, b, true);
+  for (y = 0; y * cell < size.y; y++)
+  {
+    for (x = 0; x < 6; x++)
+    {
+      ImU32 c = ((x + y) & 1) ? IM_COL32(44, 44, 52, 255) : IM_COL32(0, 0, 0, 255);
+      dl->AddRectFilled(ImVec2(a.x + x * cell, a.y + y * cell), ImVec2(a.x + (x + 1) * cell, a.y + (y + 1) * cell), c);
+    }
+  }
+  // Bottom (0) to top (1), in bands
+  for (i = 0; i < bands; i++)
+  {
+    ImVec4 c0, c1;
+    float t0 = (float)i / bands;
+    float t1 = (float)(i + 1) / bands;
+    float y0 = b.y - t0 * size.y;
+    float y1 = b.y - t1 * size.y;
+    for (int k = 0; k < 2; k++)
+    {
+      float t = k ? t1 : t0;
+      int s = (t < 0.5f) ? 0 : 1;
+      float f = t * 2.0f - s;
+      ImVec4 p = metertovec(retrometercolors[s]);
+      ImVec4 q = metertovec(retrometercolors[s + 1]);
+      ImVec4 v(p.x + (q.x - p.x) * f, p.y + (q.y - p.y) * f, p.z + (q.z - p.z) * f, p.w + (q.w - p.w) * f);
+      if (k) c1 = v;
+      else c0 = v;
+    }
+    dl->AddRectFilledMultiColor(ImVec2(a.x, y1), ImVec2(b.x, y0), ImGui::ColorConvertFloat4ToU32(c1), ImGui::ColorConvertFloat4ToU32(c1),
+      ImGui::ColorConvertFloat4ToU32(c0), ImGui::ColorConvertFloat4ToU32(c0));
+  }
+  for (y = 0; y < 7; y++)
+  {
+    float lh = size.y / 7.0f;
+    dl->AddText(fontmono, lh * 0.8f, ImVec2(a.x + cell * 0.4f, a.y + y * lh + lh * 0.1f), retrocolor(CNORMAL), "05000");
+  }
+  dl->PopClipRect();
+  dl->AddRect(a, b, theme.border);
+}
+
+static void metercolorsdialog(void)
+{
+  static unsigned saved[3];
+  static int editing = 0;
+  static const char *const names[3] = { "Bottom", "Middle", "Top" };
+
+  if (wantmetercolors)
+  {
+    ImGui::OpenPopup("##metercolors");
+    wantmetercolors = false;
+    memcpy(saved, retrometercolors, sizeof saved);
+    editing = 0;
+  }
+  if (beginmodal("##metercolors", ImGui::GetFontSize() * 30.0f))
+  {
+    const char *labels[] = { "OK", "Cancel", "Defaults" };
+    float fs = ImGui::GetFontSize();
+    ImVec4 col = metertovec(retrometercolors[editing]);
+    int result;
+    int c;
+
+    title("Level meter colors");
+    body("The meters of the retro screen rise behind each channel's instrument and command digits. Pick the color at "
+      "the bottom, in the middle and at the top; the A slider (the bar right of the colors) sets how much the background shows through.");
+    ImGui::Spacing();
+
+    // Which color: a swatch button for each
+    for (c = 0; c < 3; c++)
+    {
+      ImVec4 v = metertovec(retrometercolors[c]);
+      if (c) ImGui::SameLine();
+      ImGui::PushID(c);
+      if (ImGui::ColorButton("##swatch", v, ImGuiColorEditFlags_AlphaPreviewHalf, ImVec2(fs * 1.6f, fs * 1.6f))) editing = c;
+      ImGui::SameLine(0.0f, 4.0f);
+      ImGui::SetCursorPosY(ImGui::GetCursorPosY() + fs * 0.2f);
+      if (ImGui::Selectable(names[c], editing == c, 0, ImVec2(fs * 4.0f, 0.0f))) editing = c;
+      ImGui::PopID();
+    }
+    ImGui::Spacing();
+
+    // The picker: saturation / value square, hue bar, opacity bar, values
+    ImGui::PushItemWidth(fs * 15.0f);
+    if (ImGui::ColorPicker4("##picker", &col.x, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf |
+      ImGuiColorEditFlags_PickerHueBar | ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_Uint8 |
+      ImGuiColorEditFlags_NoSidePreview))
+      retrometercolors[editing] = vectometer(col);
+    ImGui::PopItemWidth();
+    ImGui::SameLine(0.0f, fs * 1.2f);
+    {
+      int alpha = (int)((retrometercolors[editing] >> 24) & 0xff);
+      ImGui::BeginGroup();
+      meterpreview(ImVec2(fs * 3.6f, fs * 7.0f));
+      ImGui::Text("Opacity %d%%", (alpha * 100 + 127) / 255);
+      ImGui::EndGroup();
+    }
+
+    result = buttons(labels, 3, 1);
+    if (result == 0) ImGui::CloseCurrentPopup();
+    if (result == 1)
+    {
+      memcpy(retrometercolors, saved, sizeof saved);
+      ImGui::CloseCurrentPopup();
+    }
+    if (result == 2)
+    {
+      retrometercolors[0] = DEFAULT_METERBOTTOM;
+      retrometercolors[1] = DEFAULT_METERMIDDLE;
+      retrometercolors[2] = DEFAULT_METERTOP;
+    }
+    ImGui::EndPopup();
+  }
+}
+
 void gui::drawdialogs(void)
 {
+  viewmenu();
+  aboutdialog();
+  metercolorsdialog();
   exportdialog();
   sidimportdialog();
   // One at a time: the first one wanted opens
@@ -653,7 +860,7 @@ static void previewretro(ImDrawList *dl, ImVec2 a, ImVec2 b)
   dl->PopClipRect();
 }
 
-int gui::drawchooser(int *selected, bool *remember)
+int gui::drawchooser(int *selected)
 {
   ImGuiViewport *vp = ImGui::GetMainViewport();
   ImDrawList *dl;
@@ -745,18 +952,13 @@ int gui::drawchooser(int *selected, bool *remember)
     ImGui::SetCursorPos(ImVec2(left, y + cardh + fs * 1.2f));
   }
 
-  // Don't ask again
-  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-  ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
-  ImGui::Checkbox("Don't ask again", remember);
-  ImGui::PopStyleColor();
-  ImGui::PopStyleVar();
+  // The choice is for this time only
   ImGui::SetCursorPosX(left);
   ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
 #ifdef __APPLE__
-  ImGui::TextUnformatted("Hold Shift or Option while GoatTracker Ultimate starts to choose again.");
+  ImGui::TextUnformatted("For this time only: GoatTracker Ultimate starts retro unless Shift or Option is held.");
 #else
-  ImGui::TextUnformatted("Hold Shift while GoatTracker Ultimate starts to choose again.");
+  ImGui::TextUnformatted("For this time only: GoatTracker Ultimate starts retro unless Shift is held.");
 #endif
   ImGui::PopStyleColor();
 

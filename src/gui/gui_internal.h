@@ -126,6 +126,14 @@ namespace gui
   void retrofitcell(int maxx, int maxy, int *w, int *h);
   // Color 0-15 of the classic palette
   ImU32 retrocolor(int index);
+  // Draws only the text screen's top row (the title bar) where it is on the
+  // retro screen, for the SID designer. screen0-screen1 get the whole retro
+  // screen's place (ImGui points). Returns the column under the mouse
+  // pointer, -1 if it is not on the title bar
+  int drawretrotitlebar(SDL_Renderer *renderer, ImVec2 *screen0, ImVec2 *screen1);
+  // The retro screen gets no mouse buttons until they all have been
+  // released (a click that closed the SID designer doesn't click there too)
+  void retroblockmouse(void);
 
   // The instrument designer (gui_designer.cpp), a full-window mode that looks
   // like a C64 screen. designerwanted() tells whether it is to be drawn this
@@ -139,13 +147,17 @@ namespace gui
   void designerkey(const SDL_KeyboardEvent &k, bool down);
   void designertext(int ch);
 
+  // About GoatTracker Ultimate, the level meter colors dialog
+  void openabout(void);
+  void openmetercolors(void);
+
   // The settings folder (ends with a path separator)
   const char *configdirectory(void);
 
   // The startup window asking for the modern or the retro interface.
-  // selected is the highlighted choice, remember the "Don't ask again"
-  // checkbox. Returns UI_MODERN or UI_RETRO when chosen, UI_ASK until then
-  int drawchooser(int *selected, bool *remember);
+  // selected is the highlighted choice. Returns UI_MODERN or UI_RETRO when
+  // chosen, UI_ASK until then
+  int drawchooser(int *selected);
 
   // Panel visibility
   extern bool showtracks, showpattern, showlibrary, showinspector, showtables, showsong, showhelp;

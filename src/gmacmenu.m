@@ -13,6 +13,9 @@
 // Retro screen background (gconsole.c): 0 = black, 1 = gradient
 extern unsigned retrogradient;
 
+// The credit line of the About panel (ABOUTTEXT in goattrk2.h)
+extern const char abouttext[];
+
 // Recent files list, kept by the GUI
 extern int gui_recentfilecount(void);
 extern const char *gui_recentfile(int index);
@@ -39,6 +42,7 @@ static int designerstate = 0;
 @interface GTMenuTarget : NSObject <NSMenuDelegate>
 - (void)itemSelected:(id)sender;
 - (void)recentSelected:(id)sender;
+- (void)aboutSelected:(id)sender;
 @end
 
 @implementation GTMenuTarget
@@ -57,6 +61,24 @@ static int designerstate = 0;
     return;
 
   cmd_post((int)[sender tag]);
+}
+
+// The standard About panel with the credit line under the version
+- (void)aboutSelected:(id)sender
+{
+  NSString *credit = [NSString stringWithUTF8String:abouttext];
+  NSString *basedon = @"Based on GoatTracker 2 by Lasse Öörni and contributors.\nreSID by Dag Lem, reSID-fp by Antti S. Lankila.";
+  NSMutableParagraphStyle *center = [[[NSMutableParagraphStyle alloc] init] autorelease];
+  NSDictionary *attrs;
+  NSAttributedString *credits;
+
+  (void)sender;
+  [center setAlignment:NSTextAlignmentCenter];
+  attrs = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]], NSFontAttributeName,
+    center, NSParagraphStyleAttributeName, [NSColor secondaryLabelColor], NSForegroundColorAttributeName, nil];
+  credits = [[[NSAttributedString alloc] initWithString:basedon attributes:attrs] autorelease];
+  [NSApp orderFrontStandardAboutPanelWithOptions:[NSDictionary dictionaryWithObjectsAndKeys:
+    credit, @"Copyright", credits, @"Credits", nil]];
 }
 
 - (void)recentSelected:(id)sender
@@ -85,8 +107,8 @@ static int designerstate = 0;
   if ((retrostate) && ((tag == GTCMD_TOGGLELIBRARY) || (tag == GTCMD_TOGGLEINSPECTOR) || (tag == GTCMD_TOGGLETRACKS) ||
       (tag == GTCMD_TOGGLETABLES) || (tag == GTCMD_TOGGLESONG) || (tag == GTCMD_RESETLAYOUT)))
     return NO;
-  // The background gradient is the retro screen's
-  if ((!retrostate) && (tag == GTCMD_RETROGRADIENT))
+  // The background gradient and the level meters are the retro screen's
+  if ((!retrostate) && ((tag == GTCMD_RETROGRADIENT) || (tag == GTCMD_METERCOLORS)))
     return NO;
   return YES;
 }
@@ -257,7 +279,7 @@ void macmenu_init(void)
     addfkeyitem(control, @"Song Info", 8, 0, GTCMD_EDITNAMES);
 
     view = newmenu(@"View");
-    additem(view, @"Instrument Designer", @"d", MOD_CMD, GTCMD_DESIGNER);
+    additem(view, @"SID Designer", @"d", MOD_CMD, GTCMD_DESIGNER);
     [view addItem:[NSMenuItem separatorItem]];
     additem(view, @"Library", @"", 0, GTCMD_TOGGLELIBRARY);
     additem(view, @"Inspector", @"", 0, GTCMD_TOGGLEINSPECTOR);
@@ -273,7 +295,7 @@ void macmenu_init(void)
     additem(view, @"Enter Full Screen", @"f", MOD_CMD | MOD_CTRL, GTCMD_FULLSCREEN);
     [view addItem:[NSMenuItem separatorItem]];
     additem(view, @"Gradient Background", @"", 0, GTCMD_RETROGRADIENT);
-    additem(view, @"Ask for Interface at Next Launch", @"", 0, GTCMD_ASKINTERFACE);
+    additem(view, @"Meter Colors…", @"", 0, GTCMD_METERCOLORS);
 
     help = newmenu(@"Help");
     additem(help, @"GoatTracker Ultimate Help", @"?", MOD_CMD, GTCMD_HELP);
@@ -288,6 +310,22 @@ void macmenu_init(void)
     insertmenu(mainmenu, view, index + 3);
     insertmenu(mainmenu, help, [mainmenu numberOfItems]);
     [NSApp setHelpMenu:help];
+
+    // The application menu's About item (made by SDL) shows the credits too
+    if ([mainmenu numberOfItems] > 0)
+    {
+      NSMenu *appmenu = [[mainmenu itemAtIndex:0] submenu];
+      NSInteger c;
+      for (c = 0; (appmenu) && (c < [appmenu numberOfItems]); c++)
+      {
+        NSMenuItem *item = [appmenu itemAtIndex:c];
+        if ([item action] == @selector(orderFrontStandardAboutPanel:))
+        {
+          [item setTarget:target];
+          [item setAction:@selector(aboutSelected:)];
+        }
+      }
+    }
 
     [file release];
     [recent release];

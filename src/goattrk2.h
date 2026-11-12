@@ -2,6 +2,8 @@
 #define GOATTRK2_H
 
 #define PROGRAMNAME "$VER: GoatTracker Ultimate v2.82"
+// The credit line of About GoatTracker Ultimate
+#define ABOUTTEXT "An Ultimate rework by Scott Lee & Brett Cook"
 
 #include <unistd.h>
 #include <stdio.h>

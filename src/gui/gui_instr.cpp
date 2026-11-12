@@ -127,7 +127,7 @@ void gui::drawlibrary(bool *open)
     if (ImGui::BeginPopupContextItem("##instrcontext"))
     {
       editorInfo.einum = i;
-      if (ImGui::MenuItem("Open in Instrument Designer")) cmd_post(GTCMD_DESIGNER);
+      if (ImGui::MenuItem("Open in SID Designer")) cmd_post(GTCMD_DESIGNER);
       ImGui::Separator();
       if (ImGui::MenuItem("Rename")) { renaming = i; strcpy(renamebuffer, name); }
       ImGui::Separator();
@@ -296,7 +296,7 @@ void gui::drawinspector(bool *open)
   // Hold to hear
   ImGui::Button("Hold to Play", ImVec2(-FLT_MIN, 0.0f));
   previewbutton(i);
-  if (ImGui::Button("Open in Instrument Designer", ImVec2(-FLT_MIN, 0.0f))) cmd_post(GTCMD_DESIGNER);
+  if (ImGui::Button("Open in SID Designer", ImVec2(-FLT_MIN, 0.0f))) cmd_post(GTCMD_DESIGNER);
   if (ImGui::IsItemHovered()) tooltip("Edit this instrument on a C64 screen laid out like chipsynth C64");
 
   ImGui::BeginChild("##inspectorbody", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);

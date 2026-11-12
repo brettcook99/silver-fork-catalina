@@ -25,47 +25,25 @@ static char timechar[] = {':', ' '};
 #define POSCOLUMN (40 + 10 + 27)
 #define POSWIDTH 6
 
-// The [EDIT] button right of the instrument panel's title (instrument number
-// and name): opens the instrument page. On that page the same place has
-// [BACK]
-#define EDITBTNCOLUMN 92
-#define EDITBTNROW 7
-#define EDITBTNWIDTH 6
+// The title bar (top row): the program and song name, then from column TBX
+// on the settings that a click switches: fine vibrato, pulse and realtime
+// optimization, PAL/NTSC, SID model, hard restart ADSR, speed multiplier,
+// interpolation and reSID-fp. At the right end "SID Designer" (on the SID
+// designer: "Tracker") switches between the two
+#define TBX 48
+#define TB_FV (TBX + 0)
+#define TB_PO (TBX + 3)
+#define TB_RO (TBX + 6)
+#define TB_CLOCK (TBX + 9)
+#define TB_MODEL (TBX + 14)
+#define TB_HR (TBX + 19)        // "HR:" then the 4 digits
+#define TB_MULT (TBX + 27)
+#define TB_INT (TBX + 32)
+#define TB_FP (TBX + 36)
 
-// The page shown: the main screen or the instrument page
-int retropage = RETROPAGE_MAIN;
-
-// Opens the instrument page ([EDIT] next to the instrument). It is blank for
-// now: the new instrument editor will be on it. MIDI notes play the
-// instrument there
-void retro_openinstrpage(void)
+static const char *titlebarlabel(void)
 {
-  retropage = RETROPAGE_INSTRUMENT;
-  editorInfo.editmode = EDIT_INSTRUMENT;
-  if (editorInfo.eipos > 8) editorInfo.eipos = 0;
-  clearscreen();
-}
-
-// Back to the main screen ([BACK] or ESC on the instrument page)
-void retro_closepage(void)
-{
-  retropage = RETROPAGE_MAIN;
-  printmainscreen();
-}
-
-// [EDIT] / [BACK]: grey brackets, the word in green
-static void printbutton(int x, int y, const char *word)
-{
-  printtext(x, y, CNORMAL, "[");
-  printtext(x + 1, y, CEDIT, word);
-  printtext(x + 1 + (int)strlen(word), y, CNORMAL, "]");
-}
-
-// The instrument page: blank but for [BACK]
-static void printinstrpage(void)
-{
-  clearscreen();
-  printbutton(EDITBTNCOLUMN, EDITBTNROW, "BACK");
+  return gui_designershown() ? "Tracker" : "SID Designer";
 }
 
 // Starts playing like F1-F3 (SHIFT: the other follow way)
@@ -76,82 +54,150 @@ static void retroplay(int mode)
   followsuspended = 0;
 }
 
+// Prints the title bar on the top row. The SID designer shows it too (in
+// both interfaces)
+void retro_printtitlebar(void)
+{
+  int cc = cursorcolortable[cursorflash];
+  int fg_active = 7;
+  int fg_inactive = 8;
+  const char *label = titlebarlabel();
+
+  printblankc(0, 0, 15+16, MAX_COLUMNS);
+
+  if (!strlen(loadedsongfilename))
+    sprintf(textbuffer, "%s", programname);
+  else
+    sprintf(textbuffer, "%s - %s", programname, gt_basename(loadedsongfilename));
+  textbuffer[TBX - 1] = 0;
+  printtext(0, 0, 15+16, textbuffer);
+
+  printtext(TB_FV, 0, fg_inactive+16, "FV PO RO");
+
+  if (editorInfo.finevibrato)
+    printtext(TB_FV, 0, fg_active+16, "FV");
+
+  if (editorInfo.optimizepulse)
+    printtext(TB_PO, 0, fg_active+16, "PO");
+
+  if (editorInfo.optimizerealtime)
+    printtext(TB_RO, 0, fg_active+16, "RO");
+
+  if (editorInfo.ntsc)
+    printtext(TB_CLOCK, 0, fg_active+16, "NTSC");
+  else
+    printtext(TB_CLOCK, 0, fg_active+16, " PAL");
+
+  if (!editorInfo.sidmodel)
+    printtext(TB_MODEL, 0, fg_active+16, "6581");
+  else
+    printtext(TB_MODEL, 0, fg_active+16, "8580");
+
+  sprintf(textbuffer, "HR:%04X", editorInfo.adparam);
+  printtext(TB_HR, 0, fg_active+16, textbuffer);
+  if (eamode) printbg(TB_HR + 3 + editorInfo.eacolumn, 0, cc, 1);
+
+  if (editorInfo.multiplier)
+  {
+    sprintf(textbuffer, "%2dx", editorInfo.multiplier);
+    printtext(TB_MULT, 0, fg_active+16, textbuffer);
+  }
+  else printtext(TB_MULT, 0, fg_active+16, "25Hz");
+
+  printtext(TB_INT, 0, fg_inactive+16, "INT FP");
+
+  if (interpolate & 1) {
+    printtext(TB_INT, 0, fg_active+16, "INT");
+  }
+
+  if (interpolate & 2) {
+    printtext(TB_FP, 0, fg_active+16, "FP");
+  }
+
+  printtext(MAX_COLUMNS - (int)strlen(label), 0, 15+16, label);
+}
+
+// A left click on the title bar at column x: switches the setting there, or
+// between the tracker and the SID designer
+void retro_titlebarclick(int x)
+{
+  if ((x >= TB_FV) && (x <= TB_FV + 1))
+  {
+    undoCreateEditorInfoBackup();
+    editorInfo.finevibrato ^= 1;
+    undoAddEditorSettingsToList();
+  }
+  if ((x >= TB_PO) && (x <= TB_PO + 1))
+  {
+    undoCreateEditorInfoBackup();
+    editorInfo.optimizepulse ^= 1;
+    undoAddEditorSettingsToList();
+  }
+  if ((x >= TB_RO) && (x <= TB_RO + 1))
+  {
+    undoCreateEditorInfoBackup();
+    editorInfo.optimizerealtime ^= 1;
+    undoAddEditorSettingsToList();
+  }
+  if ((x >= TB_CLOCK) && (x <= TB_CLOCK + 3))
+  {
+    undoCreateEditorInfoBackup();
+    editorInfo.ntsc ^= 1;
+    undoAddEditorSettingsToList();
+    do_sound_init();
+  }
+  if ((x >= TB_MODEL) && (x <= TB_MODEL + 3))
+  {
+    undoCreateEditorInfoBackup();
+    editorInfo.sidmodel ^= 1;
+    undoAddEditorSettingsToList();
+    do_sound_init();
+  }
+  if ((x >= TB_HR + 3) && (x <= TB_HR + 6)) gui_edithradsr();
+  if ((x >= TB_MULT) && (x <= TB_MULT + 1))
+  {
+    undoCreateEditorInfoBackup();
+    prevmultiplier();
+    undoAddEditorSettingsToList();
+  }
+  if ((x >= TB_MULT + 2) && (x <= TB_MULT + 3))
+  {
+    undoCreateEditorInfoBackup();
+    nextmultiplier();
+    undoAddEditorSettingsToList();
+  }
+  if ((x >= TB_INT) && (x <= TB_INT + 2))
+  {
+    interpolate ^= 1;
+    interpolate &= 1 + (interpolate << 1);  // turn off FP if INT is 0
+    stopsong();
+    do_sound_init();
+  }
+  if ((x >= TB_FP) && (x <= TB_FP + 1))
+  {
+    interpolate ^= 2;
+    interpolate |= interpolate >> 1;  // turn on INT if FP is 1
+    stopsong();
+    do_sound_init();
+  }
+  if (x >= MAX_COLUMNS - (int)strlen(titlebarlabel())) cmd_post(GTCMD_DESIGNER);
+}
+
 void retro_printstatus(void)
 {
   int c, d, color, color2;
   int cc = cursorcolortable[cursorflash];
   menu = 0;
 
-  if (retropage == RETROPAGE_INSTRUMENT)
-  {
-    printinstrpage();
-    return;
-  }
-
   if ((mouseb > MOUSEB_LEFT) && (mousey <= 1) && (!eamode)) menu = 1;
 
-  printblankc(0, 0, 15+16, MAX_COLUMNS);
-
   if (!menu)
-  {
-    if (!strlen(loadedsongfilename))
-      sprintf(textbuffer, "%s", programname);
-    else
-      sprintf(textbuffer, "%s - %s", programname, gt_basename(loadedsongfilename));
-    textbuffer[49] = 0;
-    printtext(0, 0, 15+16, textbuffer);
-
-    int fg_active = 7;
-    int fg_inactive = 8;
-
-    printtext(40+10, 0, fg_inactive+16, "FV PO RO");
-
-    if (editorInfo.finevibrato)
-      printtext(40+10, 0, fg_active+16, "FV");
-
-    if (editorInfo.optimizepulse)
-      printtext(43+10, 0, fg_active+16, "PO");
-
-    if (editorInfo.optimizerealtime)
-      printtext(46+10, 0, fg_active+16, "RO");
-
-    if (editorInfo.ntsc)
-      printtext(49+10, 0, fg_active+16, "NTSC");
-    else
-      printtext(49+10, 0, fg_active+16, " PAL");
-
-    if (!editorInfo.sidmodel)
-      printtext(54+10, 0, fg_active+16, "6581");
-    else
-      printtext(54+10, 0, fg_active+16, "8580");
-
-    sprintf(textbuffer, "HR:%04X", editorInfo.adparam);
-    printtext(59+10, 0, fg_active+16, textbuffer);
-    if (eamode) printbg(62+10+ editorInfo.eacolumn, 0, cc, 1);
-
-    if (editorInfo.multiplier)
-    {
-      sprintf(textbuffer, "%2dx", editorInfo.multiplier);
-      printtext(67+10, 0, fg_active+16, textbuffer);
-    }
-    else printtext(67+10, 0, fg_active+16, "25Hz");
-
-    printtext(72+10, 0, fg_inactive+16, "INT FP");
-
-    if (interpolate & 1) {
-      printtext(72+10, 0, fg_active+16, "INT");
-    }
-
-    if (interpolate & 2) {
-      printtext(76+10, 0, fg_active+16, "FP");
-    }
-
-    printtext(72+20, 0, 15+16, "F12=HELP");
-  }
+    retro_printtitlebar();
   else
   {
-    // C64 = the instrument designer
-    printtext(0, 0, 15+16, " PLAY | PLAYPOS | PLAYPATT | STOP | LOAD | SAVE | PACK/RL | HELP | CLEAR | QUIT | A- A+ | FULL | C64");
+    // VIEW = a menu with the SID designer and the view settings
+    printblankc(0, 0, 15+16, MAX_COLUMNS);
+    printtext(0, 0, 15+16, " PLAY | PLAYPOS | PLAYPATT | STOP | LOAD | SAVE | PACK/RL | HELP | CLEAR | QUIT | A-A+ | FULL | VIEW");
   }
 
   // Following the playback is done by followplayback() in the main loop
@@ -351,7 +397,6 @@ void retro_printstatus(void)
 
   sprintf(textbuffer, "INSTRUMENT NUM. %02X  %-16s", editorInfo.einum, instr[editorInfo.einum].name);
   printtext(40+10, 7, CTITLE, textbuffer);
-  printbutton(EDITBTNCOLUMN, EDITBTNROW, "EDIT");
 
   sprintf(textbuffer, "Attack/Decay    %02X", instr[editorInfo.einum].ad);
   if (editorInfo.eipos == 0) color = CEDIT; else color = CNORMAL;
@@ -838,20 +883,6 @@ void retro_mousecommands(void)
 {
   int c;
 
-  // The instrument page: [BACK] and the middle button (edit/jam mode)
-  if (retropage == RETROPAGE_INSTRUMENT)
-  {
-    if ((mouseb & MOUSEB_MIDDLE) && (!(prevmouseb & MOUSEB_MIDDLE)))
-    {
-      recordmode ^= 1;
-      gui_message(recordmode ? "Edit mode: notes are entered" : "Jam mode: notes are only played");
-    }
-    if ((mouseb & MOUSEB_LEFT) && (!prevmouseb) && (mousey == EDITBTNROW) &&
-      (mousex >= EDITBTNCOLUMN) && (mousex < EDITBTNCOLUMN + EDITBTNWIDTH))
-      retro_closepage();
-    return;
-  }
-
   // Mouse wheel over a value changes it. Over the patterns it scrolls the
   // pattern editor. While the song plays, the view then stops following the
   // playback (as in the modern interface) until playback is started again
@@ -995,14 +1026,6 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_RIGHT) prevsong();
   }
 
-  // [EDIT]: the instrument page
-  if ((mouseb & MOUSEB_LEFT) && (!prevmouseb) && (mousey == EDITBTNROW) &&
-    (mousex >= EDITBTNCOLUMN) && (mousex < EDITBTNCOLUMN + EDITBTNWIDTH))
-  {
-    retro_openinstrpage();
-    return;
-  }
-
   // Instrument editpos & instrument number selection
   if ((mousey >= 8) && (mousey <= 12) && (mousex >= 56 + 10) && (mousex <= 57 + 10))
   {
@@ -1016,7 +1039,7 @@ void retro_mousecommands(void)
     editorInfo.eipos = mousey - 8 + 5;
     editorInfo.eicolumn = mousex - 76 - 10;
   }
-  if ((mousey == 7) && (mousex >= 60 + 10) && (mousex < EDITBTNCOLUMN))
+  if ((mousey == 7) && (mousex >= 60 + 10))
   {
     editorInfo.editmode = EDIT_INSTRUMENT;
     editorInfo.eipos = 9;
@@ -1100,70 +1123,7 @@ void retro_mousecommands(void)
   // Titlebar actions
   if (!menu)
   {
-    if ((mousey == 0) && (!prevmouseb) && (mouseb == MOUSEB_LEFT))
-    {
-      if ((mousex >= 40 + 10) && (mousex <= 41 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        editorInfo.finevibrato ^= 1;
-        undoAddEditorSettingsToList();
-      }
-      if ((mousex >= 43 + 10) && (mousex <= 44 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        editorInfo.optimizepulse ^= 1;
-        undoAddEditorSettingsToList();
-      }
-      if ((mousex >= 46 + 10) && (mousex <= 47 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        editorInfo.optimizerealtime ^= 1;
-        undoAddEditorSettingsToList();
-      }
-      if ((mousex >= 49 + 10) && (mousex <= 52 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        editorInfo.ntsc ^= 1;
-        undoAddEditorSettingsToList();
-        do_sound_init();
-      }
-      if ((mousex >= 54 + 10) && (mousex <= 57 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        editorInfo.sidmodel ^= 1;
-        undoAddEditorSettingsToList();
-        do_sound_init();
-      }
-      if ((mousex >= 62 + 10) && (mousex <= 65 + 10)) gui_edithradsr();
-      if ((mousex >= 67 + 10) && (mousex <= 68 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        prevmultiplier();
-        undoAddEditorSettingsToList();
-      }
-      if ((mousex >= 69 + 10) && (mousex <= 70 + 10))
-      {
-        undoCreateEditorInfoBackup();
-        nextmultiplier();
-        undoAddEditorSettingsToList();
-      }
-      if ((mousex >= 72 + 10) && (mousex <= 74 + 10))
-      {
-        interpolate ^= 1;
-        interpolate &= 1 + (interpolate << 1);  // turn off FP if INT is 0
-        stopsong();
-        do_sound_init();
-      }
-      if ((mousex >= 76 + 10) && (mousex <= 77 + 10))
-      {
-        interpolate ^= 2;
-        interpolate |= interpolate >> 1;  // turn on INT if FP is 1
-        stopsong();
-        do_sound_init();
-      }
-      // F12=HELP
-      if (mousex >= 72 + 20) onlinehelp(0, 0);
-    }
+    if ((mousey == 0) && (!prevmouseb) && (mouseb == MOUSEB_LEFT)) retro_titlebarclick(mousex);
   }
   else
   {
@@ -1198,7 +1158,7 @@ void retro_mousecommands(void)
       if ((mousex >= 89) && (mousex <= 94))
         togglefullscreen();
       if (mousex >= 96)
-        cmd_post(GTCMD_DESIGNER);
+        gui_openviewmenu();
     }
   }
 }

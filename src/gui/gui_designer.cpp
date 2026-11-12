@@ -1,10 +1,11 @@
-// GoatTracker GUI: the instrument designer
+// GoatTracker GUI: the SID designer
 //
-// A full-window mode that looks like a Commodore 64 screen (gui_c64.h) and is
-// laid out like the patch page of Plogue's chipsynth C64: three oscillators
-// (waveforms, sync / ring / test, pulse width, envelope), a filter and a
-// keyboard, plus pages with step sequencers for the wave, pulse and filter
-// tables and one with the emulation settings.
+// A full-window mode: under the tracker's title bar, a Commodore 64 screen
+// (gui_c64.h) in a frame like the C64's nameplate, laid out like the patch
+// page of Plogue's chipsynth C64: three oscillators (waveforms, sync / ring
+// / test, pulse width, envelope) and a filter, plus pages with step
+// sequencers for the wave, pulse and filter tables and one with the
+// emulation settings.
 //
 // Each oscillator is a GoatTracker instrument, played on the SID voice with
 // the same number, so that sync and ring modulation between the oscillators
@@ -35,11 +36,17 @@ namespace gui
 #define PAGE_Y 8
 #define PAGE_H 30
 #define HINT_Y 39
-#define PIANO_Y 40
-#define PIANO_H 7
-#define PIANO_X 8
-#define PIANO_WHITES 35
-#define READY_Y 48
+
+// The frame around the screen, measured on Scott's template (520 x 335
+// pixels below the title bar): white panel, the nameplate badge, the violet
+// screen
+#define FRAME_W 520.0f
+#define FRAME_H 335.0f
+#define SCREENCOLOR 0x755df9          // Violet: the screen and its surround
+#define LABELCOLOR 0xc9b4ff           // Lavender: labels and lines (LIGHTBLUE)
+#define FAINTCOLOR 0xa29cc0           // Greyed out text (GREY)
+#define DIMCOLOR 0x5443c8             // Disabled things (DARKGREY)
+#define WARNCOLOR 0xff8a7a            // Lights, warnings (LIGHTRED)
 
 enum { PAGE_PATCH, PAGE_WAVE, PAGE_PULSE, PAGE_FILTER, PAGE_EMU, NUM_PAGES };
 static const char *pagelabels[NUM_PAGES] = { " PATCH ", " WAVE ", " PULSE ", " FILTER ", " EMU " };
@@ -65,7 +72,7 @@ enum
   ID_HEADER = 1, ID_TABS, ID_OSC1, ID_OSC2, ID_OSC3, ID_FILTER, ID_SEQHEAD,
   ID_STEP, ID_KIND, ID_BITS0, ID_BITS7 = ID_BITS0 + 7, ID_NOTE, ID_LANE, ID_FIX, ID_LOOP,
   ID_SEQBTN, ID_LISTNUM, ID_LISTKIND, ID_LISTA, ID_LISTB, ID_LISTC, ID_LISTD, ID_LISTE, ID_LISTF,
-  ID_LISTG, ID_LISTH, ID_SWEEP, ID_EMU, ID_PIANO
+  ID_LISTG, ID_LISTH, ID_SWEEP, ID_EMU
 };
 
 static int page = PAGE_PATCH;
@@ -80,7 +87,6 @@ static int heldnote = 0;
 static int heldsource = SRC_NONE;
 static int heldkey = 0;
 static bool heldvoice[PATCH_OSC];
-static bool pianodrag = false;
 
 static bool nameedit = false;
 static char namebuf[MAX_INSTRNAMELEN + 1];
@@ -307,6 +313,64 @@ static void steppatch(int dir)
   editorInfo.einum = i;
   for (k = 0; k < PATCH_OSC; k++) oscmute[k] = false;
   nameedit = false;
+}
+
+// Removes the instrument's wave, pulse and filter table parts (rows that
+// nothing else uses are deleted; a shared part is only let go of)
+static void removeparts(int ins)
+{
+  int t;
+
+  for (t = WTBL; t <= FTBL; t++)
+  {
+    int start = patch_partstart(t, ins);
+    int len;
+
+    if (start < 0) continue;
+    if (patch_isshared(t, ins))
+    {
+      instr[ins].ptr[t] = 0;
+      continue;
+    }
+    len = patch_partlen(t, start);
+    instr[ins].ptr[t] = 0;
+    while (len-- > 0) patch_deleterow(t, start);
+  }
+}
+
+static void noteoff(int source, int key);
+
+// CLEAR: the patch becomes an init patch, a plain sound to start from: one
+// oscillator (the patch's first instrument) playing a sawtooth with full
+// sustain. The other oscillators' instruments are emptied, the table rows
+// the patch alone used are deleted. Can be undone
+static void initpatch(void)
+{
+  static const unsigned char wl[2] = { 0x21, 0xff };
+  static const unsigned char wr[2] = { 0x00, 0x00 };
+  int first = firstosc();
+  int ins, k;
+
+  if (first < 0) return;
+  if (nameedit) nameedit = false;
+  if (heldnote) noteoff(heldsource, heldkey);
+  openedit();
+  ins = osc[first];
+  for (k = 0; k < PATCH_OSC; k++)
+  {
+    if (!osc[k]) continue;
+    removeparts(osc[k]);
+    clearinstr(osc[k]);
+  }
+  instr[ins].ad = 0x00;
+  instr[ins].sr = 0xf0;
+  if (!patch_setpart(WTBL, ins, wl, wr, 2)) tablefull();
+  editorInfo.einum = ins;
+  for (k = 0; k < PATCH_OSC; k++) oscmute[k] = false;
+  for (k = 0; k < NUM_PAGES; k++) selstep[k] = -1;
+  seqosc = 0;
+  bindpatch();
+  gui_message("Init patch in instrument %02X (CTRL+Z undoes)", ins);
 }
 
 static void startnameedit(void)
@@ -712,13 +776,12 @@ static void notetext(unsigned char r, char *out, int size)
 
 static void drawheader(void)
 {
-  static const int stripes[5] = { RED, ORANGE, YELLOW, LIGHTGREEN, CYAN };
-  int r, primary = editorInfo.einum;
+  int primary = editorInfo.einum;
   char text[40];
   int state;
 
-  for (r = 0; r < 5; r++) fill(12, HEADER_Y + r, 10, 1, SC_HALF_LOWER, stripes[r]);
-  print(2, HEADER_Y + 2, "GT SYNTH", WHITE);
+  // "SID Designer" and the rainbow stripes left of "64" are drawn by
+  // drawlogo()
   print(23, HEADER_Y + 2, "64", WHITE);
 
   // Patch selector
@@ -759,8 +822,48 @@ static void drawheader(void)
     cmd_post(GTCMD_LOADINSTR);
   if (button(WID(ID_HEADER, 7), 65, HEADER_Y + 3, "SAVE", false, WHITE, "SAVE THE FIRST OSCILLATOR'S INSTRUMENT"))
     cmd_post(GTCMD_SAVEINSTR);
-  if (button(WID(ID_HEADER, 8), 71, HEADER_Y + 3, "IMPORT", false, WHITE, "IMPORT A CHIPSYNTH C64 PATCH (.FERMATAX) HERE"))
-    cmd_post(GTCMD_IMPORTPATCH);
+  if (button(WID(ID_HEADER, 8), 71, HEADER_Y + 3, "CLEAR", false, WHITE, "CLEAR TO AN INIT PATCH: ONE PLAIN OSCILLATOR (CTRL+Z UNDOES)"))
+    initpatch();
+}
+
+// The badge's rainbow colors (the C64's own red and orange are too dark on
+// the violet screen)
+static const ImU32 rainbow[5] =
+{
+  IM_COL32(0xff, 0x5b, 0x57, 255), IM_COL32(0xff, 0xcc, 0x90, 255), IM_COL32(0xff, 0xff, 0x6f, 255),
+  IM_COL32(0xa2, 0xff, 0x9c, 255), IM_COL32(0x00, 0xff, 0xff, 255)
+};
+
+// "SID Designer" in the header in the interface's bold font, and the rainbow
+// stripes between it and "64". Drawn over the screen
+static void drawlogo(void)
+{
+  ImDrawList *dl = ImGui::GetBackgroundDrawList();
+  ImVec2 s0 = c64::screenmin();
+  float cell = c64::charsize();
+  const char *text = "SID Designer";
+  float size = cell * 1.5f;
+  float width = fontbold->CalcTextSizeA(size, FLT_MAX, 0.0f, text).x;
+  float maxw = cell * 10.0f;
+  ImVec2 pos;
+  int r;
+
+  // Stripes in the lower half of rows 0-4, columns 12-21
+  for (r = 0; r < 5; r++)
+  {
+    float y = s0.y + cell * (HEADER_Y + r + 0.5f);
+    dl->AddRectFilled(ImVec2(s0.x + cell * 12.0f, y), ImVec2(s0.x + cell * 22.0f, y + cell * 0.5f), rainbow[r]);
+  }
+
+  if (width > maxw)
+  {
+    size *= maxw / width;
+    width = maxw;
+  }
+  pos = ImVec2(floorf(s0.x + cell * 11.0f - width), floorf(s0.y + cell * (HEADER_Y + 2.5f) - size * 0.55f));
+  // A little heavier than the bold font, like the C64's lettering
+  dl->AddText(fontbold, size, ImVec2(pos.x + size * 0.04f, pos.y), IM_COL32(255, 255, 255, 255), text);
+  dl->AddText(fontbold, size, pos, IM_COL32(255, 255, 255, 255), text);
 }
 
 static void drawtabs(void)
@@ -776,122 +879,26 @@ static void drawtabs(void)
     }
     x += (int)strlen(pagelabels[p]) + 1;
   }
-  if (button(WID(ID_TABS, 10), 70, TAB_Y, " TRACKER ", true, LIGHTGREEN, "BACK TO THE TRACKER (ESC, ALT+NUMPAD 5, CTRL/CMD+D)"))
-    cmd_post(GTCMD_DESIGNER);
   hline(0, TAB_Y + 1, COLS, LIGHTBLUE);
 }
 
-static const int whiteoffset[7] = { 0, 2, 4, 5, 7, 9, 11 };
-static const bool blackafter[7] = { true, true, false, true, true, true, false };
-
-static int pianobase(void)
-{
-  return clampint(editorInfo.epoctave - 1, 0, 3);
-}
-
-// The note on the piano at a screen position, 0 if none
-static int pianonote(float x, float y)
-{
-  float rx = x - PIANO_X;
-  int base = pianobase();
-  int w;
-
-  if ((y < PIANO_Y) || (y >= PIANO_Y + PIANO_H) || (rx < 0.0f) || (rx >= PIANO_WHITES * 2)) return 0;
-  if (y < PIANO_Y + 4)
-  {
-    int k = (int)floorf((rx - 1.5f) / 2.0f);
-    if ((k >= 0) && (k < PIANO_WHITES - 1) && (blackafter[k % 7]) && (rx >= 2 * k + 1.5f) && (rx < 2 * k + 2.5f))
-      return FIRSTNOTE + (base + k / 7) * 12 + whiteoffset[k % 7] + 1;
-  }
-  w = (int)(rx / 2.0f);
-  return FIRSTNOTE + (base + w / 7) * 12 + whiteoffset[w % 7];
-}
-
-static void drawpiano(void)
-{
-  int base = pianobase();
-  int w, y, note;
-  int bg[PIANO_WHITES];
-
-  // Octave strip in place of chipsynth's wheels
-  print(1, PIANO_Y + 1, "OCT", LIGHTBLUE);
-  if (button(WID(ID_PIANO, 1), 1, PIANO_Y + 3, "<", false, WHITE, "OCTAVE DOWN (PAGE DOWN)"))
-  {
-    if (editorInfo.epoctave > 0) editorInfo.epoctave--;
-  }
-  printfmt(3, PIANO_Y + 3, WHITE, "%d", editorInfo.epoctave);
-  if (button(WID(ID_PIANO, 2), 5, PIANO_Y + 3, ">", false, WHITE, "OCTAVE UP (PAGE UP)"))
-  {
-    if (editorInfo.epoctave < 7) editorInfo.epoctave++;
-  }
-
-  for (w = 0; w < PIANO_WHITES; w++)
-  {
-    int x = PIANO_X + w * 2;
-    note = FIRSTNOTE + (base + w / 7) * 12 + whiteoffset[w % 7];
-    bg[w] = (note > LASTNOTE) ? GREY : (note == heldnote) ? LIGHTGREEN : WHITE;
-    for (y = PIANO_Y; y < PIANO_Y + PIANO_H; y++)
-    {
-      put(x, y, SC_SPACE, BLACK, bg[w]);
-      put(x + 1, y, SC_EIGHTH_RIGHT, GREY, bg[w]);
-    }
-    if (w % 7 == 0) printfmt(x, PIANO_Y + PIANO_H, LIGHTBLUE, "C%d", base + w / 7);
-  }
-  for (w = 0; w < PIANO_WHITES - 1; w++)
-  {
-    int x = PIANO_X + w * 2;
-    int col;
-    if (!blackafter[w % 7]) continue;
-    note = FIRSTNOTE + (base + w / 7) * 12 + whiteoffset[w % 7] + 1;
-    col = (note > LASTNOTE) ? DARKGREY : (note == heldnote) ? GREEN : BLACK;
-    for (y = PIANO_Y; y < PIANO_Y + 4; y++)
-    {
-      put(x + 1, y, SC_HALF_LEFT | SC_REVERSE, col, bg[w]);
-      put(x + 2, y, SC_HALF_LEFT, col, bg[w + 1]);
-    }
-  }
-
-  // Mouse: click and hold to play, drag along the keys
-  note = in.enabled ? pianonote(in.x, in.y) : 0;
-  if (note > LASTNOTE) note = 0;
-  if (note) tip("CLICK THE KEYS TO HEAR THE PATCH. COMPUTER KEYS Z-M AND Q-P PLAY TOO");
-  if ((in.clicked) && (note))
-  {
-    pianodrag = true;
-    noteon(note, SRC_MOUSE, 0);
-  }
-  if (pianodrag)
-  {
-    if (!in.down)
-    {
-      noteoff(SRC_MOUSE, 0);
-      pianodrag = false;
-    }
-    else if ((note) && (note != heldnote)) noteon(note, SRC_MOUSE, 0);
-  }
-}
-
-static void drawhintandready(void)
+// The bottom line: what the control under the pointer (or with the keyboard
+// focus) does, a status message, or the keys
+static void drawhint(void)
 {
   const char *text = hint ? hint : focushint;
   const char *msg = gui_currentmessage();
+  char line[COLS + 1];
+  int col = LIGHTBLUE;
 
+  if ((!text) && (msg))
+  {
+    text = msg;
+    col = WHITE;
+  }
   if (!text) text = "TAB PAGES  ARROWS/ENTER CONTROLS  Z-M Q-P PLAY  PGUP/PGDN OCTAVE  ESC TRACKER";
-  {
-    char line[COLS + 1];
-    snprintf(line, sizeof line, "%s", text);
-    print(0, HINT_Y, line, LIGHTBLUE);
-  }
-
-  if (msg)
-  {
-    char line[COLS + 1];
-    snprintf(line, sizeof line, "%s", msg);
-    print(0, READY_Y, line, WHITE);
-  }
-  else print(0, READY_Y, "READY.", LIGHTBLUE);
-  // The C64's blinking cursor
-  if ((int)(ImGui::GetTime() * 3.0) & 1) put(0, READY_Y + 1, SC_BLOCK, LIGHTBLUE);
+  snprintf(line, sizeof line, "%s", text);
+  print(0, HINT_Y, line, col);
 }
 
 /*
@@ -2109,6 +2116,90 @@ static void drawemupage(void)
  * The frame
  */
 
+// The white panel under the title bar with the C64 nameplate badge and the
+// violet screen, after Scott's template. Returns the area for the C64
+// screen (ImGui points)
+static void drawframe(ImVec2 a, ImVec2 b, ImVec2 *screen0, ImVec2 *screen1)
+{
+  ImDrawList *dl = ImGui::GetBackgroundDrawList();
+  ImU32 white = IM_COL32(255, 255, 255, 255);
+  ImU32 badge = IM_COL32(0xc4, 0xbd, 0xa8, 255);
+  ImU32 lettering = IM_COL32(0xfc, 0xfc, 0xf8, 255);
+  ImU32 violet = IM_COL32((SCREENCOLOR >> 16) & 0xff, (SCREENCOLOR >> 8) & 0xff, SCREENCOLOR & 0xff, 255);
+  float u = (b.x - a.x) / FRAME_W;      // One template pixel
+  float v = (b.y - a.y) / FRAME_H;
+  float bx0 = a.x + 4.0f * u, by0 = a.y + 6.0f * v;
+  float bh = 25.0f * v;
+  float bx1 = a.x + 269.0f * u, by1 = by0 + bh;
+  float r = bh * 0.5f;
+  float cy = by0 + r;
+  int i;
+
+  dl->AddRectFilled(a, b, white, 6.0f * u, ImDrawFlags_RoundCornersBottom);
+
+  // The faint stripes running on to the right of the badge
+  for (i = 0; i < 3; i++)
+  {
+    float y = a.y + (9.0f + i * 9.0f) * v;
+    dl->AddRectFilled(ImVec2(bx1 - r, y), ImVec2(b.x - 6.0f * u, y + 4.0f * v), IM_COL32(0xff, 0xff, 0xee, 255));
+  }
+
+  // The badge: C= logo, "commodore", the rainbow stripes, "64"
+  dl->AddRectFilled(ImVec2(bx0, by0), ImVec2(bx1, by1), badge, r);
+  {
+    // The C: a thick ring open to the right
+    float cx = bx0 + 12.0f * u;
+    float ro = bh * 0.34f, ri = bh * 0.19f;
+    float a0 = 0.27f * IM_PI, a1 = 1.73f * IM_PI;
+    const int seg = 24;
+    for (i = 0; i < seg; i++)
+    {
+      float t0 = a0 + (a1 - a0) * i / seg, t1 = a0 + (a1 - a0) * (i + 1) / seg;
+      ImVec2 q[4] =
+      {
+        ImVec2(cx + cosf(t0) * ro, cy - sinf(t0) * ro), ImVec2(cx + cosf(t1) * ro, cy - sinf(t1) * ro),
+        ImVec2(cx + cosf(t1) * ri, cy - sinf(t1) * ri), ImVec2(cx + cosf(t0) * ri, cy - sinf(t0) * ri)
+      };
+      dl->AddConvexPolyFilled(q, 4, lettering);
+    }
+    // The flags: two small parallelograms in the opening, cut at a slant
+    {
+      float fx = cx + ri * 0.55f, fw = ro * 0.95f, fh = (ro - ri) * 0.82f, gap = ri * 0.22f;
+      ImVec2 up[4] = { ImVec2(fx, cy - gap - fh), ImVec2(fx + fw, cy - gap - fh), ImVec2(fx + fw - fh, cy - gap), ImVec2(fx, cy - gap) };
+      ImVec2 dn[4] = { ImVec2(fx, cy + gap), ImVec2(fx + fw - fh, cy + gap), ImVec2(fx + fw, cy + gap + fh), ImVec2(fx, cy + gap + fh) };
+      dl->AddConvexPolyFilled(up, 4, lettering);
+      dl->AddConvexPolyFilled(dn, 4, lettering);
+    }
+  }
+  {
+    const char *word = "commodore";
+    float size = bh * 0.78f;
+    float x0 = bx0 + 31.0f * u, x1 = bx0 + 143.0f * u;
+    float w = fontbold->CalcTextSizeA(size, FLT_MAX, 0.0f, word).x;
+    float sx = (x1 - x0) / w;
+    ImVec2 p;
+    if (sx < 1.0f) size *= sx;
+    p = ImVec2(x0, cy - size * 0.62f);
+    for (i = 0; i < 3; i++) dl->AddText(fontbold, size, ImVec2(p.x + size * 0.035f * i, p.y), lettering, word);
+  }
+  for (i = 0; i < 5; i++)
+  {
+    float y = by0 + (4.0f + i * 4.0f) * v;
+    dl->AddRectFilled(ImVec2(bx0 + 147.0f * u, y), ImVec2(bx0 + 220.0f * u, y + 2.2f * v), rainbow[i]);
+  }
+  {
+    float size = bh * 0.95f;
+    float x = bx0 + 226.0f * u;
+    for (i = 0; i < 3; i++) dl->AddText(fontbold, size, ImVec2(x + size * 0.04f * i, cy - size * 0.6f), lettering, "64");
+  }
+
+  // The screen
+  *screen0 = ImVec2(a.x + 13.0f * u, a.y + 40.0f * v);
+  *screen1 = ImVec2(b.x - 12.0f * u, b.y - 9.0f * v);
+  dl->AddRectFilled(*screen0, *screen1, violet);
+  dl->AddRect(*screen0, *screen1, IM_COL32(0x65, 0x4d, 0xf5, 255));
+}
+
 static void readinput(void)
 {
   ImGuiIO &io = ImGui::GetIO();
@@ -2139,11 +2230,41 @@ static void movefocus(void)
 
 void gui::drawdesigner(SDL_Renderer *renderer)
 {
+  ImGuiIO &io = ImGui::GetIO();
+  ImVec2 s0, s1, f0, f1, c0, c1;
+  float ch, pad;
+  int titlecol;
+
   drawnlastframe = true;
   bindpatch();
   if (seqosc >= PATCH_OSC) seqosc = 0;
-  layout(renderer);
+
+  // The tracker's title bar on top, where it is on the retro screen; the
+  // frame fills the rest of the retro screen's place, black around it
+  ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(0, 0, 0, 255));
+  retro_printtitlebar();
+  titlecol = drawretrotitlebar(renderer, &s0, &s1);
+  ch = (s1.y - s0.y) / MAX_ROWS;
+  f0 = ImVec2(s0.x, s0.y + ch);
+  f1 = s1;
+  drawframe(f0, f1, &c0, &c1);
+  pad = (c1.x - c0.x) * 0.012f;
+  c0 = ImVec2(c0.x + pad, c0.y + pad);
+  c1 = ImVec2(c1.x - pad, c1.y - pad);
+
+  // Its colors on the violet screen
+  setcolor(BLUE, SCREENCOLOR);
+  setcolor(LIGHTBLUE, LABELCOLOR);
+  setcolor(GREY, FAINTCOLOR);
+  setcolor(DARKGREY, DIMCOLOR);
+  setcolor(LIGHTRED, WARNCOLOR);
+
+  layout(renderer, c0, c1);
   readinput();
+
+  // A click on the title bar: its settings, or "Tracker"
+  if ((titlecol >= 0) && (io.MouseClicked[0]) && (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup)))
+    retro_titlebarclick(titlecol);
 
   // One navigation key a frame
   nav = NAV_NONE;
@@ -2160,7 +2281,6 @@ void gui::drawdesigner(SDL_Renderer *renderer)
   nfocus = 0;
 
   clear(BLUE, LIGHTBLUE);
-  setborder(LIGHTBLUE);
   drawheader();
   drawtabs();
   switch (page)
@@ -2172,14 +2292,14 @@ void gui::drawdesigner(SDL_Renderer *renderer)
     case PAGE_EMU: drawemupage(); break;
   }
   hline(0, HINT_Y - 1, COLS, LIGHTBLUE);
-  drawpiano();
-  drawhintandready();
+  drawhint();
 
   if ((nav == NAV_LEFT) || (nav == NAV_RIGHT)) movefocus();
   if (!in.down) active = 0;
   if ((editopen) && (!active)) closeedit();
 
   present(renderer);
+  drawlogo();
 }
 
 /*
@@ -2210,7 +2330,6 @@ void gui::closedesigner(void)
 {
   if (!showdesigner) return;
   if (heldnote) noteoff(heldsource, heldkey);
-  pianodrag = false;
   commitname();
   closeedit();
   bindpatch();
@@ -2218,6 +2337,7 @@ void gui::closedesigner(void)
   editorInfo.editmode = savededitmode;
   showdesigner = false;
   drawnlastframe = false;
+  retroblockmouse();
   c64::freescreen();
   macmenu_setdesigner(0);
 }
@@ -2307,6 +2427,11 @@ void gui::designertext(int ch)
   if (len >= maxlen) return;
   namebuf[len] = (char)ch;
   namebuf[len + 1] = 0;
+}
+
+extern "C" int gui_designershown(void)
+{
+  return showdesigner ? 1 : 0;
 }
 
 bool gui::designerwanted(int textscreen)

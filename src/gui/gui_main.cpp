@@ -548,6 +548,8 @@ extern "C" int gui_command(int cmd)
     case GTCMD_RETROGRADIENT:
       retrogradient ^= 1;
       return 1;
+    case GTCMD_METERCOLORS: openmetercolors(); return 1;
+    case GTCMD_ABOUT: openabout(); return 1;
   }
   return 0;
 }
@@ -608,6 +610,30 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
   if ((k.keysym.scancode == SDL_SCANCODE_KP_5) && (mod & KMOD_ALT) && (!(mod & (KMOD_CTRL | KMOD_GUI))))
   {
     if (!k.repeat) cmd_post(GTCMD_DESIGNER);
+    return;
+  }
+
+  // CTRL + numpad 7 (CMD + numpad 7 too on macOS): switch between the tracker
+  // and the SID designer, from anywhere, like ALT/OPTION + numpad 5
+  if ((k.keysym.scancode == SDL_SCANCODE_KP_7) && (mod & (KMOD_CTRL | KMOD_GUI)) && (!(mod & (KMOD_ALT | KMOD_SHIFT))))
+  {
+    if (!k.repeat) cmd_post(GTCMD_DESIGNER);
+    return;
+  }
+
+  // CTRL + [ ] \ (CMD too on macOS): mute / unmute channel 1, 2 or 3. By
+  // scancode: the three keys right of P whatever the keyboard layout
+  // (ISO keyboards may report \ as NONUSHASH)
+  if (((k.keysym.scancode == SDL_SCANCODE_LEFTBRACKET) || (k.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) ||
+    (k.keysym.scancode == SDL_SCANCODE_BACKSLASH) || (k.keysym.scancode == SDL_SCANCODE_NONUSHASH)) &&
+    (mod & (KMOD_CTRL | KMOD_GUI)) && (!(mod & (KMOD_ALT | KMOD_SHIFT))))
+  {
+    if ((!k.repeat) && (!textscreen) && (!designerwanted(textscreen)) && (!editorsblocked()))
+    {
+      int c = (k.keysym.scancode == SDL_SCANCODE_LEFTBRACKET) ? 0 : (k.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) ? 1 : 2;
+      mutechannel(c);
+      gui_message(chn[c].mute ? "Channel %d muted" : "Channel %d unmuted", c + 1);
+    }
     return;
   }
 
@@ -1062,10 +1088,9 @@ extern "C" void gui_frame(int textscreen)
   endframe(retromode ? IM_COL32(0, 0, 0, 255) : theme.bgdeep);
 }
 
-extern "C" int gui_chooseinterface(int current, int *remember)
+extern "C" int gui_chooseinterface(int current)
 {
-  int selected = (current == UI_RETRO) ? UI_RETRO : UI_MODERN;
-  bool rem = (remember) && (*remember);
+  int selected = (current == UI_MODERN) ? UI_MODERN : UI_RETRO;
   int result = UI_ASK;
 
   if (!initted) return selected;
@@ -1073,7 +1098,7 @@ extern "C" int gui_chooseinterface(int current, int *remember)
   for (;;)
   {
     beginframe(0);
-    result = drawchooser(&selected, &rem);
+    result = drawchooser(&selected);
     endframe(theme.bgdeep);
     if (result != UI_ASK) break;
     // Window closed (or the screenshot test aid is done)
@@ -1083,7 +1108,6 @@ extern "C" int gui_chooseinterface(int current, int *remember)
   // Keys pressed in the chooser are not for the editors. Commands (files
   // opened from the Finder meanwhile) stay queued
   input_clearkeys();
-  if (remember) *remember = rem ? 1 : 0;
   return result;
 }
 

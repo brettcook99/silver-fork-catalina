@@ -94,9 +94,9 @@ void gui::drawcontrolbar(float height)
   x += bw + 4.0f;
   ImGui::SetCursorScreenPos(ImVec2(x, y));
 #ifdef __APPLE__
-  if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "Instrument designer: a C64 screen laid out like chipsynth C64 (CMD+D, OPTION+numpad 5)"))
+  if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "SID Designer: design instruments on a C64 screen (CTRL+numpad 7, CMD+D)"))
 #else
-  if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "Instrument designer: a C64 screen laid out like chipsynth C64 (CTRL+D, ALT+numpad 5)"))
+  if (iconbutton("##designer", ICON_DESIGNER, false, 0, ImVec2(bw, bh), "SID Designer: design instruments on a C64 screen (CTRL+numpad 7, CTRL+D)"))
 #endif
     cmd_post(GTCMD_DESIGNER);
   x += bw + 12.0f;
@@ -473,7 +473,7 @@ void gui::drawmenubar(void)
   }
   if (ImGui::BeginMenu("View"))
   {
-    if (ImGui::MenuItem("Instrument Designer", "CTRL+D")) cmd_post(GTCMD_DESIGNER);
+    if (ImGui::MenuItem("SID Designer", "CTRL+NUMPAD 7")) cmd_post(GTCMD_DESIGNER);
     ImGui::Separator();
     ImGui::MenuItem("Library", NULL, &showlibrary);
     ImGui::MenuItem("Inspector", NULL, &showinspector);
@@ -489,12 +489,14 @@ void gui::drawmenubar(void)
     ImGui::Separator();
     // The retro screen has no menu bar on Windows / Linux: it is set here
     if (ImGui::MenuItem("Gradient Background (Retro Interface)", NULL, retrogradient != 0)) cmd_post(GTCMD_RETROGRADIENT);
-    if (ImGui::MenuItem("Ask for Interface at Next Launch")) cmd_post(GTCMD_ASKINTERFACE);
+    if (ImGui::MenuItem("Meter Colors (Retro Interface)...")) cmd_post(GTCMD_METERCOLORS);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Help"))
   {
     if (ImGui::MenuItem("GoatTracker Ultimate Help", "F12")) cmd_post(GTCMD_HELP);
+    ImGui::Separator();
+    if (ImGui::MenuItem("About GoatTracker Ultimate")) cmd_post(GTCMD_ABOUT);
     ImGui::EndMenu();
   }
   ImGui::EndMainMenuBar();
