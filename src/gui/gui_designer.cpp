@@ -3030,6 +3030,37 @@ extern "C" void gui_designermidi(int noteon_, int noteoff_)
   if ((noteoff_) && (noteoff_ == heldnote)) noteoff(SRC_MIDI, 0);
 }
 
+// MIDI CC14-CC21 choose patch 1-8: the instruments from 01 on, those of a
+// patch with oscillators counted once. In the tracker the instrument (its
+// first oscillator) becomes the current one. Not over a classic dialog
+extern "C" void gui_midipatch(int cc)
+{
+  char base[MAX_INSTRNAMELEN + 1];
+  int ins = patch_nth(cc - MIDICC_PATCH);
+  int k;
+
+  if (!ins) return;
+  if (gui_designeractive())
+  {
+    if (nameedit) return;
+    bindpatch();
+    for (k = 0; k < PATCH_OSC; k++)
+    {
+      if (osc[k] == ins) return;
+    }
+    closeedit();
+    editorInfo.einum = ins;
+    for (k = 0; k < PATCH_OSC; k++) oscmute[k] = false;
+    patch_splitname(instr[ins].name, base);
+    gui_message("PATCH %02X %s (MIDI CC %d)", ins, base, cc);
+    return;
+  }
+  if ((textscreenactive) && (!((retromode) && (retroatmainscreen)))) return;
+  if (ins == editorInfo.einum) return;
+  editorInfo.einum = ins;
+  gui_message("Instrument %02X %.*s (MIDI CC %d)", ins, MAX_INSTRNAMELEN, instr[ins].name, cc);
+}
+
 // MIDI knobs: the envelope of the oscillators that are heard (on and not
 // muted), the filter's cutoff and resonance. A knob turned without a pause
 // is one undo step

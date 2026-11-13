@@ -85,6 +85,13 @@ void onlinehelp(int standalone,int context)
     "  (playing: the playback goes there),",
     "  octave, MIDI INPUT, STEPS...)",
     "CTRL+SHIFT+wheel Select instrument",
+    "Effects panel (middle): click an",
+    "  effect, the wheel sets its value:",
+    "  a command goes to the playing row",
+    "  (stopped: the cursor row), AD to",
+    "  WAVE change the instrument. Click",
+    "  it again or jam mode lets it go",
+    "MIDI CC14-21 Choose patch 1-8",
     NULL
   };
 

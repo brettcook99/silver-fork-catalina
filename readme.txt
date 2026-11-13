@@ -458,6 +458,16 @@ are skipped after a note is entered, 0-16: with 1 the cursor moves from row
 00 to 02, with 2 from 00 to 03 and so on. It works for the note keys and the
 MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
 
+MIDI controllers: control changes CC14-CC21 (for example 8 buttons or pads
+set to send them) choose patch 1-8, in both interfaces: in the tracker the
+patch's instrument becomes the current one, in the SID Designer the patch
+opens. The patches are the instruments from 01 on, the oscillators of a SID
+Designer patch (named BASE:1, BASE:2...) counting as one. Any value works,
+so buttons that send a value when pressed and another when let go, or that
+switch between two, both do. In the SID Designer knobs sending CC73, CC75,
+CC70 (or CC76) and CC72 set attack, decay, sustain and release, CC74 the
+filter cutoff and CC71 the resonance.
+
 Notes played (keys or MIDI) while the song plays start at once, after the
 instrument's hardrestart frames, on their channel. A note of the pattern on
 that row doesn't take their place.
@@ -665,6 +675,23 @@ the start of that position. Each change of a value can be undone.
 
 CTRL+SHIFT+wheel (CMD+SHIFT+wheel on macOS too) selects the instrument, with
 the pointer anywhere, in both interfaces.
+
+The effects panel, between the patterns and the orderlist on the retro
+screen, lists the 16 pattern commands (0XY-FXY) and the instrument's 9
+parameters: AD attack/decay, SR sustain/release, WP, PP and FP the wave,
+pulse and filter table positions, VP vibrato parameter, VD vibrato delay,
+GATE the HR/gate timer and WAVE the 1st frame wave. Click one to pick it: it
+turns white (the others stay grey) and its value shows in green above the
+list. The mouse wheel over the panel then sets the value:
+- a command is written, with that value, into the pattern of the cursor's
+  channel. While the song plays it goes on the playing (green) row, so it is
+  heard right away and turning the wheel records a sweep as the song plays
+  on; with the song stopped it goes on the cursor row (whose value of that
+  command the panel then shows)
+- a parameter changes the current instrument; its next notes play with it
+Turning the wheel without a pause (of 0.6 seconds) is one undo step. Click
+the effect again to let it go; switching to jam mode lets it go too. Picking
+an effect in jam mode switches to edit mode.
 
 Level meters behind each channel's instrument and command columns, at the
 bottom of the patterns, show how loud the channel's voice is (its envelope):

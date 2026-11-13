@@ -250,11 +250,14 @@ int input_nextmidi(void)
   {
     event = midi_getevent(&midinote);
     if (!event) return 0;
-    // Control changes (knobs) go to the SID designer at once, the others
-    // are dropped
+    // Control changes are handled at once: CC14-CC21 choose patch 1-8
+    // (whatever the value: buttons send one when pressed and another when
+    // let go, or switch between two), the knobs go to the SID designer. The
+    // others are dropped
     if (event == MIDI_CONTROL)
     {
-      if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
+      if ((midinote >= MIDICC_PATCH) && (midinote < MIDICC_PATCH + MIDICC_PATCHES)) gui_midipatch(midinote);
+      else if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
       continue;
     }
     note = FIRSTNOTE + midinote - 12;

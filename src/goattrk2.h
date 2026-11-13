@@ -46,8 +46,11 @@
 #define KEY_DMC 1
 #define KEY_JANKO 2
 
-#define VISIBLEPATTROWS 31
-#define VISIBLEORDERLIST 15
+// The retro main screen shows the pattern rows from text row PATTROWY on,
+// under the effects panel's value (gretro.c)
+#define PATTROWY 6
+#define VISIBLEPATTROWS 28
+#define VISIBLEORDERLIST 12
 #define VISIBLETABLEROWS 15
 #define VISIBLEFILES 24
 

@@ -12,6 +12,187 @@
 
 static char timechar[] = {':', ' '};
 
+// The columns: the patterns at the left; from column RX on the orderlist,
+// the instrument, the tables and the song info; between them the effects
+// panel
+#define RX 59
+
+// The effects panel: the 16 pattern commands and the 9 instrument
+// parameters, one on each pattern row, centered on column FXCENTER. A left
+// click picks one: it turns white (the others stay darker grey) and its
+// value shows in green above the list. The mouse wheel over the panel sets
+// the value. A command is written into the pattern of the cursor's channel:
+// while the song plays on the row the playback reads next (the playing row,
+// so that it is heard at once), with the song stopped on the cursor row. A
+// parameter changes the current instrument (heard from its next note on).
+// Another click on the effect, or jam mode, lets it go
+#define FXFIRSTCOLUMN (MAX_CHN * 15 + 2)   // Clicks & wheel: to column RX - 2
+#define FXCENTER 52
+#define FXVALUEY (PATTROWY - 2)
+#define FXCOMMANDS 16
+#define FXNUM (FXCOMMANDS + 9)
+#define FXPAUSE 600                        // ms: a pause ends the wheel's undo step
+
+static const char *fxname[FXNUM] =
+{
+  "0XY", "1XY", "2XY", "3XY", "4XY", "5XY", "6XY", "7XY",
+  "8XY", "9XY", "AXY", "BXY", "CXY", "DXY", "EXY", "FXY",
+  "AD", "SR", "WP", "PP", "FP", "VP", "VD", "GATE", "WAVE"
+};
+
+static int fxsel = -1;                     // The effect picked, -1 = none
+static unsigned char fxvalue[FXCOMMANDS];  // Each command's value set last
+static int fxlast = -1;                    // What the wheel set last, when,
+static unsigned fxtime = 0;                // and the undo list after it
+static int fxundotop = -1;
+static int fxundocount = -1;
+
+extern int psnum;                          // The subtune playing (gplay.c)
+
+static int clampvalue(int value, int min, int max)
+{
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+// The pattern row a command goes to (see above). Returns 0 if there is none
+static int fxrow(int *patt, int *row)
+{
+  int c = editorInfo.epchn;
+  CHN *cptr = &chn[c];
+
+  if (!isplaying())
+  {
+    *patt = editorUndoInfo.editorInfo[c].epnum;
+    *row = editorInfo.eppos;
+  }
+  else if (playstarting()) return 0;
+  else if (cptr->pattptr != 0x7fffffff)
+  {
+    *patt = cptr->pattnum;
+    *row = cptr->pattptr / 4;
+  }
+  else
+  {
+    // After a pattern's last row: the first row of the next pattern, found
+    // as the sequencer will find it
+    unsigned char *order = songorder[psnum][c];
+    int sp = cptr->songptr;
+
+    *patt = cptr->pattnum;
+    *row = 0;
+    if (cptr->advance)
+    {
+      if (order[sp] == LOOPSONG) sp = order[sp + 1];
+      if (sp >= songlen[psnum][c]) return 0;
+      if ((order[sp] >= TRANSDOWN) && (order[sp] < LOOPSONG)) sp++;
+      if ((order[sp] >= REPEAT) && (order[sp] < TRANSDOWN)) sp++;
+      if (order[sp] >= MAX_PATT) return 0;
+      *patt = order[sp];
+    }
+  }
+  return (*row >= 0) && (*row < pattlen[*patt]);
+}
+
+// The value of the effect picked: an instrument parameter's own; a
+// command's from the cursor row if the song is stopped and the row has that
+// command, otherwise the value set last
+static int fxcurrent(void)
+{
+  int patt, row;
+
+  if (fxsel >= FXCOMMANDS) return (&instr[editorInfo.einum].ad)[fxsel - FXCOMMANDS];
+  if ((!isplaying()) && (fxrow(&patt, &row)) && (pattern[patt][row * 4 + 2] == fxsel))
+    return pattern[patt][row * 4 + 3];
+  return fxvalue[fxsel];
+}
+
+static void fxprint(void)
+{
+  int k;
+
+  if (!recordmode) fxsel = -1;
+
+  if (fxsel >= 0) sprintf(textbuffer, "%02X", fxcurrent());
+  else sprintf(textbuffer, "  ");
+  printtext(FXCENTER - 1, FXVALUEY, CEDIT, textbuffer);
+
+  for (k = 0; k < FXNUM; k++)
+    printtext(FXCENTER - (int)strlen(fxname[k]) / 2, PATTROWY + k, (k == fxsel) ? CTITLE : CNORMAL, fxname[k]);
+}
+
+// A left click on an effect picks it (in edit mode), on the one picked lets
+// it go
+static void fxclick(void)
+{
+  int k = mousey - PATTROWY;
+
+  if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (k < 0) || (k >= FXNUM)) return;
+  if (k == fxsel)
+  {
+    fxsel = -1;
+    return;
+  }
+  fxsel = k;
+  if (!recordmode)
+  {
+    recordmode = 1;
+    gui_message("Edit mode: the effect's value is entered");
+  }
+}
+
+// The mouse wheel over the effects panel sets the value of the effect
+// picked (up = bigger). Turned without a pause it is one undo step. Returns
+// nonzero if the wheel was over the panel
+static int fxwheel(int d)
+{
+  unsigned now = SDL_GetTicks();
+  GTUNDO_OBJECT *ed;
+  int top, v;
+
+  if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (mousey < 2) || (mousey > PATTROWY + VISIBLEPATTROWS)) return 0;
+  if (fxsel < 0) return 1;
+
+  v = clampvalue(fxcurrent() + d, 0, 0xff);
+  top = currentUndoPosition;
+  ed = undoCreateEditorInfo();
+  if (fxsel < FXCOMMANDS)
+  {
+    int patt, row;
+
+    fxvalue[fxsel] = (unsigned char)v;
+    if (fxrow(&patt, &row))
+    {
+      pattern[patt][row * 4 + 2] = (unsigned char)fxsel;
+      pattern[patt][row * 4 + 3] = (unsigned char)v;
+      undoAreaSetCheckForChange(UNDO_AREA_PATTERN, patt, UNDO_AREA_DIRTY_CHECK);
+    }
+  }
+  // Instrument 0 is "no instrument" and can't be edited
+  else if (editorInfo.einum)
+  {
+    INSTR *iptr = &instr[editorInfo.einum];
+
+    (&iptr->ad)[fxsel - FXCOMMANDS] = (unsigned char)v;
+    // As when typing: the gate timer can't be 0
+    if (!(iptr->gatetimer & 0x3f)) iptr->gatetimer |= 1;
+    undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, editorInfo.einum, UNDO_AREA_DIRTY_CHECK);
+  }
+
+  if (undoValidateUndoAreas(ed))
+  {
+    if ((fxlast == fxsel) && (fxundotop == top) && (fxundocount == undoCounter - 1) && (now - fxtime < FXPAUSE))
+      undoJoinStep(top);
+    fxundotop = currentUndoPosition;
+    fxundocount = undoCounter;
+    fxlast = fxsel;
+    fxtime = now;
+  }
+  else undoFreeUndoObject(ed);
+  return 1;
+}
+
 // The bottom rows: OCTAVE, PLAYING/STOPPED, MIDI INPUT and STEPS, each two
 // columns after the one before, then the message area
 #define INPUTCOLUMN 19
@@ -22,7 +203,7 @@ static char timechar[] = {':', ' '};
 #define MSGWIDTH (77 - MSGCOLUMN)
 
 // "POS xx" in the orderlist title
-#define POSCOLUMN (40 + 10 + 27)
+#define POSCOLUMN (RX + 27)
 #define POSWIDTH 6
 
 // The title bar (top row): the program and song name, then from column TBX
@@ -260,31 +441,31 @@ void retro_printstatus(void)
       textbuffer[3] = 0;
       if (p%stepsize)
       {
-        printtext(2+c*15, 3+d, CNORMAL, textbuffer);
+        printtext(2+c*15, PATTROWY+d, CNORMAL, textbuffer);
       }
       else
       {
-        printtext(2+c*15, 3+d, CCOMMAND, textbuffer);
+        printtext(2+c*15, PATTROWY+d, CCOMMAND, textbuffer);
       }
       if (color == CNORMAL)
         color2 = CCOMMAND;
       else
         color2 = color;
-      printtext(6+c*15, 3+d, color2, &textbuffer[4]);
-      printtext(10+c*15, 3+d, color, &textbuffer[8]);
-      printtext(12+c*15, 3+d, color2, &textbuffer[10]);
-      printtext(13+c*15, 3+d, color, &textbuffer[11]);
+      printtext(6+c*15, PATTROWY+d, color2, &textbuffer[4]);
+      printtext(10+c*15, PATTROWY+d, color, &textbuffer[8]);
+      printtext(12+c*15, PATTROWY+d, color2, &textbuffer[10]);
+      printtext(13+c*15, PATTROWY+d, color, &textbuffer[11]);
       if (c == editorInfo.epmarkchn)
       {
         if (editorInfo.epmarkstart <= editorInfo.epmarkend)
         {
           if ((p >= editorInfo.epmarkstart) && (p <= editorInfo.epmarkend))
-            printbg(2+c*15+4, 3+d, 1, 9);
+            printbg(2+c*15+4, PATTROWY+d, 1, 9);
         }
         else
         {
           if ((p <= editorInfo.epmarkstart) && (p >= editorInfo.epmarkend))
-            printbg(2+c*15+4, 3+d, 1, 9);
+            printbg(2+c*15+4, PATTROWY+d, 1, 9);
         }
       }
       if ((color == CEDIT) && (editorInfo.editmode == EDIT_PATTERN) && (editorInfo.epchn == c))
@@ -292,23 +473,25 @@ void retro_printstatus(void)
         switch(editorInfo.epcolumn)
         {
           case 0:
-          if (!eamode) printbg(2+c*15+4, 3+d, cc, 3);
+          if (!eamode) printbg(2+c*15+4, PATTROWY+d, cc, 3);
           break;
 
           default:
-          if (!eamode) printbg(2+c*15+7+editorInfo.epcolumn, 3+d, cc, 1);
+          if (!eamode) printbg(2+c*15+7+editorInfo.epcolumn, PATTROWY+d, cc, 1);
           break;
         }
       }
     }
   }
 
+  fxprint();
+
   sprintf(textbuffer, "CHN ORDERLIST (SUBTUNE %02X, POS %02X)", editorInfo.esnum, editorInfo.eseditpos);
-  printtext(40+10, 2, CTITLE, textbuffer);
+  printtext(RX, 2, CTITLE, textbuffer);
   for (c = 0; c < MAX_CHN; c++)
   {
     sprintf(textbuffer, " %d ", c+1);
-    printtext(40+10, 3+c, 15, textbuffer);
+    printtext(RX, 3+c, 15, textbuffer);
     for (d = 0; d < VISIBLEORDERLIST; d++)
     {
       int p = editorInfo.esview+d;
@@ -364,7 +547,7 @@ void retro_printstatus(void)
           if (color == CNORMAL) color = CCOMMAND;
         }
       }
-      printtext(44+10+d*3, 3+c, color, textbuffer);
+      printtext(RX+4+d*3, 3+c, color, textbuffer);
       if (c == editorInfo.esmarkchn)
       {
         if (editorInfo.esmarkstart <= editorInfo.esmarkend)
@@ -372,9 +555,9 @@ void retro_printstatus(void)
           if ((p >= editorInfo.esmarkstart) && (p <= editorInfo.esmarkend))
           {
             if (p != editorInfo.esmarkend)
-              printbg(44+10+d*3, 3+c, 1, 3);
+              printbg(RX+4+d*3, 3+c, 1, 3);
             else
-              printbg(44+10+d*3, 3+c, 1, 2);
+              printbg(RX+4+d*3, 3+c, 1, 2);
           }
         }
         else
@@ -382,72 +565,72 @@ void retro_printstatus(void)
           if ((p <= editorInfo.esmarkstart) && (p >= editorInfo.esmarkend))
           {
             if (p != editorInfo.esmarkstart)
-              printbg(44+10+d*3, 3+c, 1, 3);
+              printbg(RX+4+d*3, 3+c, 1, 3);
             else
-              printbg(44+10+d*3, 3+c, 1, 2);
+              printbg(RX+4+d*3, 3+c, 1, 2);
           }
         }
       }
       if ((p == editorInfo.eseditpos) && (editorInfo.editmode == EDIT_ORDERLIST) && (editorInfo.eschn == c))
       {
-        if (!eamode) printbg(44+10+d*3+editorInfo.escolumn, 3+c, cc, 1);
+        if (!eamode) printbg(RX+4+d*3+editorInfo.escolumn, 3+c, cc, 1);
       }
     }
   }
 
   sprintf(textbuffer, "INSTRUMENT NUM. %02X  %-16s", editorInfo.einum, instr[editorInfo.einum].name);
-  printtext(40+10, 7, CTITLE, textbuffer);
+  printtext(RX, 7, CTITLE, textbuffer);
 
   sprintf(textbuffer, "Attack/Decay    %02X", instr[editorInfo.einum].ad);
   if (editorInfo.eipos == 0) color = CEDIT; else color = CNORMAL;
-  printtext(40+10, 8, color, textbuffer);
+  printtext(RX, 8, color, textbuffer);
 
   sprintf(textbuffer, "Sustain/Release %02X", instr[editorInfo.einum].sr);
   if (editorInfo.eipos == 1) color = CEDIT; else color = CNORMAL;
-  printtext(40+10, 9, color, textbuffer);
+  printtext(RX, 9, color, textbuffer);
 
   sprintf(textbuffer, "Wavetable Pos   %02X", instr[editorInfo.einum].ptr[WTBL]);
   if (editorInfo.eipos == 2) color = CEDIT; else color = CNORMAL;
-  printtext(40+10, 10, color, textbuffer);
+  printtext(RX, 10, color, textbuffer);
 
   sprintf(textbuffer, "Pulsetable Pos  %02X", instr[editorInfo.einum].ptr[PTBL]);
   if (editorInfo.eipos == 3) color = CEDIT; else color = CNORMAL;
-  printtext(40+10, 11, color, textbuffer);
+  printtext(RX, 11, color, textbuffer);
 
   sprintf(textbuffer, "Filtertable Pos %02X", instr[editorInfo.einum].ptr[FTBL]);
   if (editorInfo.eipos == 4) color = CEDIT; else color = CNORMAL;
-  printtext(40+10, 12, color, textbuffer);
+  printtext(RX, 12, color, textbuffer);
 
   sprintf(textbuffer, "Vibrato Param   %02X", instr[editorInfo.einum].ptr[STBL]);
   if (editorInfo.eipos == 5) color = CEDIT; else color = CNORMAL;
-  printtext(60+10, 8, color, textbuffer);
+  printtext(RX+20, 8, color, textbuffer);
 
   sprintf(textbuffer, "Vibrato Delay   %02X", instr[editorInfo.einum].vibdelay);
   if (editorInfo.eipos == 6) color = CEDIT; else color = CNORMAL;
-  printtext(60+10, 9, color, textbuffer);
+  printtext(RX+20, 9, color, textbuffer);
 
   sprintf(textbuffer, "HR/Gate Timer   %02X", instr[editorInfo.einum].gatetimer);
   if (editorInfo.eipos == 7) color = CEDIT; else color = CNORMAL;
-  printtext(60+10, 10, color, textbuffer);
+  printtext(RX+20, 10, color, textbuffer);
 
   sprintf(textbuffer, "1stFrame Wave   %02X", instr[editorInfo.einum].firstwave);
   if (editorInfo.eipos == 8) color = CEDIT; else color = CNORMAL;
-  printtext(60+10, 11, color, textbuffer);
+  printtext(RX+20, 11, color, textbuffer);
 
   if (editorInfo.editmode == EDIT_INSTRUMENT)
   {
     if (editorInfo.eipos < 9)
     {
-      if (!eamode) printbg(56+10+editorInfo.eicolumn+20*(editorInfo.eipos/5), 8+(editorInfo.eipos%5), cc, 1);
+      if (!eamode) printbg(RX+16+editorInfo.eicolumn+20*(editorInfo.eipos/5), 8+(editorInfo.eipos%5), cc, 1);
     }
     else
     {
-      if (!eamode) printbg(60+10+strlen(instr[editorInfo.einum].name), 7, cc, 1);
+      if (!eamode) printbg(RX+20+strlen(instr[editorInfo.einum].name), 7, cc, 1);
     }
   }
 
   sprintf(textbuffer, "WAVE TBL  PULSETBL  FILT.TBL  SPEEDTBL");
-  printtext(40+10, 14, CTITLE, textbuffer);
+  printtext(RX, 14, CTITLE, textbuffer);
 
   for (c = 0; c < MAX_TABLES; c++)
   {
@@ -472,19 +655,19 @@ void retro_printstatus(void)
       }
       if ((p == editorInfo.etpos) && (editorInfo.etnum == c)) color = CEDIT;
       sprintf(textbuffer, "%02X:%02X %02X", p+1, ltable[c][p], rtable[c][p]);
-      printtext(40+10+10*c, 15+d, color, textbuffer);
+      printtext(RX+10*c, 15+d, color, textbuffer);
 
       if (editorInfo.etmarknum == c)
       {
         if (editorInfo.etmarkstart <= editorInfo.etmarkend)
         {
           if ((p >= editorInfo.etmarkstart) && (p <= editorInfo.etmarkend))
-            printbg(40+10+10*c+3, 15+d, 1, 5);
+            printbg(RX+10*c+3, 15+d, 1, 5);
         }
         else
         {
           if ((p <= editorInfo.etmarkstart) && (p >= editorInfo.etmarkend))
-            printbg(40+10+10*c+3, 15+d, 1, 5);
+            printbg(RX+10*c+3, 15+d, 1, 5);
         }
       }
     }
@@ -492,33 +675,33 @@ void retro_printstatus(void)
 
   if (editorInfo.editmode == EDIT_TABLES)
   {
-    if (!eamode) printbg(43+10+editorInfo.etnum*10+(editorInfo.etcolumn & 1)+(editorInfo.etcolumn/2)*3, 15+editorInfo.etpos-editorInfo.etview[editorInfo.etnum], cc, 1);
+    if (!eamode) printbg(RX+3+editorInfo.etnum*10+(editorInfo.etcolumn & 1)+(editorInfo.etcolumn/2)*3, 15+editorInfo.etpos-editorInfo.etview[editorInfo.etnum], cc, 1);
   }
 
-  printtext(40+10, 31, CTITLE, "NAME   ");
+  printtext(RX, 31, CTITLE, "NAME   ");
   sprintf(textbuffer, "%-32s", songname);
-  printtext(47+10, 31, CEDIT, textbuffer);
+  printtext(RX+7, 31, CEDIT, textbuffer);
 
-  printtext(40+10, 32, CTITLE, "AUTHOR ");
+  printtext(RX, 32, CTITLE, "AUTHOR ");
   sprintf(textbuffer, "%-32s", authorname);
-  printtext(47+10, 32, CEDIT, textbuffer);
+  printtext(RX+7, 32, CEDIT, textbuffer);
 
-  printtext(40+10, 33, CTITLE, "COPYR. ");
+  printtext(RX, 33, CTITLE, "COPYR. ");
   sprintf(textbuffer, "%-32s", copyrightname);
-  printtext(47+10, 33, CEDIT, textbuffer);
+  printtext(RX+7, 33, CEDIT, textbuffer);
 
   if ((editorInfo.editmode == EDIT_NAMES) && (!eamode))
   {
     switch(editorInfo.enpos)
     {
       case 0:
-      printbg(47+10+strlen(songname), 31, cc, 1);
+      printbg(RX+7+strlen(songname), 31, cc, 1);
       break;
       case 1:
-      printbg(47+10+strlen(authorname), 32, cc, 1);
+      printbg(RX+7+strlen(authorname), 32, cc, 1);
       break;
       case 2:
-      printbg(47+10+strlen(copyrightname), 33, cc, 1);
+      printbg(RX+7+strlen(copyrightname), 33, cc, 1);
       break;
     }
   }
@@ -628,13 +811,6 @@ void retro_printstatus(void)
   retromainshown = 1;
 }
 
-static int clampvalue(int value, int min, int max)
-{
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
-}
-
 // Moves the orderlist cursor steps song positions on (wheel over "POS xx").
 // The pattern editor shows the patterns at the new position, as SHIFT+RETURN
 // does in the orderlist
@@ -698,12 +874,12 @@ static int retrotablewheel(int d)
   int num, x, pos, column, v;
   unsigned char *ptr;
 
-  if ((mousey < 15) || (mousey >= 15 + VISIBLETABLEROWS) || (mousex < 40 + 10) || (mousex >= 40 + 10 + MAX_TABLES * 10))
+  if ((mousey < 15) || (mousey >= 15 + VISIBLETABLEROWS) || (mousex < RX) || (mousex >= RX + MAX_TABLES * 10))
     return 0;
 
   // Each table is "nn:LL RR" and two spaces
-  num = (mousex - 40 - 10) / 10;
-  x = (mousex - 40 - 10) % 10;
+  num = (mousex - RX) / 10;
+  x = (mousex - RX) % 10;
   if ((x < 3) || (x > 7))
   {
     retrotablescroll(num, mousewheel);
@@ -730,12 +906,15 @@ static int retrotablewheel(int d)
 // mouse buttons change (pattern, subtune & instrument numbers, octave, MIDI
 // input, steps), the instrument parameters, the table values, the song
 // position ("POS xx"; while playing, the playback goes there too) and the
-// pattern numbers in the orderlist. Returns nonzero if the wheel was over
-// one of them
+// pattern numbers in the orderlist, and the effects panel's value. Returns
+// nonzero if the wheel was over one of them
 static int retrowheel(void)
 {
   int d = -mousewheel;
   int c;
+
+  // The effects panel
+  if (fxwheel(d)) return 1;
 
   // Pattern number of a channel ("PATT.xx")
   for (c = 0; c < MAX_CHN; c++)
@@ -754,7 +933,7 @@ static int retrowheel(void)
   }
 
   // Subtune number
-  if ((mousey == 2) && (mousex >= 63 + 10) && (mousex <= 64 + 10))
+  if ((mousey == 2) && (mousex >= RX + 23) && (mousex <= RX + 24))
   {
     for (; d > 0; d--) nextsong();
     for (; d < 0; d++) prevsong();
@@ -779,10 +958,10 @@ static int retrowheel(void)
 
   // Pattern numbers in the orderlist. The channel's pattern editor shows the
   // pattern chosen (as RETURN on it does)
-  if ((mousey >= 3) && (mousey < 3 + MAX_CHN) && (mousex >= 44 + 10) && (mousex < 44 + 10 + VISIBLEORDERLIST * 3))
+  if ((mousey >= 3) && (mousey < 3 + MAX_CHN) && (mousex >= RX + 4) && (mousex < RX + 4 + VISIBLEORDERLIST * 3))
   {
     int chn = mousey - 3;
-    int pos = editorInfo.esview + (mousex - 44 - 10) / 3;
+    int pos = editorInfo.esview + (mousex - RX - 4) / 3;
     unsigned char *entry;
     int patt;
 
@@ -801,7 +980,7 @@ static int retrowheel(void)
   }
 
   // Instrument number
-  if ((mousey == 7) && (mousex >= 40 + 10) && (mousex <= 57 + 10))
+  if ((mousey == 7) && (mousex >= RX) && (mousex <= RX + 17))
   {
     for (; d > 0; d--) nextinstr();
     for (; d < 0; d++) previnstr();
@@ -814,15 +993,15 @@ static int retrowheel(void)
     int param = -1;
     int high = 0;
 
-    if ((mousey >= 8) && (mousey <= 12) && (mousex >= 40 + 10) && (mousex <= 57 + 10))
+    if ((mousey >= 8) && (mousey <= 12) && (mousex >= RX) && (mousex <= RX + 17))
     {
       param = mousey - 8;
-      high = (mousex == 56 + 10);
+      high = (mousex == RX + 16);
     }
-    if ((mousey >= 8) && (mousey <= 11) && (mousex >= 60 + 10) && (mousex <= 77 + 10))
+    if ((mousey >= 8) && (mousey <= 11) && (mousex >= RX + 20) && (mousex <= RX + 37))
     {
       param = mousey - 8 + 5;
-      high = (mousex == 76 + 10);
+      high = (mousex == RX + 36);
     }
     if (param >= 0)
     {
@@ -887,7 +1066,7 @@ void retro_mousecommands(void)
   // pattern editor. While the song plays, the view then stops following the
   // playback (as in the modern interface) until playback is started again
   // or stops
-  if ((mousewheel) && (!retrowheel()) && (mousey >= 2) && (mousey <= 2 + VISIBLEPATTROWS + 1) && (mousex < MAX_CHN * 15))
+  if ((mousewheel) && (!retrowheel()) && (mousey >= 2) && (mousey <= PATTROWY + VISIBLEPATTROWS) && (mousex < MAX_CHN * 15))
   {
     if ((isplaying()) && (followplay)) followsuspended = 1;
     patternscroll(mousewheel);
@@ -906,6 +1085,9 @@ void retro_mousecommands(void)
     }
     return;
   }
+
+  // The effects panel: pick an effect or let it go
+  if ((mouseb & MOUSEB_LEFT) && (!prevmouseb)) fxclick();
 
   // Pattern editpos & pattern number selection
   for (c = 0; c < MAX_CHN; c++)
@@ -928,10 +1110,10 @@ void retro_mousecommands(void)
     }
     else
     {
-      if ((mousey >= 2) && (mousey <= 34) && (mousex >= 6 + c * 15) && (mousex <= 14 + c * 15))
+      if ((mousey >= 2) && (mousey <= PATTROWY + VISIBLEPATTROWS) && (mousex >= 6 + c * 15) && (mousex <= 14 + c * 15))
       {
         int x = mousex - 6 - c * 15;
-        int newpos = mousey - 3 + editorInfo.epview;
+        int newpos = mousey - PATTROWY + editorInfo.epview;
         if (newpos < 0) newpos = 0;
         if (newpos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) newpos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
 
@@ -962,8 +1144,8 @@ void retro_mousecommands(void)
         {
           if (mouseb & MOUSEB_LEFT)
           {
-            if (mousey == 2) editorInfo.eppos--;
-            if (mousey == 34) editorInfo.eppos++;
+            if (mousey < PATTROWY) editorInfo.eppos--;
+            if (mousey == PATTROWY + VISIBLEPATTROWS) editorInfo.eppos++;
           }
         }
         if (editorInfo.eppos < 0) editorInfo.eppos = 0;
@@ -977,10 +1159,10 @@ void retro_mousecommands(void)
   // Song editpos & songnumber selection. Only the orderlist rows: the rows
   // below are the instrument's (the 6-channel layout this came from had 6
   // orderlist rows, and a click there chose a channel that doesn't exist)
-  if ((mousey >= 3) && (mousey < 3 + MAX_CHN) && (mousex >= 40 + 10))
+  if ((mousey >= 3) && (mousey < 3 + MAX_CHN) && (mousex >= RX))
   {
-    int newpos = editorInfo.esview + (mousex - 44 - 10) / 3;
-    int newcolumn = (mousex - 44 - 10) % 3;
+    int newpos = editorInfo.esview + (mousex - RX - 4) / 3;
+    int newcolumn = (mousex - RX - 4) % 3;
     int newchn = mousey - 3;
     if (newcolumn < 0) newcolumn = 0;
     if (newcolumn > 1) newcolumn = 1;
@@ -1020,31 +1202,31 @@ void retro_mousecommands(void)
 
     if ((mouseb & MOUSEB_RIGHT) && (newpos < songlen[editorInfo.esnum][editorInfo.eschn])) editorInfo.esmarkend = newpos;
   }
-  if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 2) && (mousex >= 63 + 10) && (mousex <= 64 + 10))
+  if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 2) && (mousex >= RX + 23) && (mousex <= RX + 24))
   {
     if (mouseb & MOUSEB_LEFT) nextsong();
     if (mouseb & MOUSEB_RIGHT) prevsong();
   }
 
   // Instrument editpos & instrument number selection
-  if ((mousey >= 8) && (mousey <= 12) && (mousex >= 56 + 10) && (mousex <= 57 + 10))
+  if ((mousey >= 8) && (mousey <= 12) && (mousex >= RX + 16) && (mousex <= RX + 17))
   {
     editorInfo.editmode = EDIT_INSTRUMENT;
     editorInfo.eipos = mousey - 8;
-    editorInfo.eicolumn = mousex - 56 - 10;
+    editorInfo.eicolumn = mousex - RX - 16;
   }
-  if ((mousey >= 8) && (mousey <= 11) && (mousex >= 76 + 10) && (mousex <= 77 + 10))
+  if ((mousey >= 8) && (mousey <= 11) && (mousex >= RX + 36) && (mousex <= RX + 37))
   {
     editorInfo.editmode = EDIT_INSTRUMENT;
     editorInfo.eipos = mousey - 8 + 5;
-    editorInfo.eicolumn = mousex - 76 - 10;
+    editorInfo.eicolumn = mousex - RX - 36;
   }
-  if ((mousey == 7) && (mousex >= 60 + 10))
+  if ((mousey == 7) && (mousex >= RX + 20))
   {
     editorInfo.editmode = EDIT_INSTRUMENT;
     editorInfo.eipos = 9;
   }
-  if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 7) && (mousex >= 56 + 10) && (mousex <= 57 + 10))
+  if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousey == 7) && (mousex >= RX + 16) && (mousex <= RX + 17))
   {
     if (mouseb & MOUSEB_LEFT) nextinstr();
     if (mouseb & MOUSEB_RIGHT) previnstr();
@@ -1053,7 +1235,7 @@ void retro_mousecommands(void)
   // Table editpos
   for (c = 0; c < MAX_TABLES; c++)
   {
-    if ((mousey >= 14) && (mousey <= 30) && (mousex >= 43 + 10 + c * 10) && (mousex <= 47 + 10 + c * 10))
+    if ((mousey >= 14) && (mousey <= 30) && (mousex >= RX + 3 + c * 10) && (mousex <= RX + 7 + c * 10))
     {
       int newpos = mousey - 15 + editorInfo.etview[editorInfo.etnum];
       if (newpos < 0) newpos = 0;
@@ -1073,7 +1255,7 @@ void retro_mousecommands(void)
       {
         editorInfo.etnum = c;
         editorInfo.etpos = mousey - 15 + editorInfo.etview[editorInfo.etnum];
-        editorInfo.etcolumn = mousex - 43 - 10 - c * 10;
+        editorInfo.etcolumn = mousex - RX - 3 - c * 10;
       }
       if (editorInfo.etcolumn >= 2) editorInfo.etcolumn--;
       if (editorInfo.etpos < 0) editorInfo.etpos = 0;
@@ -1084,7 +1266,7 @@ void retro_mousecommands(void)
   }
 
   // Name editpos
-  if ((mousey >= 31) && (mousey <= 33) && (mousex >= 47 + 10))
+  if ((mousey >= 31) && (mousey <= 33) && (mousex >= RX + 7))
   {
     editorInfo.editmode = EDIT_NAMES;
     editorInfo.enpos = mousey - 31;

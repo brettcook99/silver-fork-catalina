@@ -89,6 +89,9 @@ int undoInvalidateBuffer(int areaType);
 void undoAddEditorSettingsToList();
 void undoCreateEditorInfoBackup();
 void undoInvalidateUndoAreas();
+// Joins the last undo step, which starts at list position pos, to the step
+// before it, so that one CTRL+Z undoes both
+void undoJoinStep(int pos);
 
 
 #endif

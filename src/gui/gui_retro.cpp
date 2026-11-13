@@ -30,7 +30,7 @@ static bool mouseblocked = false;
 #define METERROWS 7
 #define METERCOLUMN 10                      // In each channel's 15 columns
 #define METERWIDTH 5
-#define METERBOTTOM (3 + VISIBLEPATTROWS)   // The row below the patterns
+#define METERBOTTOM (PATTROWY + VISIBLEPATTROWS) // The row below the patterns
 #define METERHEIGHT (METERROWS * FONT_YSIZE)
 #define METERFALL 300.0f                    // Pixels per second
 

@@ -60,6 +60,9 @@ void gui_designermidi(int noteon, int noteoff);
 // (CC 73), decay (75), sustain (70 or 76), release (72), filter cutoff (74)
 // and resonance (71), values 0-127
 void gui_designermidicc(int cc, int value);
+// MIDI CC14-CC21 (MIDICC_PATCH...): choose patch 1-8, in the tracker its
+// instrument
+void gui_midipatch(int cc);
 
 // Shows a message in the status bar for a few seconds
 void gui_message(const char *fmt, ...);

@@ -602,6 +602,12 @@ void undoPerform()
 
 
 
+void undoJoinStep(int pos)
+{
+	if ((pos > 0) && (pos < currentUndoPosition))
+		((GTUNDO_OBJECT*)undoList[pos])->counter = 1;
+}
+
 void undoFreeUndoObject(GTUNDO_OBJECT *gu)
 {
 	if (REMOVE_UNDO)
