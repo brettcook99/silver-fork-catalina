@@ -4,8 +4,9 @@
 // (gui_c64.h) in a frame like the C64's nameplate, laid out like the patch
 // page of Plogue's chipsynth C64: three oscillators (waveforms, sync / ring
 // / test, pulse width, envelope) and a filter, plus pages with step
-// sequencers for the wave, pulse and filter tables and one with the
-// emulation settings.
+// sequencers for the wave, pulse and filter tables, one with the emulation
+// settings and an instrument browser. MIDI knobs set the envelope and the
+// filter.
 //
 // Each oscillator is a GoatTracker instrument, played on the SID voice with
 // the same number, so that sync and ring modulation between the oscillators
@@ -37,30 +38,40 @@ namespace gui
 #define PAGE_H 30
 #define HINT_Y 39
 
-// The frame around the screen, measured on Scott's template (520 x 335
-// pixels below the title bar): white panel, the nameplate badge, the violet
-// screen
+// The frame: Scott's template (designerframe.png, made from measurements on
+// his 520 x 345 image: white panel with a blue bar along the top, the C64
+// nameplate badge, the violet screen). It fills the retro screen's place,
+// the tracker's title bar over its blue bar. The violet area, in the
+// template's pixels:
 #define FRAME_W 520.0f
-#define FRAME_H 335.0f
-#define SCREENCOLOR 0x755df9          // Violet: the screen and its surround
-#define LABELCOLOR 0xc9b4ff           // Lavender: labels and lines (LIGHTBLUE)
-#define FAINTCOLOR 0xa29cc0           // Greyed out text (GREY)
-#define DIMCOLOR 0x5443c8             // Disabled things (DARKGREY)
+#define FRAME_H 345.0f
+#define VIOLET_X0 13.0f
+#define VIOLET_Y0 49.07f
+#define VIOLET_X1 508.0f
+#define VIOLET_Y1 335.2f
+#define BORDERCOLOR 0x755df9          // Violet: the template's screen, here the
+                                      // border around the designer's screen
+#define SCREENCOLOR 0x332974          // Dark blue: the designer's screen (BLUE)
+#define BORDERW 0.035f                // Border at the sides (of its width)
+#define LABELCOLOR 0xa594ff           // Light violet: labels and lines (LIGHTBLUE)
+#define FAINTCOLOR 0x9c96bc           // Greyed out text (GREY)
+#define DIMCOLOR 0x5a4bb4             // Disabled things (DARKGREY)
 #define WARNCOLOR 0xff8a7a            // Lights, warnings (LIGHTRED)
 
-enum { PAGE_PATCH, PAGE_WAVE, PAGE_PULSE, PAGE_FILTER, PAGE_EMU, NUM_PAGES };
-static const char *pagelabels[NUM_PAGES] = { " PATCH ", " WAVE ", " PULSE ", " FILTER ", " EMU " };
+enum { PAGE_PATCH, PAGE_WAVE, PAGE_PULSE, PAGE_FILTER, PAGE_EMU, PAGE_BROWSER, NUM_PAGES };
+static const char *pagelabels[NUM_PAGES] = { " PATCH ", " WAVE ", " PULSE ", " FILTER ", " EMU ", " BROWSER " };
 static const char *pagetips[NUM_PAGES] =
 {
   "THE THREE OSCILLATORS AND THE FILTER (TAB: NEXT PAGE)",
   "STEP SEQUENCER OF THE WAVETABLE: WAVEFORMS AND ARPEGGIO NOTES",
   "STEP SEQUENCER OF THE PULSETABLE: PULSE WIDTH SWEEPS",
   "STEP SEQUENCER OF THE FILTERTABLE: FILTER TYPE AND CUTOFF SWEEPS",
-  "SID CHIP, CLOCK, PLAYER SPEED, HARD RESTART AND THE SID REGISTERS"
+  "SID CHIP, CLOCK, PLAYER SPEED, HARD RESTART AND THE SID REGISTERS",
+  "THE INSTRUMENTS IN A FOLDER: UP / DOWN TRIES ONE, ENTER OR DOUBLE-CLICK LOADS IT"
 };
 
 // Where the sounding note comes from
-enum { SRC_NONE, SRC_MOUSE, SRC_KEY, SRC_MIDI };
+enum { SRC_NONE, SRC_MOUSE, SRC_KEY, SRC_MIDI, SRC_PREVIEW };
 
 // Keyboard navigation
 enum { NAV_NONE, NAV_UP, NAV_DOWN, NAV_LEFT, NAV_RIGHT, NAV_ENTER };
@@ -72,7 +83,7 @@ enum
   ID_HEADER = 1, ID_TABS, ID_OSC1, ID_OSC2, ID_OSC3, ID_FILTER, ID_SEQHEAD,
   ID_STEP, ID_KIND, ID_BITS0, ID_BITS7 = ID_BITS0 + 7, ID_NOTE, ID_LANE, ID_FIX, ID_LOOP,
   ID_SEQBTN, ID_LISTNUM, ID_LISTKIND, ID_LISTA, ID_LISTB, ID_LISTC, ID_LISTD, ID_LISTE, ID_LISTF,
-  ID_LISTG, ID_LISTH, ID_SWEEP, ID_EMU
+  ID_LISTG, ID_LISTH, ID_SWEEP, ID_EMU, ID_BROWSER
 };
 
 static int page = PAGE_PATCH;
@@ -126,6 +137,25 @@ static bool navshift = false;
 static const char *hint = NULL;
 static const char *focushint = NULL;
 static bool editopen = false;
+static Uint32 cctime = 0;             // When a MIDI knob last changed something
+#define CCPAUSE 600                   // ms: a pause that ends a knob's undo step
+
+// The instrument browser's try-out (preview): the instrument tried is loaded
+// into the patch's instrument; the song as it was is kept here to be put
+// back. Editing anything keeps the instrument tried (as an undo step)
+static struct
+{
+  bool active;
+  int slot;                           // The instrument it is loaded into
+  char path[MAX_PATHNAME];
+  unsigned sum;                       // Checksum of the song with it loaded
+  INSTR instr[MAX_INSTR];
+  unsigned char ltable[MAX_TABLES][MAX_TABLELEN];
+  unsigned char rtable[MAX_TABLES][MAX_TABLELEN];
+  unsigned char pattern[MAX_PATT][MAX_PATTROWS * 4 + 4];
+} pv;
+static void keeppreview(void);
+static void cancelpreview(void);
 
 /*
  * Undo: everything the designer may change is marked, as table rows that are
@@ -137,6 +167,7 @@ static void openedit(void)
   int c;
 
   if (editopen) return;
+  if (pv.active) keeppreview();
   undobegin();
   for (c = 0; c < MAX_INSTR; c++) undoinstrument(c);
   for (c = 0; c < MAX_TABLES; c++) undotable(c);
@@ -834,17 +865,17 @@ static const ImU32 rainbow[5] =
   IM_COL32(0xa2, 0xff, 0x9c, 255), IM_COL32(0x00, 0xff, 0xff, 255)
 };
 
-// "SID Designer" in the header in the interface's bold font, and the rainbow
-// stripes between it and "64". Drawn over the screen
+// "SID Designer" in the header in the tracker's own font (as in its title
+// bar), and the rainbow stripes between it and "64". Drawn over the screen
 static void drawlogo(void)
 {
+  ImGuiIO &io = ImGui::GetIO();
   ImDrawList *dl = ImGui::GetBackgroundDrawList();
   ImVec2 s0 = c64::screenmin();
   float cell = c64::charsize();
+  float fb = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
   const char *text = "SID Designer";
-  float size = cell * 1.5f;
-  float width = fontbold->CalcTextSizeA(size, FLT_MAX, 0.0f, text).x;
-  float maxw = cell * 10.0f;
+  float pixel, width;
   ImVec2 pos;
   int r;
 
@@ -855,15 +886,14 @@ static void drawlogo(void)
     dl->AddRectFilled(ImVec2(s0.x + cell * 12.0f, y), ImVec2(s0.x + cell * 22.0f, y + cell * 0.5f), rainbow[r]);
   }
 
-  if (width > maxw)
-  {
-    size *= maxw / width;
-    width = maxw;
-  }
-  pos = ImVec2(floorf(s0.x + cell * 11.0f - width), floorf(s0.y + cell * (HEADER_Y + 2.5f) - size * 0.55f));
-  // A little heavier than the bold font, like the C64's lettering
-  dl->AddText(fontbold, size, ImVec2(pos.x + size * 0.04f, pos.y), IM_COL32(255, 255, 255, 255), text);
-  dl->AddText(fontbold, size, pos, IM_COL32(255, 255, 255, 255), text);
+  // Font pixels of whole screen pixels, filling columns 0-10 (fractions only
+  // when whole ones would not fit)
+  pixel = floorf(cell * 11.0f / retrotextwidth(text, 1.0f) * fb + 0.5f) / fb;
+  if (retrotextwidth(text, pixel) > cell * 11.0f) pixel = cell * 11.0f / retrotextwidth(text, 1.0f);
+  if (pixel < 1.0f / fb) pixel = 1.0f / fb;
+  width = retrotextwidth(text, pixel);
+  pos = ImVec2(floorf((s0.x + cell * 11.0f - width) * fb) / fb, floorf((s0.y + cell * (HEADER_Y + 2.5f) - pixel * 7.5f) * fb) / fb);
+  drawretrotext(dl, pos, pixel, pixel, IM_COL32(255, 255, 255, 255), text);
 }
 
 static void drawtabs(void)
@@ -2113,91 +2143,569 @@ static void drawemupage(void)
 }
 
 /*
+ * BROWSER page: the instruments (.ins files) and the folders in a folder.
+ * Moving onto an instrument (UP / DOWN or a click) tries it: it is loaded
+ * into the patch's instrument and a note plays. ENTER or a double-click
+ * keeps it; leaving the page puts the song back as it was
+ */
+
+#define BR_MAXENTRIES 4000
+#define BR_LISTY (PAGE_Y + 5)               // First row of the list
+#define BR_ROWS (PAGE_Y + PAGE_H - 1 - BR_LISTY)
+#define BR_W 58                             // Width of the list's box
+#define PREVIEWMS 700                       // How long the tried note is held
+
+#if defined(_WIN32)
+#define PATHSEP '\\'
+#else
+#define PATHSEP '/'
+#endif
+
+struct BrowserEntry
+{
+  char name[MAX_FILENAME];
+  bool dir;
+  bool valid;                               // A GoatTracker instrument
+  char insname[MAX_INSTRNAMELEN + 1];       // Its own name
+  unsigned char ad, sr;
+};
+
+static BrowserEntry *brentries = NULL;
+static int brcount = 0;
+static int brfiles = 0;
+static char brscanned[MAX_PATHNAME];        // The folder listed ("" = none yet)
+static bool brrescan = false;
+static bool brfailed = false;               // The folder could not be read
+static int brsel = -1;
+static int brscroll = 0;
+static char brselect[MAX_FILENAME];         // Entry to select after the next scan
+// Keys for the list, acted on when the page is drawn
+static int brmove = 0;                      // UP -1 / DOWN +1 (summed)
+static int brjump = 0;                      // HOME -1 / END +1
+static bool brenter = false, brparent = false;
+static Uint32 previewtime = 0;
+
+static bool isslash(char c)
+{
+  return (c == '/') || (c == '\\');
+}
+
+static int nocasecmp(const char *a, const char *b)
+{
+  for (;; a++, b++)
+  {
+    int ca = tolower((unsigned char)*a), cb = tolower((unsigned char)*b);
+    if ((ca != cb) || (!ca)) return ca - cb;
+  }
+}
+
+static bool hasext(const char *name, const char *ext)
+{
+  size_t n = strlen(name), e = strlen(ext);
+  return (n > e) && (!nocasecmp(name + n - e, ext));
+}
+
+static void joinpath(char *out, int size, const char *dir, const char *name)
+{
+  size_t len = strlen(dir);
+  if ((len) && (isslash(dir[len - 1]))) snprintf(out, size, "%s%s", dir, name);
+  else snprintf(out, size, "%s%c%s", dir, PATHSEP, name);
+}
+
+// Directories first, then by name
+static int entrycmp(const void *a, const void *b)
+{
+  const BrowserEntry *ea = (const BrowserEntry *)a, *eb = (const BrowserEntry *)b;
+  if (ea->dir != eb->dir) return ea->dir ? -1 : 1;
+  return nocasecmp(ea->name, eb->name);
+}
+
+// The instrument's name and envelope from the file's header
+static void readheader(const char *path, BrowserEntry *e)
+{
+  unsigned char head[13 + MAX_INSTRNAMELEN];
+  FILE *f = fopen(path, "rb");
+  size_t n;
+
+  if (!f) return;
+  n = fread(head, 1, sizeof head, f);
+  fclose(f);
+  if ((n < 13) || (memcmp(head, "GTI", 3)) || (!strchr("2345!", head[3]))) return;
+  e->valid = true;
+  e->ad = head[4];
+  e->sr = head[5];
+  // GTI2-5: the name follows AD, SR and 7 more bytes
+  if ((head[3] != '!') && (n == sizeof head))
+  {
+    memcpy(e->insname, head + 13, MAX_INSTRNAMELEN);
+    e->insname[MAX_INSTRNAMELEN] = 0;
+  }
+}
+
+static void scanfolder(void)
+{
+  DIR *d;
+  struct dirent *de;
+  int i;
+
+  snprintf(brscanned, sizeof brscanned, "%s", browserfolder);
+  brcount = brfiles = 0;
+  brsel = -1;
+  brscroll = 0;
+  brrescan = false;
+  brfailed = true;
+  if (!brentries) brentries = (BrowserEntry *)malloc(sizeof(BrowserEntry) * BR_MAXENTRIES);
+  if (!brentries) return;
+  d = opendir(browserfolder);
+  if (!d) return;
+  brfailed = false;
+  while (((de = readdir(d)) != NULL) && (brcount < BR_MAXENTRIES))
+  {
+    char full[MAX_PATHNAME * 2];
+    struct stat st;
+    BrowserEntry *e = &brentries[brcount];
+
+    if (de->d_name[0] == '.') continue;
+    joinpath(full, sizeof full, browserfolder, de->d_name);
+    if (stat(full, &st)) continue;
+    memset(e, 0, sizeof *e);
+    snprintf(e->name, sizeof e->name, "%s", de->d_name);
+    if (st.st_mode & S_IFDIR) e->dir = true;
+    else if (hasext(de->d_name, ".ins"))
+    {
+      readheader(full, e);
+      brfiles++;
+    }
+    else continue;
+    brcount++;
+  }
+  closedir(d);
+  qsort(brentries, brcount, sizeof(BrowserEntry), entrycmp);
+  // After going to the parent folder: the folder come from
+  for (i = 0; (brselect[0]) && (i < brcount); i++)
+  {
+    if (!strcmp(brentries[i].name, brselect))
+    {
+      brsel = i;
+      brscroll = i - BR_ROWS / 2;
+    }
+  }
+  brselect[0] = 0;
+}
+
+static void setfolder(const char *path)
+{
+  if (strlen(path) >= MAX_PATHNAME) return;
+  strcpy(browserfolder, path);
+}
+
+static void parentfolder(void)
+{
+  char path[MAX_PATHNAME];
+  int len;
+
+  strcpy(path, browserfolder);
+  len = (int)strlen(path);
+  while ((len > 1) && (isslash(path[len - 1]))) path[--len] = 0;
+  while ((len > 0) && (!isslash(path[len - 1]))) len--;
+  if (len <= 0) return;                     // No folder above
+  snprintf(brselect, sizeof brselect, "%s", path + len);
+  path[len] = 0;
+  // Keep the slash of a root ("/", "C:\"), drop any other
+  if ((len > 1) && (path[len - 2] != ':')) path[len - 1] = 0;
+  setfolder(path);
+}
+
+// Checksum of everything loading an instrument may change
+static unsigned songsum(void)
+{
+  const unsigned char *parts[4] = { (const unsigned char *)instr, &ltable[0][0], &rtable[0][0], &pattern[0][0] };
+  const size_t sizes[4] = { sizeof instr, sizeof ltable, sizeof rtable, sizeof pattern };
+  unsigned h = 2166136261u;
+  int p;
+  size_t i;
+
+  for (p = 0; p < 4; p++)
+  {
+    for (i = 0; i < sizes[p]; i++) h = (h ^ parts[p][i]) * 16777619u;
+  }
+  return h;
+}
+
+static void putsongback(void)
+{
+  memcpy(instr, pv.instr, sizeof instr);
+  memcpy(ltable, pv.ltable, sizeof ltable);
+  memcpy(rtable, pv.rtable, sizeof rtable);
+  memcpy(pattern, pv.pattern, sizeof pattern);
+}
+
+static void loadinto(const char *path, int slot)
+{
+  if (strlen(path) >= MAX_FILENAME) return;
+  editorInfo.einum = slot;
+  strcpy(instrfilename, path);
+  loadinstrument();
+}
+
+// The song as it was before the try-out, unless something else has changed
+// it meanwhile (song loaded...): then it stays as it is
+static void cancelpreview(void)
+{
+  if (!pv.active) return;
+  if (heldsource == SRC_PREVIEW) noteoff(SRC_PREVIEW, 0);
+  if (songsum() == pv.sum) putsongback();
+  pv.active = false;
+}
+
+// The instrument tried stays, as an undo step of its own
+static void keeppreview(void)
+{
+  char path[MAX_PATHNAME];
+  int c;
+
+  if (!pv.active) return;
+  pv.active = false;
+  if (songsum() != pv.sum) return;
+  strcpy(path, pv.path);
+  putsongback();
+  undobegin();
+  for (c = 0; c < MAX_INSTR; c++) undoinstrument(c);
+  for (c = 0; c < MAX_TABLES; c++) undotable(c);
+  for (c = 0; c < MAX_PATT; c++) undopattern(c);
+  loadinto(path, pv.slot);
+  undoend();
+}
+
+static void playpreview(void)
+{
+  int k;
+
+  if ((heldnote) && (heldsource != SRC_PREVIEW)) return;    // A key is held
+  if (heldnote) noteoff(SRC_PREVIEW, 0);
+  for (k = 0; k < PATCH_OSC; k++) oscmute[k] = false;
+  noteon(FIRSTNOTE + editorInfo.epoctave * 12, SRC_PREVIEW, 0);
+  previewtime = SDL_GetTicks();
+}
+
+// Tries the instrument in the file
+static void previewfile(const char *path)
+{
+  int slot = editorInfo.einum;
+
+  if ((pv.active) && (!strcmp(pv.path, path)))
+  {
+    playpreview();
+    return;
+  }
+  cancelpreview();
+  if ((slot < 1) || (slot >= MAX_INSTR)) slot = 1;
+  if (strlen(path) >= MAX_FILENAME) return;
+  memcpy(pv.instr, instr, sizeof instr);
+  memcpy(pv.ltable, ltable, sizeof ltable);
+  memcpy(pv.rtable, rtable, sizeof rtable);
+  memcpy(pv.pattern, pattern, sizeof pattern);
+  pv.slot = slot;
+  snprintf(pv.path, sizeof pv.path, "%s", path);
+  loadinto(path, slot);
+  pv.sum = songsum();
+  pv.active = true;
+  playpreview();
+}
+
+// Loads the instrument in the file for good (CTRL+Z undoes)
+static void loadfile(const char *path)
+{
+  int slot = pv.active ? pv.slot : editorInfo.einum;
+
+  if ((slot < 1) || (slot >= MAX_INSTR)) slot = 1;
+  if ((pv.active) && (!strcmp(pv.path, path)))
+  {
+    // The one being tried: keep it
+    keeppreview();
+    gui_addrecentfile(path);
+    gui_message("Loaded instrument %02X from %s", slot, gt_basename(path));
+    return;
+  }
+  cancelpreview();
+  closeedit();
+  openedit();
+  gt_loadinstrument(path, slot);
+  closeedit();
+}
+
+// Acts on the entry: a folder is opened, an instrument tried or loaded
+static void openentry(int i, bool load)
+{
+  char full[MAX_PATHNAME * 2];
+  BrowserEntry *e;
+
+  if ((i < 0) || (i >= brcount)) return;
+  e = &brentries[i];
+  joinpath(full, sizeof full, browserfolder, e->name);
+  if (e->dir)
+  {
+    if (load) setfolder(full);
+    return;
+  }
+  if (!e->valid)
+  {
+    gui_message("%s is not a GoatTracker instrument", e->name);
+    return;
+  }
+  if (load) loadfile(full);
+  else previewfile(full);
+}
+
+static void selectentry(int i)
+{
+  if (brcount <= 0) return;
+  i = clampint(i, 0, brcount - 1);
+  if (i == brsel) return;
+  brsel = i;
+  if (brsel < brscroll) brscroll = brsel;
+  if (brsel >= brscroll + BR_ROWS) brscroll = brsel - BR_ROWS + 1;
+  if (!brentries[brsel].dir) openentry(brsel, false);
+}
+
+static void drawbrowserpage(void)
+{
+  ImGuiIO &io = ImGui::GetIO();
+  const int x1 = BR_W - 2;                  // Last column inside the box
+  int i, r, y;
+  char text[MAX_PATHNAME + 8];
+
+  // The folder: the one used last, else the instrument dialogs' folder
+  if (!browserfolder[0]) setfolder(gt_folder(FOLDER_INSTR));
+  if ((!browserfolder[0]) && (getcwd(text, sizeof text))) setfolder(text);
+  if ((brrescan) || (strcmp(brscanned, browserfolder))) scanfolder();
+
+  // Keys
+  if (brjump) selectentry(brjump < 0 ? 0 : brcount - 1);
+  else if (brmove) selectentry(brsel < 0 ? (brmove > 0 ? 0 : brcount - 1) : brsel + brmove);
+  brjump = brmove = 0;
+  if (brenter) openentry(brsel, true);
+  if (brparent) parentfolder();
+  brenter = brparent = false;
+
+  box(0, PAGE_Y, BR_W, PAGE_H, LIGHTBLUE, "INSTRUMENT BROWSER", WHITE);
+
+  // Folder line: the end of the path if it is long
+  print(2, PAGE_Y + 1, "FOLDER", LIGHTBLUE);
+  {
+    int room = x1 - 9 + 1;
+    const char *p = browserfolder;
+    if ((int)strlen(p) > room)
+    {
+      p += strlen(p) - (room - 3);
+      snprintf(text, sizeof text, "...%s", p);
+    }
+    else snprintf(text, sizeof text, "%s", p);
+    // The C64 has no backslash (it would show as a pound sign)
+    for (i = 0; text[i]; i++)
+    {
+      if (text[i] == '\\') text[i] = '/';
+    }
+    print(9, PAGE_Y + 1, text, WHITE);
+  }
+  if (button(WID(ID_BROWSER, 1), 2, PAGE_Y + 2, " SET FOLDER ", false, WHITE, "CHOOSE THE FOLDER TO LOOK IN"))
+    cmd_post(GTCMD_BROWSEFOLDER);
+  if (button(WID(ID_BROWSER, 2), 15, PAGE_Y + 2, " PARENT ", false, WHITE, "THE FOLDER ABOVE THIS ONE (BACKSPACE)"))
+    parentfolder();
+  if (button(WID(ID_BROWSER, 3), 24, PAGE_Y + 2, " REFRESH ", false, WHITE, "READ THE FOLDER AGAIN"))
+    brrescan = true;
+  snprintf(text, sizeof text, "%d INSTRUMENT%s", brfiles, brfiles == 1 ? "" : "S");
+  print(x1 - (int)strlen(text) + 1, PAGE_Y + 2, text, GREY);
+  print(2, BR_LISTY - 1, "NAME", GREY);
+  print(34, BR_LISTY - 1, "INSTRUMENT", GREY);
+  print(51, BR_LISTY - 1, "AD SR", GREY);
+
+  // The list
+  if (over(1.0f, (float)BR_LISTY, (float)(x1), (float)BR_ROWS) && (in.wheel != 0.0f))
+    brscroll -= (int)(in.wheel > 0.0f ? 3 : -3);
+  if (brscroll > brcount - BR_ROWS) brscroll = brcount - BR_ROWS;
+  if (brscroll < 0) brscroll = 0;
+  if (!brcount)
+    print(2, BR_LISTY + 1, brfailed ? "THE FOLDER CAN'T BE READ" : "NO INSTRUMENTS OR FOLDERS HERE", GREY);
+  for (r = 0; r < BR_ROWS; r++)
+  {
+    BrowserEntry *e;
+    bool hovered, sel;
+    int fg;
+    char name[MAX_FILENAME];
+    char full[MAX_PATHNAME * 2];
+
+    i = brscroll + r;
+    if (i >= brcount) break;
+    e = &brentries[i];
+    y = BR_LISTY + r;
+    hovered = over(1.0f, (float)y, (float)(x1 - 1), 1.0f);
+    sel = (i == brsel);
+    if (hovered)
+    {
+      tip(e->dir ? "DOUBLE-CLICK TO OPEN THE FOLDER" : e->valid ? "CLICK TO TRY, DOUBLE-CLICK TO LOAD INTO THE PATCH" :
+        "NOT A GOATTRACKER INSTRUMENT");
+      if (in.clicked)
+      {
+        // A click tries an instrument (again), a double-click (a second
+        // click on the same row soon after) loads it or opens the folder
+        static Uint32 lastclick = 0;
+        static int lastrow = -1;
+        Uint32 now = SDL_GetTicks();
+        bool twice = (lastrow == i) && (now - lastclick <= (Uint32)(io.MouseDoubleClickTime * 1000.0f + 100.0f));
+        brsel = i;
+        sel = true;
+        lastrow = twice ? -1 : i;
+        lastclick = now;
+        if (twice) openentry(i, true);
+        else if (!e->dir) openentry(i, false);
+      }
+    }
+
+    snprintf(name, sizeof name, "%s", e->name);
+    if (e->dir) strncat(name, "/", sizeof name - strlen(name) - 1);
+    else if (hasext(name, ".ins")) name[strlen(name) - 4] = 0;
+    name[31] = 0;
+    fg = e->dir ? LIGHTBLUE : e->valid ? WHITE : DARKGREY;
+    joinpath(full, sizeof full, browserfolder, e->name);
+    if ((pv.active) && (!e->dir) && (!strcmp(full, pv.path))) fg = YELLOW;
+    if (hovered && !sel) fg = YELLOW;
+    if (sel) fill(1, y, x1 - 1, 1, SC_SPACE, WHITE, LIGHTBLUE);
+    print(2, y, name, sel ? BLUE : fg, false, sel ? LIGHTBLUE : -1);
+    if (e->dir) print(51, y, "DIR", sel ? BLUE : GREY, false, sel ? LIGHTBLUE : -1);
+    else if (e->valid)
+    {
+      print(34, y, e->insname, sel ? BLUE : GREY, false, sel ? LIGHTBLUE : -1);
+      printfmt(51, y, sel ? BLUE : GREY, "%02X %02X", e->ad, e->sr);
+      if (sel) color(51, y, 5, 1, BLUE, LIGHTBLUE);
+    }
+  }
+
+  // Scroll bar
+  if (brcount > BR_ROWS)
+  {
+    int top = brscroll * BR_ROWS / brcount;
+    int len = BR_ROWS * BR_ROWS / brcount;
+    if (len < 1) len = 1;
+    if (top + len > BR_ROWS) top = BR_ROWS - len;
+    fill(x1, BR_LISTY, 1, BR_ROWS, SC_SPACE, DARKGREY, DARKGREY);
+    fill(x1, BR_LISTY + top, 1, len, SC_SPACE, LIGHTBLUE, LIGHTBLUE);
+    if (over((float)x1, (float)BR_LISTY, 1.0f, (float)BR_ROWS))
+    {
+      tip("SCROLL (OR USE THE WHEEL)");
+      if (in.clicked) brscroll += (in.y < BR_LISTY + top) ? -BR_ROWS : (in.y >= BR_LISTY + top + len) ? BR_ROWS : 0;
+    }
+  }
+
+  // The panel: what is selected, what happens
+  box(BR_W, PAGE_Y, COLS - BR_W, PAGE_H, LIGHTBLUE, "TRY OUT", WHITE);
+  {
+    const int px = BR_W + 2;
+    BrowserEntry *e = ((brsel >= 0) && (brsel < brcount)) ? &brentries[brsel] : NULL;
+    int target = pv.active ? pv.slot : editorInfo.einum;
+
+    // (19 columns inside the box)
+    if ((e) && (!e->dir) && (e->valid))
+    {
+      print(px, PAGE_Y + 2, e->insname[0] ? e->insname : "(NO NAME)", WHITE);
+      printfmt(px, PAGE_Y + 4, LIGHTBLUE, "ATTACK  %X", e->ad >> 4);
+      printfmt(px, PAGE_Y + 5, LIGHTBLUE, "DECAY   %X", e->ad & 15);
+      printfmt(px, PAGE_Y + 6, LIGHTBLUE, "SUSTAIN %X", e->sr >> 4);
+      printfmt(px, PAGE_Y + 7, LIGHTBLUE, "RELEASE %X", e->sr & 15);
+    }
+    else print(px, PAGE_Y + 2, e && e->dir ? "A FOLDER" : "NOTHING SELECTED", GREY);
+
+    if (pv.active)
+    {
+      printfmt(px, PAGE_Y + 9, YELLOW, "TRYING IN INS %02X", target);
+      print(px, PAGE_Y + 10, "NOT KEPT YET", GREY);
+    }
+    else printfmt(px, PAGE_Y + 9, GREY, "LOADS INTO INS %02X", target);
+
+    if (button(WID(ID_BROWSER, 10), px, PAGE_Y + 12, " LOAD ", false, WHITE, "KEEP THE SELECTED INSTRUMENT IN THE PATCH (ENTER)",
+      (e) && (!e->dir) && (e->valid)))
+      openentry(brsel, true);
+    if (button(WID(ID_BROWSER, 11), px + 7, PAGE_Y + 12, " PLAY ", false, WHITE, "PLAY THE INSTRUMENT BEING TRIED AGAIN", pv.active))
+      playpreview();
+    if (button(WID(ID_BROWSER, 12), px, PAGE_Y + 14, " PUT BACK ", false, WHITE, "STOP TRYING: THE PATCH AS IT WAS", pv.active))
+      cancelpreview();
+
+    print(px, PAGE_Y + 17, "UP/DOWN   TRY", GREY);
+    print(px, PAGE_Y + 18, "ENTER     LOAD", GREY);
+    print(px, PAGE_Y + 19, "DBL-CLICK LOAD/OPEN", GREY);
+    print(px, PAGE_Y + 20, "BACKSPACE PARENT", GREY);
+    print(px, PAGE_Y + 21, "HOME END  TOP/END", GREY);
+    print(px, PAGE_Y + 22, "Z-M Q-P   PLAY", GREY);
+    print(px, PAGE_Y + 23, "PGUP/PGDN OCTAVE", GREY);
+    print(px, PAGE_Y + 25, "LEAVING THIS PAGE", GREY);
+    print(px, PAGE_Y + 26, "PUTS BACK WHAT WAS", GREY);
+    print(px, PAGE_Y + 27, "TRIED BUT NOT KEPT", GREY);
+  }
+}
+
+/*
  * The frame
  */
 
-// The white panel under the title bar with the C64 nameplate badge and the
-// violet screen, after Scott's template. Returns the area for the C64
-// screen (ImGui points)
-static void drawframe(ImVec2 a, ImVec2 b, ImVec2 *screen0, ImVec2 *screen1)
+#include "designerframe.h"
+
+static unsigned char *framepixels = NULL;   // designerframe.png decoded
+static int framew = 0, frameh = 0;
+static bool framefailed = false;
+static SDL_Texture *frametexture = NULL;    // At the size shown
+static SDL_Renderer *framerenderer = NULL;
+static int frametexw = 0, frameteth = 0;
+
+static void freeframe(void)
 {
+  if (frametexture) SDL_DestroyTexture(frametexture);
+  frametexture = NULL;
+  free(framepixels);
+  framepixels = NULL;
+}
+
+// Draws the frame over a-b (ImGui points: the retro screen's place), pixel
+// for pixel. Returns the violet area
+static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen0, ImVec2 *screen1)
+{
+  ImGuiIO &io = ImGui::GetIO();
   ImDrawList *dl = ImGui::GetBackgroundDrawList();
-  ImU32 white = IM_COL32(255, 255, 255, 255);
-  ImU32 badge = IM_COL32(0xc4, 0xbd, 0xa8, 255);
-  ImU32 lettering = IM_COL32(0xfc, 0xfc, 0xf8, 255);
-  ImU32 violet = IM_COL32((SCREENCOLOR >> 16) & 0xff, (SCREENCOLOR >> 8) & 0xff, SCREENCOLOR & 0xff, 255);
+  float sx = io.DisplayFramebufferScale.x > 0.0f ? io.DisplayFramebufferScale.x : 1.0f;
+  float sy = io.DisplayFramebufferScale.y > 0.0f ? io.DisplayFramebufferScale.y : 1.0f;
+  int w = (int)((b.x - a.x) * sx + 0.5f);
+  int h = (int)((b.y - a.y) * sy + 0.5f);
   float u = (b.x - a.x) / FRAME_W;      // One template pixel
   float v = (b.y - a.y) / FRAME_H;
-  float bx0 = a.x + 4.0f * u, by0 = a.y + 6.0f * v;
-  float bh = 25.0f * v;
-  float bx1 = a.x + 269.0f * u, by1 = by0 + bh;
-  float r = bh * 0.5f;
-  float cy = by0 + r;
-  int i;
 
-  dl->AddRectFilled(a, b, white, 6.0f * u, ImDrawFlags_RoundCornersBottom);
+  *screen0 = ImVec2(a.x + VIOLET_X0 * u, a.y + VIOLET_Y0 * v);
+  *screen1 = ImVec2(a.x + VIOLET_X1 * u, a.y + VIOLET_Y1 * v);
 
-  // The faint stripes running on to the right of the badge
-  for (i = 0; i < 3; i++)
+  if ((!framepixels) && (!framefailed))
   {
-    float y = a.y + (9.0f + i * 9.0f) * v;
-    dl->AddRectFilled(ImVec2(bx1 - r, y), ImVec2(b.x - 6.0f * u, y + 4.0f * v), IM_COL32(0xff, 0xff, 0xee, 255));
+    framepixels = decodepng(designerframe_png, sizeof designerframe_png, &framew, &frameh);
+    framefailed = !framepixels;
   }
-
-  // The badge: C= logo, "commodore", the rainbow stripes, "64"
-  dl->AddRectFilled(ImVec2(bx0, by0), ImVec2(bx1, by1), badge, r);
+  if ((frametexture) && ((framerenderer != renderer) || (frametexw != w) || (frameteth != h)))
   {
-    // The C: a thick ring open to the right
-    float cx = bx0 + 12.0f * u;
-    float ro = bh * 0.34f, ri = bh * 0.19f;
-    float a0 = 0.27f * IM_PI, a1 = 1.73f * IM_PI;
-    const int seg = 24;
-    for (i = 0; i < seg; i++)
-    {
-      float t0 = a0 + (a1 - a0) * i / seg, t1 = a0 + (a1 - a0) * (i + 1) / seg;
-      ImVec2 q[4] =
-      {
-        ImVec2(cx + cosf(t0) * ro, cy - sinf(t0) * ro), ImVec2(cx + cosf(t1) * ro, cy - sinf(t1) * ro),
-        ImVec2(cx + cosf(t1) * ri, cy - sinf(t1) * ri), ImVec2(cx + cosf(t0) * ri, cy - sinf(t0) * ri)
-      };
-      dl->AddConvexPolyFilled(q, 4, lettering);
-    }
-    // The flags: two small parallelograms in the opening, cut at a slant
-    {
-      float fx = cx + ri * 0.55f, fw = ro * 0.95f, fh = (ro - ri) * 0.82f, gap = ri * 0.22f;
-      ImVec2 up[4] = { ImVec2(fx, cy - gap - fh), ImVec2(fx + fw, cy - gap - fh), ImVec2(fx + fw - fh, cy - gap), ImVec2(fx, cy - gap) };
-      ImVec2 dn[4] = { ImVec2(fx, cy + gap), ImVec2(fx + fw - fh, cy + gap), ImVec2(fx + fw, cy + gap + fh), ImVec2(fx, cy + gap + fh) };
-      dl->AddConvexPolyFilled(up, 4, lettering);
-      dl->AddConvexPolyFilled(dn, 4, lettering);
-    }
+    SDL_DestroyTexture(frametexture);
+    frametexture = NULL;
   }
+  if ((!frametexture) && (framepixels) && (w > 0) && (h > 0))
   {
-    const char *word = "commodore";
-    float size = bh * 0.78f;
-    float x0 = bx0 + 31.0f * u, x1 = bx0 + 143.0f * u;
-    float w = fontbold->CalcTextSizeA(size, FLT_MAX, 0.0f, word).x;
-    float sx = (x1 - x0) / w;
-    ImVec2 p;
-    if (sx < 1.0f) size *= sx;
-    p = ImVec2(x0, cy - size * 0.62f);
-    for (i = 0; i < 3; i++) dl->AddText(fontbold, size, ImVec2(p.x + size * 0.035f * i, p.y), lettering, word);
+    frametexture = scaledtexture(renderer, framepixels, framew, frameh, w, h);
+    framerenderer = renderer;
+    frametexw = w;
+    frameteth = h;
   }
-  for (i = 0; i < 5; i++)
+  if (frametexture)
   {
-    float y = by0 + (4.0f + i * 4.0f) * v;
-    dl->AddRectFilled(ImVec2(bx0 + 147.0f * u, y), ImVec2(bx0 + 220.0f * u, y + 2.2f * v), rainbow[i]);
-  }
-  {
-    float size = bh * 0.95f;
-    float x = bx0 + 226.0f * u;
-    for (i = 0; i < 3; i++) dl->AddText(fontbold, size, ImVec2(x + size * 0.04f * i, cy - size * 0.6f), lettering, "64");
+    dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)frametexture), a, b);
+    return;
   }
 
-  // The screen
-  *screen0 = ImVec2(a.x + 13.0f * u, a.y + 40.0f * v);
-  *screen1 = ImVec2(b.x - 12.0f * u, b.y - 9.0f * v);
-  dl->AddRectFilled(*screen0, *screen1, violet);
-  dl->AddRect(*screen0, *screen1, IM_COL32(0x65, 0x4d, 0xf5, 255));
+  // Without the image: a plain white panel and the violet
+  dl->AddRectFilled(a, b, IM_COL32(255, 255, 255, 255), 8.0f * u);
+  dl->AddRectFilled(*screen0, *screen1, IM_COL32((BORDERCOLOR >> 16) & 0xff, (BORDERCOLOR >> 8) & 0xff, BORDERCOLOR & 0xff, 255));
 }
 
 static void readinput(void)
@@ -2231,28 +2739,36 @@ static void movefocus(void)
 void gui::drawdesigner(SDL_Renderer *renderer)
 {
   ImGuiIO &io = ImGui::GetIO();
-  ImVec2 s0, s1, f0, f1, c0, c1;
-  float ch, pad;
+  ImDrawList *bg = ImGui::GetBackgroundDrawList();
+  ImVec2 s0, s1, c0, c1;
+  float pad;
   int titlecol;
 
   drawnlastframe = true;
+  // The browser's try-out ends when its page is left or another patch is
+  // chosen; its note is let go after a moment
+  if ((pv.active) && ((page != PAGE_BROWSER) || (editorInfo.einum != pv.slot))) cancelpreview();
+  if ((heldsource == SRC_PREVIEW) && (SDL_GetTicks() - previewtime >= PREVIEWMS)) noteoff(SRC_PREVIEW, 0);
   bindpatch();
   if (seqosc >= PATCH_OSC) seqosc = 0;
 
-  // The tracker's title bar on top, where it is on the retro screen; the
-  // frame fills the rest of the retro screen's place, black around it
-  ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(0, 0, 0, 255));
+  // The frame fills the retro screen's place, black around it; the tracker's
+  // title bar on top of it, where it is on the retro screen (drawn first to
+  // learn that place, into the channel drawn last)
+  bg->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(0, 0, 0, 255));
   retro_printtitlebar();
+  bg->ChannelsSplit(2);
+  bg->ChannelsSetCurrent(1);
   titlecol = drawretrotitlebar(renderer, &s0, &s1);
-  ch = (s1.y - s0.y) / MAX_ROWS;
-  f0 = ImVec2(s0.x, s0.y + ch);
-  f1 = s1;
-  drawframe(f0, f1, &c0, &c1);
-  pad = (c1.x - c0.x) * 0.012f;
+  bg->ChannelsSetCurrent(0);
+  drawframe(renderer, s0, s1, &c0, &c1);
+  bg->ChannelsMerge();
+  // The dark blue screen in the violet, like a C64's screen in its border
+  pad = (c1.x - c0.x) * BORDERW;
   c0 = ImVec2(c0.x + pad, c0.y + pad);
   c1 = ImVec2(c1.x - pad, c1.y - pad);
 
-  // Its colors on the violet screen
+  // Its colors on the dark blue screen
   setcolor(BLUE, SCREENCOLOR);
   setcolor(LIGHTBLUE, LABELCOLOR);
   setcolor(GREY, FAINTCOLOR);
@@ -2276,6 +2792,8 @@ void gui::drawdesigner(SDL_Renderer *renderer)
     keyboardmode = true;
   }
   if (in.clicked) keyboardmode = false;
+  // A click is a step of its own, apart from a knob's
+  if ((in.clicked) && (editopen) && (!active)) closeedit();
   hint = NULL;
   focushint = NULL;
   nfocus = 0;
@@ -2290,13 +2808,14 @@ void gui::drawdesigner(SDL_Renderer *renderer)
     case PAGE_PULSE: drawpulsepage(); break;
     case PAGE_FILTER: drawfilterpage(); break;
     case PAGE_EMU: drawemupage(); break;
+    case PAGE_BROWSER: drawbrowserpage(); break;
   }
   hline(0, HINT_Y - 1, COLS, LIGHTBLUE);
   drawhint();
 
   if ((nav == NAV_LEFT) || (nav == NAV_RIGHT)) movefocus();
   if (!in.down) active = 0;
-  if ((editopen) && (!active)) closeedit();
+  if ((editopen) && (!active) && (SDL_GetTicks() - cctime >= CCPAUSE)) closeedit();
 
   present(renderer);
   drawlogo();
@@ -2306,10 +2825,35 @@ void gui::drawdesigner(SDL_Renderer *renderer)
  * Opening and closing, keys
  */
 
+// The instrument the tracker uses where its pattern cursor is: the cursor
+// row's instrument number, or the last one set above it in the pattern (the
+// one that row plays with). 0 if there is none
+static int cursorinstrument(void)
+{
+  int p = editorUndoInfo.editorInfo[editorInfo.epchn].epnum;
+  int row = editorInfo.eppos;
+
+  if ((p < 0) || (p >= MAX_PATT)) return 0;
+  if (row >= pattlen[p]) row = pattlen[p] - 1;
+  for (; row >= 0; row--)
+  {
+    int i = pattern[p][row * 4 + 1];
+    if ((i > 0) && (i < MAX_INSTR)) return i;
+  }
+  return 0;
+}
+
 void gui::opendesigner(void)
 {
   if (showdesigner) return;
   savededitmode = editorInfo.editmode;
+  // From the patterns: the instrument used there (elsewhere the instrument
+  // the tracker has selected)
+  if (editorInfo.editmode == EDIT_PATTERN)
+  {
+    int i = cursorinstrument();
+    if (i) editorInfo.einum = i;
+  }
   if (editorInfo.einum < 1) editorInfo.einum = 1;
   editorInfo.editmode = EDIT_INSTRUMENT;
   showdesigner = true;
@@ -2329,6 +2873,7 @@ void gui::opendesigner(void)
 void gui::closedesigner(void)
 {
   if (!showdesigner) return;
+  cancelpreview();
   if (heldnote) noteoff(heldsource, heldkey);
   commitname();
   closeedit();
@@ -2339,6 +2884,7 @@ void gui::closedesigner(void)
   drawnlastframe = false;
   retroblockmouse();
   c64::freescreen();
+  freeframe();
   macmenu_setdesigner(0);
 }
 
@@ -2383,8 +2929,39 @@ void gui::designerkey(const SDL_KeyboardEvent &k, bool down)
   // CTRL / CMD: undo; other combinations do nothing here
   if (mod & (KMOD_CTRL | KMOD_GUI))
   {
-    if ((sym == SDLK_z) && (!k.repeat)) cmd_post(GTCMD_UNDO);
+    if ((sym == SDLK_z) && (!k.repeat))
+    {
+      // An instrument being tried is put back first (that is the undo); a
+      // knob's step still open ends first
+      if (pv.active)
+      {
+        cancelpreview();
+        return;
+      }
+      if (!active) closeedit();
+      cmd_post(GTCMD_UNDO);
+    }
     return;
+  }
+
+  // The browser's list (ENTER presses a control that has the keyboard focus)
+  if ((page == PAGE_BROWSER) && (!(mod & KMOD_ALT)))
+  {
+    switch (sym)
+    {
+      case SDLK_UP: brmove--; return;
+      case SDLK_DOWN: brmove++; return;
+      case SDLK_HOME: brjump = -1; return;
+      case SDLK_END: brjump = 1; return;
+      case SDLK_BACKSPACE: if (!k.repeat) brparent = true; return;
+      case SDLK_RETURN: case SDLK_KP_ENTER:
+        if ((!keyboardmode) || (!focus))
+        {
+          if (!k.repeat) brenter = true;
+          return;
+        }
+        break;
+    }
   }
 
   switch (sym)
@@ -2451,4 +3028,71 @@ extern "C" void gui_designermidi(int noteon_, int noteoff_)
 {
   if (noteon_) noteon(noteon_, SRC_MIDI, 0);
   if ((noteoff_) && (noteoff_ == heldnote)) noteoff(SRC_MIDI, 0);
+}
+
+// MIDI knobs: the envelope of the oscillators that are heard (on and not
+// muted), the filter's cutoff and resonance. A knob turned without a pause
+// is one undo step
+extern "C" void gui_designermidicc(int cc, int value)
+{
+  static const char *names[4] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
+  int part = -1;
+  int k;
+
+  if (nameedit) return;
+  bindpatch();
+  switch (cc)
+  {
+    case 73: part = 0; break;
+    case 75: part = 1; break;
+    case 70: case 76: part = 2; break;
+    case 72: part = 3; break;
+    case 74: case 71: break;
+    default: return;
+  }
+
+  if (part >= 0)
+  {
+    int v = (value & 0x7f) >> 3;
+    int shift = (part & 1) ? 0 : 4;
+    bool any = false;
+    for (k = 0; k < PATCH_OSC; k++)
+    {
+      unsigned char *reg;
+      if ((!osc[k]) || (oscmute[k])) continue;
+      reg = (part < 2) ? &instr[osc[k]].ad : &instr[osc[k]].sr;
+      if (((*reg >> shift) & 15) == v) continue;
+      openedit();
+      *reg = (unsigned char)((*reg & ~(15 << shift)) | (v << shift));
+      any = true;
+    }
+    if (any)
+    {
+      cctime = SDL_GetTicks();
+      gui_message("%s %X (MIDI CC %d)", names[part], v, cc);
+    }
+    return;
+  }
+
+  // Cutoff / resonance: the filter part (a new one on the first oscillator
+  // if the patch has none)
+  if (firstosc() < 0) return;
+  {
+    int owner = filterowner();
+    int fi = (owner >= 0) ? osc[owner] : 0;
+    int row = fi ? ((cc == 74) ? patch_cutoffrow(fi) : patch_filterrow(fi)) : -1;
+    int v = (cc == 74) ? ((value & 0x7f) * 255 + 63) / 127 : (value & 0x7f) >> 3;
+    int old = (row < 0) ? -1 : (cc == 74) ? rtable[FTBL][row] : (rtable[FTBL][row] >> 4);
+
+    if (old == v) return;
+    openedit();
+    fi = needfilter(1 << firstosc());
+    row = fi ? ((cc == 74) ? patch_cutoffrow(fi) : patch_filterrow(fi)) : -1;
+    if (row < 0) return;
+    if (cc == 74) rtable[FTBL][row] = (unsigned char)v;
+    else rtable[FTBL][row] = (unsigned char)((rtable[FTBL][row] & 0x0f) | (v << 4));
+    cctime = SDL_GetTicks();
+    if (cc == 74) gui_message("CUTOFF %02X (MIDI CC 74)", v);
+    else gui_message("RESONANCE %X (MIDI CC 71)", v);
+  }
 }

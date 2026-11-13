@@ -63,22 +63,27 @@ static int designerstate = 0;
   cmd_post((int)[sender tag]);
 }
 
-// The standard About panel with the credit line under the version
+// The standard About panel with the credit line right under the version,
+// then the original authors
 - (void)aboutSelected:(id)sender
 {
-  NSString *credit = [NSString stringWithUTF8String:abouttext];
+  NSString *credit = [NSString stringWithFormat:@"%@\n\n", [NSString stringWithUTF8String:abouttext]];
   NSString *basedon = @"Based on GoatTracker 2 by Lasse Öörni and contributors.\nreSID by Dag Lem, reSID-fp by Antti S. Lankila.";
   NSMutableParagraphStyle *center = [[[NSMutableParagraphStyle alloc] init] autorelease];
-  NSDictionary *attrs;
-  NSAttributedString *credits;
+  NSDictionary *creditattrs, *attrs;
+  NSMutableAttributedString *credits;
 
   (void)sender;
   [center setAlignment:NSTextAlignmentCenter];
+  creditattrs = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont boldSystemFontOfSize:[NSFont systemFontSize]], NSFontAttributeName,
+    center, NSParagraphStyleAttributeName, [NSColor labelColor], NSForegroundColorAttributeName, nil];
   attrs = [NSDictionary dictionaryWithObjectsAndKeys:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]], NSFontAttributeName,
     center, NSParagraphStyleAttributeName, [NSColor secondaryLabelColor], NSForegroundColorAttributeName, nil];
-  credits = [[[NSAttributedString alloc] initWithString:basedon attributes:attrs] autorelease];
+  credits = [[[NSMutableAttributedString alloc] initWithString:credit attributes:creditattrs] autorelease];
+  [credits appendAttributedString:[[[NSAttributedString alloc] initWithString:basedon attributes:attrs] autorelease]];
+  // An empty copyright line: the credit line is already at the top
   [NSApp orderFrontStandardAboutPanelWithOptions:[NSDictionary dictionaryWithObjectsAndKeys:
-    credit, @"Copyright", credits, @"Credits", nil]];
+    @" ", @"Copyright", credits, @"Credits", nil]];
 }
 
 - (void)recentSelected:(id)sender

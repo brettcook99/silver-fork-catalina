@@ -423,8 +423,62 @@ static void retrofitsize(int xpercent, int ypercent, int *w, int *h)
   *h = ch * MAX_ROWS;
 }
 
-// CTRL/CMD + - 0 in the retro interface: the next larger or smaller window
-// size, or the default size
+// The desktop's usable area (without the menu bar, Dock or taskbar) and the
+// window's title bar and borders around the inside
+static void usablearea(SDL_Rect *usable, int *top, int *left, int *bottom, int *right)
+{
+  if (SDL_GetDisplayUsableBounds(SDL_GetWindowDisplayIndex(window), usable) != 0)
+  {
+    usable->x = usable->y = 0;
+    usable->w = 1440;
+    usable->h = 900;
+  }
+  *top = *left = *bottom = *right = 0;
+  // Not known on every system (macOS): a title bar's height
+  if ((SDL_GetWindowBordersSize(window, top, left, bottom, right) != 0) || (*top <= 0))
+  {
+    *top = 32;
+    *left = *bottom = *right = 0;
+  }
+}
+
+// Largest retro window: one that fills the usable area of the desktop
+static void retromaxsize(int *w, int *h)
+{
+  SDL_Rect usable;
+  int top, left, bottom, right, cw, ch;
+
+  usablearea(&usable, &top, &left, &bottom, &right);
+  retrofitcell(usable.w - left - right, usable.h - top - bottom, &cw, &ch);
+  if ((cw < 8) || (ch < 14))
+  {
+    cw = 8;
+    ch = 14;
+  }
+  *w = cw * MAX_COLUMNS;
+  *h = ch * MAX_ROWS;
+}
+
+// Moves the window so that it is all on the desktop's usable area
+static void keeponscreen(int w, int h)
+{
+  SDL_Rect usable;
+  int top, left, bottom, right, x, y, nx, ny;
+
+  usablearea(&usable, &top, &left, &bottom, &right);
+  SDL_GetWindowPosition(window, &x, &y);
+  nx = x;
+  ny = y;
+  if (nx + w + right > usable.x + usable.w) nx = usable.x + usable.w - w - right;
+  if (ny + h + bottom > usable.y + usable.h) ny = usable.y + usable.h - h - bottom;
+  if (nx - left < usable.x) nx = usable.x + left;
+  if (ny - top < usable.y) ny = usable.y + top;
+  if ((nx != x) || (ny != y)) SDL_SetWindowPosition(window, nx, ny);
+}
+
+// CTRL/CMD + - 0 in the retro interface (A- / A+ in the menu bar): the next
+// larger or smaller window size, or the default size. The largest size fills
+// the desktop
 static void retrozoom(int dir)
 {
   int winw, winh, cellw, cellh;
@@ -443,7 +497,7 @@ static void retrozoom(int dir)
   {
     int maxw, maxh;
 
-    retrofitsize(92, 88, &maxw, &maxh);
+    retromaxsize(&maxw, &maxh);
     for (c = 0; c < NUM_ZOOMSTEPS; c++)
     {
       zoomsize(zoomsteps[c], &w, &h);
@@ -480,6 +534,7 @@ static void retrozoom(int dir)
   if (neww < RETRO_MINXSIZE) neww = RETRO_MINXSIZE;
   if (newh < RETRO_MINYSIZE) newh = RETRO_MINYSIZE;
   SDL_SetWindowSize(window, neww, newh);
+  if (dir >= 0) keeponscreen(neww, newh);
   windowedxsize = neww;
   windowedysize = newh;
 }

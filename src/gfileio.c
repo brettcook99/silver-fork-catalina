@@ -542,6 +542,26 @@ int filedialog_open(int kind, const char *title, const char *exts, char *path, i
 #endif
 }
 
+int filedialog_folder(const char *title, const char *startdir, char *path, int pathsize)
+{
+#ifdef __APPLE__
+  return macfile_folder(title, ((startdir) && (startdir[0])) ? startdir : NULL, path, pathsize);
+#else
+  // The classic file selector can only pick files: any instrument in the
+  // folder is chosen
+  static char name[MAX_FILENAME] = "";
+  char dir[MAX_PATHNAME];
+  char fulltitle[MAX_PATHNAME];
+  char filter[MAX_FILENAME] = "*.ins";       // The selector changes it
+
+  snprintf(dir, sizeof dir, "%s", ((startdir) && (startdir[0])) ? startdir : gt_folder(FOLDER_INSTR));
+  snprintf(fulltitle, sizeof fulltitle, "%s (pick any instrument in it)", title);
+  if (!fileselector(name, dir, filter, fulltitle, 0)) return 0;
+  snprintf(path, pathsize, "%s", dir);
+  return 1;
+#endif
+}
+
 int filedialog_save(int kind, const char *title, const char *ext, const char *suggestedname, char *path, int pathsize)
 {
 #ifdef __APPLE__

@@ -56,6 +56,10 @@ int gui_designershown(void);
 // colors, About) at the mouse pointer
 void gui_openviewmenu(void);
 void gui_designermidi(int noteon, int noteoff);
+// A MIDI control change (knob) while the SID designer is shown: attack
+// (CC 73), decay (75), sustain (70 or 76), release (72), filter cutoff (74)
+// and resonance (71), values 0-127
+void gui_designermidicc(int cc, int value);
 
 // Shows a message in the status bar for a few seconds
 void gui_message(const char *fmt, ...);

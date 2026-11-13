@@ -62,6 +62,31 @@ int macfile_open(const char *title, const char *exts, const char *startdir, char
   }
 }
 
+int macfile_folder(const char *title, const char *startdir, char *path, int pathsize)
+{
+  @autoreleasepool
+  {
+    NSWindow *window = [NSApp keyWindow];
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    NSModalResponse result;
+
+    if (title) [panel setMessage:[NSString stringWithUTF8String:title]];
+    [panel setCanChooseFiles:NO];
+    [panel setCanChooseDirectories:YES];
+    [panel setCanCreateDirectories:YES];
+    [panel setAllowsMultipleSelection:NO];
+    [panel setResolvesAliases:YES];
+    [panel setPrompt:@"Choose"];
+    if ((startdir) && (startdir[0]))
+      [panel setDirectoryURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:startdir] isDirectory:YES]];
+
+    result = [panel runModal];
+    restorewindow(window);
+    if (result != NSModalResponseOK) return 0;
+    return copypath([panel URL], path, pathsize);
+  }
+}
+
 int macfile_modifiersheld(void)
 {
   NSEventModifierFlags flags = [NSEvent modifierFlags];

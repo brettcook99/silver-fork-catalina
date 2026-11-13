@@ -91,6 +91,7 @@ enum
   GTCMD_RETROGRADIENT,    // Retro screen background: black / gradient
   GTCMD_METERCOLORS,      // Retro level meter colors dialog
   GTCMD_ABOUT,            // About GoatTracker Ultimate (Windows / Linux; macOS has its own)
+  GTCMD_BROWSEFOLDER,     // Choose the folder of the SID designer's instrument browser
 
   GTCMD_COUNT
 };

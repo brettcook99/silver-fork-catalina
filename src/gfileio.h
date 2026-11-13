@@ -59,6 +59,10 @@ int gt_openfile_direct(const char *path);
 #define FOLDER_KINDS 4
 int filedialog_open(int kind, const char *title, const char *exts, char *path, int pathsize);
 int filedialog_save(int kind, const char *title, const char *ext, const char *suggestedname, char *path, int pathsize);
+// Chooses a folder (on macOS a folder panel; elsewhere the classic file
+// selector, where any instrument in the folder is picked). startdir may be
+// empty. Returns 1 with the folder's path
+int filedialog_folder(const char *title, const char *startdir, char *path, int pathsize);
 char *gt_folder(int kind);
 
 // Pieces of a path

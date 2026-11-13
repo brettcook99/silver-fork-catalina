@@ -56,6 +56,8 @@ unsigned retrogradient = 0;       // Retro screen background: 0 = black,
 // Retro level meter colors at the bottom, middle and top, 0xAARRGGBB (AA =
 // opacity: 00 clear, FF solid). View > Meter Colors
 unsigned retrometercolors[3] = { DEFAULT_METERBOTTOM, DEFAULT_METERMIDDLE, DEFAULT_METERTOP };
+// The user's own meter color presets (bottom, middle, top), all 0 = empty
+unsigned retrometerpresets[METERPRESETS][3];
 
 /*
  * Key event queue
@@ -248,6 +250,13 @@ int input_nextmidi(void)
   {
     event = midi_getevent(&midinote);
     if (!event) return 0;
+    // Control changes (knobs) go to the SID designer at once, the others
+    // are dropped
+    if (event == MIDI_CONTROL)
+    {
+      if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
+      continue;
+    }
     note = FIRSTNOTE + midinote - 12;
     if ((note >= FIRSTNOTE) && (note <= LASTNOTE)) break;
   }

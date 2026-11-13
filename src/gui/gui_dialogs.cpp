@@ -667,6 +667,55 @@ static void meterpreview(ImVec2 size)
   dl->AddRect(a, b, theme.border);
 }
 
+// Ready-made meter colors (bottom, middle, top). Choosing one sets the colors
+// but keeps the opacity of each
+struct MeterPreset
+{
+  const char *name;
+  unsigned rgb[3];
+};
+
+static const MeterPreset meterpresets[] =
+{
+  { "Default", { DEFAULT_METERBOTTOM & 0xffffff, DEFAULT_METERMIDDLE & 0xffffff, DEFAULT_METERTOP & 0xffffff } },
+  { "LED (green, yellow, red)", { 0x00c040, 0xffe000, 0xff2020 } },
+  { "Fire", { 0xffe060, 0xff7000, 0xa00000 } },
+  { "Ice", { 0xffffff, 0x40d0ff, 0x1030c0 } },
+  { "C64 (light blue, blue)", { 0xc9b4ff, 0x755df9, 0x332974 } },
+  { "Rainbow (cyan, yellow, red)", { 0x00ffff, 0xffff6f, 0xff5b57 } },
+  { "Green screen", { 0xc0ffc0, 0x30d030, 0x005000 } },
+  { "Amber", { 0xffe0a0, 0xffa000, 0x804000 } },
+  { "Grey", { 0xffffff, 0x9a9a9a, 0x404040 } },
+};
+#define NUM_METERPRESETS ((int)(sizeof meterpresets / sizeof meterpresets[0]))
+
+// A preset button: the gradient it gives, bottom to top. Returns true when
+// clicked
+static bool presetswatch(const char *id, const unsigned *argb, ImVec2 size, const char *tiptext)
+{
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  ImVec2 a = ImGui::GetCursorScreenPos();
+  ImVec2 b(a.x + size.x, a.y + size.y);
+  ImVec2 m(b.x, a.y + size.y * 0.5f);
+  bool clicked = ImGui::InvisibleButton(id, size);
+  bool hovered = ImGui::IsItemHovered();
+
+  if (argb)
+  {
+    ImU32 c0 = argb[0] | 0xff000000u, c1 = argb[1] | 0xff000000u, c2 = argb[2] | 0xff000000u;
+    // ImU32 is ABGR: swap red and blue
+    c0 = (c0 & 0xff00ff00u) | ((c0 >> 16) & 0xff) | ((c0 & 0xff) << 16);
+    c1 = (c1 & 0xff00ff00u) | ((c1 >> 16) & 0xff) | ((c1 & 0xff) << 16);
+    c2 = (c2 & 0xff00ff00u) | ((c2 >> 16) & 0xff) | ((c2 & 0xff) << 16);
+    dl->AddRectFilledMultiColor(a, m, c2, c2, c1, c1);
+    dl->AddRectFilledMultiColor(ImVec2(a.x, m.y), b, c1, c1, c0, c0);
+  }
+  else dl->AddRectFilled(a, b, IM_COL32(0, 0, 0, 255));      // An empty slot
+  dl->AddRect(a, b, hovered ? theme.text : theme.border, 0.0f, 0, hovered ? 2.0f : 1.0f);
+  if ((hovered) && (tiptext)) ImGui::SetTooltip("%s", tiptext);
+  return clicked;
+}
+
 static void metercolorsdialog(void)
 {
   static unsigned saved[3];
@@ -691,6 +740,53 @@ static void metercolorsdialog(void)
     title("Level meter colors");
     body("The meters of the retro screen rise behind each channel's instrument and command digits. Pick the color at "
       "the bottom, in the middle and at the top; the A slider (the bar right of the colors) sets how much the background shows through.");
+    ImGui::Spacing();
+
+    // Presets: ready-made ones, then the user's own
+    {
+      ImVec2 sw(fs * 1.9f, fs * 2.6f);
+      float gap = fs * 0.45f;
+      ImGui::TextUnformatted("Presets");
+      for (c = 0; c < NUM_METERPRESETS; c++)
+      {
+        ImGui::PushID(c);
+        if (c) ImGui::SameLine(0.0f, gap);
+        if (presetswatch("##preset", meterpresets[c].rgb, sw, meterpresets[c].name))
+        {
+          int s;
+          for (s = 0; s < 3; s++) retrometercolors[s] = (retrometercolors[s] & 0xff000000u) | meterpresets[c].rgb[s];
+        }
+        ImGui::PopID();
+      }
+      ImGui::Spacing();
+      ImGui::TextUnformatted("My presets");
+      ImGui::SameLine();
+      ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "(Save keeps the colors above in a slot)");
+      for (c = 0; c < METERPRESETS; c++)
+      {
+        bool empty = !(retrometerpresets[c][0] | retrometerpresets[c][1] | retrometerpresets[c][2]);
+        char tiptext[40];
+        ImGui::PushID(100 + c);
+        if (c) ImGui::SameLine(0.0f, fs * 1.2f);
+        ImGui::BeginGroup();
+        snprintf(tiptext, sizeof tiptext, empty ? "Slot %d: empty" : "My preset %d (with its opacity)", c + 1);
+        if ((presetswatch("##mine", empty ? NULL : retrometerpresets[c], sw, tiptext)) && (!empty))
+          memcpy(retrometercolors, retrometerpresets[c], sizeof retrometercolors);
+        ImGui::SameLine(0.0f, gap * 0.6f);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (sw.y - ImGui::GetFrameHeight()) * 0.5f);
+        if (ImGui::SmallButton("Save"))
+        {
+          memcpy(retrometerpresets[c], retrometercolors, sizeof retrometercolors);
+          // A preset of all-clear black would read as empty
+          if (!(retrometerpresets[c][0] | retrometerpresets[c][1] | retrometerpresets[c][2])) retrometerpresets[c][0] = 1;
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Keep the current colors in slot %d", c + 1);
+        ImGui::EndGroup();
+        ImGui::PopID();
+      }
+    }
+    ImGui::Spacing();
+    ImGui::Separator();
     ImGui::Spacing();
 
     // Which color: a swatch button for each

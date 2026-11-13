@@ -107,6 +107,7 @@ extern char songfilename[MAX_FILENAME];
 extern char songfilter[MAX_FILENAME];
 extern char songpath[MAX_PATHNAME];
 extern char instrfilename[MAX_FILENAME];
+extern char browserfolder[MAX_PATHNAME];
 extern char instrfilter[MAX_FILENAME];
 extern char instrpath[MAX_PATHNAME];
 extern char packedpath[MAX_PATHNAME];

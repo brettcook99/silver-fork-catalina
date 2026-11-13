@@ -7,15 +7,21 @@
 
 #define MIDI_NOTEON 1
 #define MIDI_NOTEOFF 2
+#define MIDI_CONTROL 3
 
 // Opens every MIDI input device. Returns the number of devices opened.
 // On macOS devices plugged in later are picked up automatically.
 int midi_init(void);
 void midi_uninit(void);
 
-// Gets the next received note event. Returns 0 if there is none, otherwise
-// MIDI_NOTEON or MIDI_NOTEOFF with the MIDI note number (0-127) in *note
+// Gets the next received event. Returns 0 if there is none, otherwise
+// MIDI_NOTEON or MIDI_NOTEOFF with the MIDI note number (0-127) in *note, or
+// MIDI_CONTROL with the controller number (0-127) in *note
 int midi_getevent(int *note);
+
+// The velocity (note on) or value (control change, 0-127) of the event
+// midi_getevent() returned last
+int midi_eventvalue(void);
 
 // When the event midi_getevent() returned last arrived, in milliseconds
 // (SDL_GetTicks())

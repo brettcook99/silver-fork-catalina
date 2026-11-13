@@ -1,8 +1,9 @@
 //
 // GOATTRACKER v2 MIDI input
 //
-// Every MIDI input device is opened and note on/off messages from all
-// channels are put into a queue, which the editor reads once per frame.
+// Every MIDI input device is opened and note on/off and control change
+// messages from all channels are put into a queue, which the editor reads
+// once per frame.
 // The MIDI system calls us from its own thread, so the queue is the only
 // thing shared between the threads.
 //
@@ -28,13 +29,14 @@ static volatile int midiqueue[MIDI_QUEUESIZE];
 // When each event arrived (SDL_GetTicks() milliseconds)
 static volatile unsigned midiqueuetime[MIDI_QUEUESIZE];
 static unsigned midilasttime = 0;
+static int midilastvalue = 0;
 static volatile unsigned midiqueuewrite = 0;
 static volatile unsigned midiqueueread = 0;
 static volatile int midiqueuelock = 0;
 static int mididevices = 0;
 
 // Called from the MIDI thread(s). Events are dropped if the queue is full
-static void midi_pushevent(int type, int note)
+static void midi_pushevent(int type, int data1, int data2)
 {
   unsigned next;
 
@@ -43,7 +45,7 @@ static void midi_pushevent(int type, int note)
   next = (midiqueuewrite + 1) % MIDI_QUEUESIZE;
   if (next != midiqueueread)
   {
-    midiqueue[midiqueuewrite] = (type << 8) | (note & 0x7f);
+    midiqueue[midiqueuewrite] = (type << 16) | ((data1 & 0x7f) << 8) | (data2 & 0x7f);
     midiqueuetime[midiqueuewrite] = SDL_GetTicks();
     __sync_synchronize();
     midiqueuewrite = next;
@@ -57,11 +59,15 @@ static void midi_handlemessage(int status, int data1, int data2)
   {
     case 0x90:
     // Note on with velocity 0 is a note off
-    midi_pushevent(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, data1);
+    midi_pushevent(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, data1, data2);
     break;
 
     case 0x80:
-    midi_pushevent(MIDI_NOTEOFF, data1);
+    midi_pushevent(MIDI_NOTEOFF, data1, 0);
+    break;
+
+    case 0xb0:
+    midi_pushevent(MIDI_CONTROL, data1, data2);
     break;
   }
 }
@@ -77,13 +83,19 @@ int midi_getevent(int *note)
   __sync_synchronize();
   midiqueueread = (midiqueueread + 1) % MIDI_QUEUESIZE;
 
-  *note = event & 0x7f;
-  return event >> 8;
+  *note = (event >> 8) & 0x7f;
+  midilastvalue = event & 0x7f;
+  return event >> 16;
 }
 
 unsigned midi_eventtime(void)
 {
   return midilasttime;
+}
+
+int midi_eventvalue(void)
+{
+  return midilastvalue;
 }
 
 int midi_devicecount(void)
@@ -307,6 +319,11 @@ int midi_getevent(int *note)
 }
 
 unsigned midi_eventtime(void)
+{
+  return 0;
+}
+
+int midi_eventvalue(void)
 {
   return 0;
 }

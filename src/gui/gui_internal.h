@@ -126,6 +126,11 @@ namespace gui
   void retrofitcell(int maxx, int maxy, int *w, int *h);
   // Color 0-15 of the classic palette
   ImU32 retrocolor(int index);
+  // Draws text in the retro screen's font (8x14 characters), each font pixel
+  // pixel x pixel points (pixelh tall), top left at pos. bold: one pixel
+  // wider strokes. Returns the width
+  float drawretrotext(ImDrawList *dl, ImVec2 pos, float pixel, float pixelh, ImU32 col, const char *text, bool bold = false);
+  float retrotextwidth(const char *text, float pixel);
   // Draws only the text screen's top row (the title bar) where it is on the
   // retro screen, for the SID designer. screen0-screen1 get the whole retro
   // screen's place (ImGui points). Returns the column under the mouse
@@ -146,6 +151,13 @@ namespace gui
   // Key presses and releases, typed characters while it is shown
   void designerkey(const SDL_KeyboardEvent &k, bool down);
   void designertext(int ch);
+
+  // Images built into the program (gui_image.cpp). decodepng() reads a PNG
+  // (8-bit RGB or RGBA, not interlaced) into RGBA (free() it), NULL if it
+  // can't. scaledtexture() makes an opaque texture of the image (over black)
+  // at exactly w x h pixels
+  unsigned char *decodepng(const unsigned char *data, size_t size, int *w, int *h);
+  SDL_Texture *scaledtexture(SDL_Renderer *renderer, const unsigned char *rgba, int sw, int sh, int w, int h);
 
   // About GoatTracker Ultimate, the level meter colors dialog
   void openabout(void);

@@ -101,6 +101,8 @@ extern unsigned retrogradient;
 #define DEFAULT_METERMIDDLE 0xff4896ecu
 #define DEFAULT_METERTOP 0xff162ca0u
 extern unsigned retrometercolors[3];
+#define METERPRESETS 4
+extern unsigned retrometerpresets[METERPRESETS][3];
 
 #ifdef __cplusplus
 }

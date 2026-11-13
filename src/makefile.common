@@ -21,7 +21,7 @@ imgui/imgui_impl_sdl2.o imgui/imgui_impl_sdlrenderer2.o
 
 GUIOBJ= gui/gui_main.o gui/gui_widgets.o gui/gui_transport.o gui/gui_pattern.o gui/gui_tracks.o \
 gui/gui_instr.o gui/gui_tables.o gui/gui_song.o gui/gui_dialogs.o gui/gui_help.o gui/gui_retro.o \
-gui/gui_c64screen.o gui/gui_designer.o
+gui/gui_c64screen.o gui/gui_designer.o gui/gui_image.o
 
 $(IMGUIOBJ) $(GUIOBJ): CXXFLAGS += -std=c++11
 

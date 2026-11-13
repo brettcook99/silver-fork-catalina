@@ -15,3 +15,5 @@ int gui_textscreenmousewheel(void) { return 0; }
 void gui_changetextsize(int dir) { (void)dir; }
 void gui_togglefullscreen(void) { }
 void gui_message(const char *fmt, ...) { (void)fmt; }
+int gui_designeractive(void) { return 0; }
+void gui_designermidicc(int cc, int value) { (void)cc; (void)value; }

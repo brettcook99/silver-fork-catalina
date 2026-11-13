@@ -136,6 +136,49 @@ ImU32 gui::retrocolor(int index)
   return IM_COL32((c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff, 255);
 }
 
+float gui::retrotextwidth(const char *text, float pixel)
+{
+  return (float)strlen(text) * FONT_XSIZE * pixel;
+}
+
+float gui::drawretrotext(ImDrawList *dl, ImVec2 pos, float pixel, float pixelh, ImU32 col, const char *text, bool bold)
+{
+  float x = pos.x;
+
+  if (!loaded)
+  {
+    if (!loadfontandpalette()) return 0.0f;
+    loaded = true;
+  }
+  for (; *text; text++)
+  {
+    const unsigned char *glyph = chardata + ((unsigned char)*text) * 16 + 1;
+    int py, px;
+
+    for (py = 0; py < FONT_YSIZE; py++)
+    {
+      // Pixel n of the row is bit 8-n of row: bit 0 is the extra column of
+      // bold text, each pixel then also set one to the right
+      unsigned row = (unsigned)glyph[py] << 1;
+      int width = FONT_XSIZE + (bold ? 1 : 0);
+      if (bold) row |= row >> 1;
+      // Runs of set pixels as one rectangle each
+      px = 0;
+      while (px < width)
+      {
+        int start;
+        while ((px < width) && (!((row >> (8 - px)) & 1))) px++;
+        if (px >= width) break;
+        start = px;
+        while ((px < width) && ((row >> (8 - px)) & 1)) px++;
+        dl->AddRectFilled(ImVec2(x + start * pixel, pos.y + py * pixelh), ImVec2(x + px * pixel, pos.y + (py + 1) * pixelh), col);
+      }
+    }
+    x += FONT_XSIZE * pixel;
+  }
+  return x - pos.x;
+}
+
 void gui::retrofitcell(int maxx, int maxy, int *w, int *h)
 {
   int maxw = maxx / MAX_COLUMNS;

@@ -113,6 +113,8 @@ char songpath[MAX_PATHNAME];
 char instrfilename[MAX_FILENAME];
 char instrfilter[MAX_FILENAME];
 char instrpath[MAX_PATHNAME];
+// Folder shown by the SID designer's instrument browser ("" = not chosen)
+char browserfolder[MAX_PATHNAME];
 char packedpath[MAX_PATHNAME];
 char importpath[MAX_PATHNAME];
 // The folders read from the config file (see gt_folder())
@@ -284,6 +286,9 @@ int main(int argc, char **argv)
 		getparam(configfile, &retrogradient);
 		for (c = 0; c < 3; c++)
 			getparam(configfile, &retrometercolors[c]);
+		for (c = 0; c < METERPRESETS * 3; c++)
+			getparam(configfile, &retrometerpresets[c / 3][c % 3]);
+		getpathparam(configfile, browserfolder);
 		fclose(configfile);
 
 		// A config file saved with the old default sound buffer gets the
@@ -299,6 +304,7 @@ int main(int argc, char **argv)
 		if ((strcmp(configfolder[c], "0")) && (isfolder(configfolder[c])))
 			strcpy(gt_folder(c), configfolder[c]);
 	}
+	if (!isfolder(browserfolder)) browserfolder[0] = 0;
 
 	// Scan command line
 	for (c = 1; c < argc; c++)
@@ -710,6 +716,10 @@ int main(int argc, char **argv)
 			retrometercolors[0],
 			retrometercolors[1],
 			retrometercolors[2]);
+		fprintf(configfile, ";Meter color presets of your own: bottom, middle, top of each ($AARRGGBB, 0 = empty)\n");
+		for (c = 0; c < METERPRESETS * 3; c++)
+			fprintf(configfile, "$%08X\n", retrometerpresets[c / 3][c % 3]);
+		fprintf(configfile, "\n;Folder of the SID designer's instrument browser (0 = none)\n%s\n\n", browserfolder[0] ? browserfolder : "0");
 		fclose(configfile);
 	}
 
@@ -1721,6 +1731,11 @@ void runcommand(int cmd, const char *path)
 			else
 				gt_loadinstrument(newpath, editorInfo.einum ? editorInfo.einum : 1);
 		}
+		break;
+
+	case GTCMD_BROWSEFOLDER:
+		if (filedialog_folder("Choose the folder of instruments to browse", browserfolder[0] ? browserfolder : gt_folder(FOLDER_INSTR), newpath, MAX_PATHNAME))
+			strcpy(browserfolder, newpath);
 		break;
 
 	case GTCMD_SAVEINSTR:
