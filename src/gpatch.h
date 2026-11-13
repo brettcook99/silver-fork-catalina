@@ -94,10 +94,6 @@ int patch_findosc(const char *base, int n);
 // Names the instrument base + ":n" (just base when n is 0), cutting the base
 // to fit
 void patch_setname(int ins, const char *base, int n);
-// The first instrument of the n-th patch (0 = the first): the instruments
-// from 01 on, those of one patch (BASE:1, BASE:2...) counted once. 0 if
-// there are not so many
-int patch_nth(int n);
 
 #ifdef __cplusplus
 }

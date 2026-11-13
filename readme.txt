@@ -204,7 +204,7 @@ may want. For example "goattrk2 dojo.sng -s1 -e1" to set 1x-speed mode and SID
 model 8580 and to load "dojo.sng" on startup.
 
 -Axx Set hard restart ADSR parameter in hex. DEFAULT=0F00
--Bxx Set sound buffer length in milliseconds DEFAULT=25
+-Bxx Set sound buffer length in milliseconds DEFAULT=15
 -Cxx Use CatWeasel MK3 PCI SID (0 = off, 1 = on)
 -Dxx Pattern row display (0 = decimal, 1 = hex, 2 = decimal w/dots, 3 = hex w/dots)
 -Exx Set emulated SID model (0 = 6581 1 = 8580) DEFAULT=6581
@@ -242,9 +242,10 @@ choice between it and the modern interface (panels, arrangement timeline,
 mouse-friendly editors) for that time; -u1 starts the modern one.
 
 The SID Designer is a full-window editor for instruments: under the
-tracker's title bar, a C64 screen in a frame like the C64's nameplate, laid
-out like Plogue chipsynth C64's patch page. CTRL+numpad 7 opens it from
-anywhere and returns to the tracker, as do "SID Designer" / "Tracker" at the
+tracker's title bar, a violet C64 screen with a lavender border in a white
+frame with the C64's nameplate, laid out like Plogue chipsynth C64's patch
+page. It opens on the tracker's current instrument (INSTRUMENT NUM.).
+CTRL+numpad 7 opens it from anywhere and returns to the tracker, as do "SID Designer" / "Tracker" at the
 right end of the title bar, CTRL+D (CMD+D on macOS), ALT/OPTION+numpad 5,
 the rainbow button in the modern control bar and View > SID Designer; ESC
 returns too. The title bar's settings can be clicked there as on the
@@ -274,9 +275,11 @@ loaded.
 
 Try the command line options if there are any problems. For example, if you
 experience choppy audio you can increase audio buffering with -B option (the
-default is 25 ms, so that notes played on the keyboard or a MIDI keyboard are
-heard right away; it used to be 100 ms, and a config file still holding 100 gets
-25). SDL
+default is 15 ms, so that notes played on the keyboard or a MIDI keyboard are
+heard right away; it used to be 100 ms, then 25 ms, and a config file still
+holding one of those gets 15). On macOS the sound goes through Core Audio; SDL
+queues two buffers there, or more if they are shorter than 15 ms, so a shorter
+buffer doesn't make the delay shorter. SDL
 seems to have trouble with some soundcards under Windows; you might want to
 try even a 500ms buffer, or tweak the hardware acceleration level of the
 soundcard (from Control Panel). Also, reSID interpolation will take remarkably
@@ -458,19 +461,17 @@ are skipped after a note is entered, 0-16: with 1 the cursor moves from row
 00 to 02, with 2 from 00 to 03 and so on. It works for the note keys and the
 MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
 
-MIDI controllers: control changes CC14-CC21 (for example 8 buttons or pads
-set to send them) choose patch 1-8, in both interfaces: in the tracker the
-patch's instrument becomes the current one, in the SID Designer the patch
-opens. The patches are the instruments from 01 on, the oscillators of a SID
-Designer patch (named BASE:1, BASE:2...) counting as one. Any value works,
-so buttons that send a value when pressed and another when let go, or that
-switch between two, both do. In the SID Designer knobs sending CC73, CC75,
-CC70 (or CC76) and CC72 set attack, decay, sustain and release, CC74 the
-filter cutoff and CC71 the resonance.
+MIDI controllers: in the SID Designer knobs sending CC73, CC75, CC70 (or
+CC76 or CC20) and CC72 set attack, decay, sustain and release of the
+oscillators heard, CC74 the filter cutoff and CC71 the resonance. CC4 sets
+the filter type and CC7 the SID voice that goes through the filter: the
+knob's range in three parts, LP / BP / HP and voice 1 / 2 / 3.
 
-Notes played (keys or MIDI) while the song plays start at once, after the
-instrument's hardrestart frames, on their channel. A note of the pattern on
-that row doesn't take their place.
+Notes played (keys or MIDI) start after one hardrestart frame (20 ms; none
+if the instrument's gate timer is 0), enough for the envelope to start
+again cleanly, not after the instrument's whole gate timer as pattern notes
+do. While the song plays they start at once like that on their channel, and
+a note of the pattern on that row doesn't take their place.
 
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and
@@ -632,7 +633,7 @@ Conversion between relative and absolute notes will use the basenote C-0 if
 octave is 0, C-1 if octave is 1 and so on.
 
 When table scrolling is unlocked, each table maintains its separate view
-position. To indicate this mode, a "U" letter is visible in the bottom right
+position. To indicate this mode, a "U" letter is visible in the bottom
 part of the screen. By default table scrolling is locked.
 
 2.3.6 Songname edit mode
@@ -677,21 +678,37 @@ CTRL+SHIFT+wheel (CMD+SHIFT+wheel on macOS too) selects the instrument, with
 the pointer anywhere, in both interfaces.
 
 The effects panel, between the patterns and the orderlist on the retro
-screen, lists the 16 pattern commands (0XY-FXY) and the instrument's 9
-parameters: AD attack/decay, SR sustain/release, WP, PP and FP the wave,
-pulse and filter table positions, VP vibrato parameter, VD vibrato delay,
-GATE the HR/gate timer and WAVE the 1st frame wave. Click one to pick it: it
-turns white (the others stay grey) and its value shows in green above the
-list. The mouse wheel over the panel then sets the value:
-- a command is written, with that value, into the pattern of the cursor's
-  channel. While the song plays it goes on the playing (green) row, so it is
-  heard right away and turning the wheel records a sweep as the song plays
-  on; with the song stopped it goes on the cursor row (whose value of that
-  command the panel then shows)
-- a parameter changes the current instrument; its next notes play with it
-Turning the wheel without a pause (of 0.6 seconds) is one undo step. Click
-the effect again to let it go; switching to jam mode lets it go too. Picking
-an effect in jam mode switches to edit mode.
+screen, lists the 16 pattern commands, named after what they do: CLEAR (0XY,
+no command), UP (1XY), DOWN (2XY), TONE (3XY toneportamento), VIBE (4XY),
+DECAY (5XY attack/decay), SUSTAIN (6XY sustain/release), REGISTER (7XY
+waveform register), WAVE, PULSE and FILTER (8XY-AXY table positions),
+CONTROL (BXY filter control), CUTOFF (CXY), VOLUME (DXY), FUNK (EXY) and
+TEMPO (FXY). Click one to pick it: it turns white (the others stay grey) and
+its value shows in green above the list. The mouse wheel over the panel then
+sets the value: the command is written, with that value, into the pattern
+of the cursor's channel. While the song plays it goes on the playing (green)
+row, so it is heard right away and turning the wheel records a sweep as the
+song plays on; with the song stopped it goes on the cursor row (whose value
+of that command the panel then shows). Turning the wheel without a pause (of
+0.6 seconds) is one undo step. Click the command again to let it go;
+switching to jam mode lets it go too. Picking one in jam mode switches to
+edit mode.
+
+Below the commands:
+- OCTAVE: the mouse wheel transposes the marked rows (nothing marked: the
+  cursor channel's pattern) an octave up or down, as SHIFT+W and SHIFT+S do;
+  UP or DOWN in green shows which way it went last. It can be undone
+- LOOP: the mouse wheel sets how many patterns the playback loops, 00-FF
+  (00 = no loop). Set while the song plays, each channel loops from the
+  pattern it is playing (01: that pattern again and again, 02: it and the
+  next one...); set before, from where the playback starts
+- CHN1, CHN2, CHN3: each channel's song position and row (with the song
+  stopped: the channel's start position, green in the orderlist). The mouse
+  wheel moves the channel to the next or previous pattern in its orderlist:
+  while the song plays it goes there at once, on the same row, so that it
+  stays in time with the others (a loop then starts from there); stopped,
+  its start position goes there and its pattern editor shows that pattern.
+  A click mutes or unmutes the channel
 
 Level meters behind each channel's instrument and command columns, at the
 bottom of the patterns, show how loud the channel's voice is (its envelope):

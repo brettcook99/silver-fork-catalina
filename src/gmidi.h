@@ -9,10 +9,6 @@
 #define MIDI_NOTEOFF 2
 #define MIDI_CONTROL 3
 
-// Control changes CC14-CC21 choose patch 1-8 (gui_midipatch())
-#define MIDICC_PATCH 14
-#define MIDICC_PATCHES 8
-
 // Opens every MIDI input device. Returns the number of devices opened.
 // On macOS devices plugged in later are picked up automatically.
 int midi_init(void);

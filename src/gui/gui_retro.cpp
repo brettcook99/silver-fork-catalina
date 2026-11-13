@@ -359,8 +359,75 @@ static void drawmeters(void)
   }
 }
 
+// Panel boxes (printpanelbox()): their color (from Scott's picture) and how
+// far they are inset from their edge characters, in font pixels, so that
+// boxes on rows next to each other stay apart. The corner pixels are left
+// out (rounded a little)
+#define BOXCOLOR 0xff22273eu
+#define BOXINSETX 4
+#define BOXINSETY 2
+
+static bool inbox(unsigned cell, int px, int py)
+{
+  int top = (cell & CELL_BOXTOP) ? BOXINSETY : -1;
+  int bottom = (cell & CELL_BOXBOTTOM) ? FONT_YSIZE - 1 - BOXINSETY : FONT_YSIZE;
+  int left = (cell & CELL_BOXLEFT) ? BOXINSETX : -1;
+  int right = (cell & CELL_BOXRIGHT) ? FONT_XSIZE - 1 - BOXINSETX : FONT_XSIZE;
+
+  if ((py < top) || (py > bottom) || (px < left) || (px > right)) return false;
+  if (((py == top) || (py == bottom)) && ((px == left) || (px == right))) return false;
+  return true;
+}
+
+// Draws a character into the pixel buffer: its background (a panel box's
+// color in the box) and, if glyph is set, the character
+static void drawcell(int x, int y, unsigned cell, bool glyph)
+{
+  const unsigned char *g = chardata + (cell & 0xff) * 16 + 1;
+  Uint32 fg = palette[(cell >> 16) & 0xf];
+  Uint32 bg = palette[(cell >> 20) & 0xf];
+  bool black = !((cell >> 20) & 0xf);
+  Uint32 *dptr = pixels + (y * FONT_YSIZE) * BASE_XSIZE + x * FONT_XSIZE;
+  int px, py;
+
+  // Black background: clear over the gradient
+  if ((retrogradient) && (black)) bg = 0;
+  for (py = 0; py < FONT_YSIZE; py++)
+  {
+    unsigned char bits = glyph ? g[py] : 0;
+    for (px = 0; px < FONT_XSIZE; px++)
+    {
+      Uint32 b = bg;
+      if ((black) && (cell & CELL_BOX) && (inbox(cell, px, py))) b = BOXCOLOR;
+      dptr[px] = ((bits >> (7 - px)) & 1) ? fg : b;
+    }
+    dptr += BASE_XSIZE;
+  }
+}
+
+// Draws a character half a character to the left (CELL_HALFLEFT), over the
+// backgrounds drawn already
+static void drawhalfleft(int x, int y, unsigned cell)
+{
+  const unsigned char *g = chardata + (cell & 0xff) * 16 + 1;
+  Uint32 fg = palette[(cell >> 16) & 0xf];
+  int x0 = x * FONT_XSIZE - FONT_XSIZE / 2;
+  int px, py;
+
+  for (py = 0; py < FONT_YSIZE; py++)
+  {
+    Uint32 *dptr = pixels + (y * FONT_YSIZE + py) * BASE_XSIZE;
+    for (px = 0; px < FONT_XSIZE; px++)
+    {
+      if ((x0 + px >= 0) && ((g[py] >> (7 - px)) & 1)) dptr[x0 + px] = fg;
+    }
+  }
+}
+
 // Draws the changed characters into the pixel buffer and updates the
-// texture with the rows that changed
+// texture with the rows that changed. A row with characters half a
+// character to the left (now or before) is drawn whole when something in it
+// changed, as they reach into their neighbors
 static void updatetexture(void)
 {
   int firstrow = MAX_ROWS;
@@ -384,31 +451,31 @@ static void updatetexture(void)
 
   for (y = 0; y < MAX_ROWS; y++)
   {
+    unsigned *row = scrbuffer + y * MAX_COLUMNS;
+    unsigned *prev = prevscreen + y * MAX_COLUMNS;
+    bool changed = false;
+    bool halfleft = false;
+
     for (x = 0; x < MAX_COLUMNS; x++)
     {
-      unsigned cell = scrbuffer[y * MAX_COLUMNS + x];
-      const unsigned char *glyph;
-      Uint32 fg, bg;
-      Uint32 *dptr;
-      int px, py;
+      if (row[x] != prev[x]) changed = true;
+      if ((row[x] & CELL_HALFLEFT) || ((prev[x] != 0xffffffff) && (prev[x] & CELL_HALFLEFT))) halfleft = true;
+    }
+    if (!changed) continue;
+    if (y < firstrow) firstrow = y;
+    if (y > lastrow) lastrow = y;
 
-      if (cell == prevscreen[y * MAX_COLUMNS + x]) continue;
-      prevscreen[y * MAX_COLUMNS + x] = cell;
-      if (y < firstrow) firstrow = y;
-      if (y > lastrow) lastrow = y;
-
-      glyph = chardata + (cell & 0xff) * 16 + 1;
-      fg = palette[(cell >> 16) & 0xf];
-      bg = palette[(cell >> 20) & 0xf];
-      // Black background: clear over the gradient
-      if ((retrogradient) && (!((cell >> 20) & 0xf))) bg = 0;
-      dptr = pixels + (y * FONT_YSIZE) * BASE_XSIZE + x * FONT_XSIZE;
-      for (py = 0; py < FONT_YSIZE; py++)
+    for (x = 0; x < MAX_COLUMNS; x++)
+    {
+      if ((!halfleft) && (row[x] == prev[x])) continue;
+      prev[x] = row[x];
+      drawcell(x, y, row[x], !(row[x] & CELL_HALFLEFT));
+    }
+    if (halfleft)
+    {
+      for (x = 0; x < MAX_COLUMNS; x++)
       {
-        unsigned char bits = glyph[py];
-        for (px = 0; px < FONT_XSIZE; px++)
-          dptr[px] = ((bits >> (7 - px)) & 1) ? fg : bg;
-        dptr += BASE_XSIZE;
+        if (row[x] & CELL_HALFLEFT) drawhalfleft(x, y, row[x]);
       }
     }
   }

@@ -17,35 +17,55 @@ static char timechar[] = {':', ' '};
 // panel
 #define RX 59
 
-// The effects panel: the 16 pattern commands and the 9 instrument
-// parameters, one on each pattern row, centered on column FXCENTER. A left
-// click picks one: it turns white (the others stay darker grey) and its
-// value shows in green above the list. The mouse wheel over the panel sets
-// the value. A command is written into the pattern of the cursor's channel:
-// while the song plays on the row the playback reads next (the playing row,
-// so that it is heard at once), with the song stopped on the cursor row. A
-// parameter changes the current instrument (heard from its next note on).
-// Another click on the effect, or jam mode, lets it go
+// The effects panel, between the patterns and the orderlist (its texts
+// centered on the line between columns FXCENTER - 1 and FXCENTER):
+// - the 16 pattern commands, one on each pattern row, named after what they
+//   do. A left click picks one: it turns white (the others stay darker grey)
+//   and its value shows in green above the list; the mouse wheel over the
+//   panel sets the value. The command is written into the pattern of the
+//   cursor's channel: while the song plays on the row the playback reads
+//   next (the playing row, so that it is heard at once), with the song
+//   stopped on the cursor row. Another click on it, or jam mode, lets it go
+// - OCTAVE: the wheel transposes the marked rows (nothing marked: the cursor
+//   channel's pattern) an octave up or down, as SHIFT+W / SHIFT+S; "UP" or
+//   "DOWN" in green tells which way it went last
+// - LOOP: the wheel sets how many patterns the playback loops (playloop),
+//   00 = no loop
+// - CHN1-CHN3 in boxes: each channel's song position / row (stopped: its
+//   start position). The wheel moves the channel to the next or previous
+//   pattern in its orderlist: while the song plays it goes there at once
+//   (same row), stopped the start position goes there. A click mutes it
 #define FXFIRSTCOLUMN (MAX_CHN * 15 + 2)   // Clicks & wheel: to column RX - 2
 #define FXCENTER 52
 #define FXVALUEY (PATTROWY - 2)
-#define FXCOMMANDS 16
-#define FXNUM (FXCOMMANDS + 9)
+#define FXNUM 16
 #define FXPAUSE 600                        // ms: a pause ends the wheel's undo step
+#define OCTAVEY (PATTROWY + FXNUM + 1)     // "OCTAVE", its value under it
+#define LOOPY (OCTAVEY + 3)                // "LOOP", its value under it
+#define CHNBOXY (LOOPY + 3)                // The channel boxes, 2 rows each
+#define CHNBOXX (FXCENTER - 4)
+#define CHNBOXW 8
+#define JUMPWAIT 100                       // ms: a channel's jump still pending
 
 static const char *fxname[FXNUM] =
 {
-  "0XY", "1XY", "2XY", "3XY", "4XY", "5XY", "6XY", "7XY",
-  "8XY", "9XY", "AXY", "BXY", "CXY", "DXY", "EXY", "FXY",
-  "AD", "SR", "WP", "PP", "FP", "VP", "VD", "GATE", "WAVE"
+  "CLEAR", "UP", "DOWN", "TONE", "VIBE", "DECAY", "SUSTAIN", "REGISTER",
+  "WAVE", "PULSE", "FILTER", "CONTROL", "CUTOFF", "VOLUME", "FUNK", "TEMPO"
 };
 
-static int fxsel = -1;                     // The effect picked, -1 = none
-static unsigned char fxvalue[FXCOMMANDS];  // Each command's value set last
+// The controls whose wheel changes join into undo steps: the commands (their
+// numbers) and OCTAVE
+#define CONTROL_OCTAVE FXNUM
+
+static int fxsel = -1;                     // The command picked, -1 = none
+static unsigned char fxvalue[FXNUM];       // Each command's value set last
 static int fxlast = -1;                    // What the wheel set last, when,
 static unsigned fxtime = 0;                // and the undo list after it
 static int fxundotop = -1;
 static int fxundocount = -1;
+static int octavelast = 0;                 // Last transpose: 1 up, -1 down
+static int jumppos[MAX_CHN] = { -1, -1, -1 };  // A channel's jump asked for
+static unsigned jumptime[MAX_CHN];
 
 extern int psnum;                          // The subtune playing (gplay.c)
 
@@ -95,39 +115,87 @@ static int fxrow(int *patt, int *row)
   return (*row >= 0) && (*row < pattlen[*patt]);
 }
 
-// The value of the effect picked: an instrument parameter's own; a
-// command's from the cursor row if the song is stopped and the row has that
-// command, otherwise the value set last
+// The value of the command picked: from the cursor row if the song is
+// stopped and the row has that command, otherwise the value set last
 static int fxcurrent(void)
 {
   int patt, row;
 
-  if (fxsel >= FXCOMMANDS) return (&instr[editorInfo.einum].ad)[fxsel - FXCOMMANDS];
   if ((!isplaying()) && (fxrow(&patt, &row)) && (pattern[patt][row * 4 + 2] == fxsel))
     return pattern[patt][row * 4 + 3];
   return fxvalue[fxsel];
 }
 
+// A channel's song position and row as its box shows them: while playing
+// where the playback is (a jump asked for shows at once), stopped its start
+// position
+static void chnposition(int c, int *pos, int *row)
+{
+  if (isplaying())
+  {
+    *pos = chn[c].songptr - 1;
+    *row = chn[c].pattptr / 4;
+    if (*row > pattlen[chn[c].pattnum]) *row = pattlen[chn[c].pattnum];
+    if ((jumppos[c] >= 0) && (SDL_GetTicks() - jumptime[c] < JUMPWAIT)) *pos = jumppos[c];
+  }
+  else
+  {
+    *pos = editorUndoInfo.editorInfo[c].espos;
+    *row = 0;
+  }
+  if (*pos < 0) *pos = 0;
+  if (*row >= 100) *row -= 100;
+}
+
 static void fxprint(void)
 {
-  int k;
+  int c, k;
 
   if (!recordmode) fxsel = -1;
 
-  if (fxsel >= 0) sprintf(textbuffer, "%02X", fxcurrent());
-  else sprintf(textbuffer, "  ");
-  printtext(FXCENTER - 1, FXVALUEY, CEDIT, textbuffer);
+  for (k = FXVALUEY; k < CHNBOXY + MAX_CHN * 2; k++)
+    printblankc(FXFIRSTCOLUMN, k, CNORMAL, RX - 1 - FXFIRSTCOLUMN);
 
+  if (fxsel >= 0)
+  {
+    sprintf(textbuffer, "%02X", fxcurrent());
+    printtextcentered(FXCENTER, FXVALUEY, CEDIT, textbuffer);
+  }
   for (k = 0; k < FXNUM; k++)
-    printtext(FXCENTER - (int)strlen(fxname[k]) / 2, PATTROWY + k, (k == fxsel) ? CTITLE : CNORMAL, fxname[k]);
+    printtextcentered(FXCENTER, PATTROWY + k, (k == fxsel) ? CTITLE : CNORMAL, fxname[k]);
+
+  printtextcentered(FXCENTER, OCTAVEY, CTITLE, "OCTAVE");
+  if (octavelast) printtextcentered(FXCENTER, OCTAVEY + 1, CEDIT, (octavelast > 0) ? "UP" : "DOWN");
+
+  printtextcentered(FXCENTER, LOOPY, CTITLE, "LOOP");
+  sprintf(textbuffer, "%02X", playloop);
+  printtextcentered(FXCENTER, LOOPY + 1, CEDIT, textbuffer);
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    int y = CHNBOXY + c * 2;
+    int pos, row;
+
+    sprintf(textbuffer, "CHN%d", c + 1);
+    printtextcentered(FXCENTER, y, chn[c].mute ? CMUTE : CTITLE, textbuffer);
+    chnposition(c, &pos, &row);
+    sprintf(textbuffer, "%03d/%02d", pos, row);
+    printtextcentered(FXCENTER, y + 1, CEDIT, textbuffer);
+    printpanelbox(CHNBOXX, y, CHNBOXW, 2);
+  }
 }
 
-// A left click on an effect picks it (in edit mode), on the one picked lets
-// it go
+// A left click on a command picks it (in edit mode), on the one picked lets
+// it go. A click on a channel's box mutes it (or lets it be heard again)
 static void fxclick(void)
 {
   int k = mousey - PATTROWY;
 
+  if ((mousex >= CHNBOXX) && (mousex < CHNBOXX + CHNBOXW) && (mousey >= CHNBOXY) && (mousey < CHNBOXY + MAX_CHN * 2))
+  {
+    mutechannel((mousey - CHNBOXY) / 2);
+    return;
+  }
   if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (k < 0) || (k >= FXNUM)) return;
   if (k == fxsel)
   {
@@ -142,54 +210,122 @@ static void fxclick(void)
   }
 }
 
-// The mouse wheel over the effects panel sets the value of the effect
-// picked (up = bigger). Turned without a pause it is one undo step. Returns
-// nonzero if the wheel was over the panel
-static int fxwheel(int d)
+// Ends a change made with the wheel: its undo step (ed and top as they were
+// before it). A control turned without a pause is one undo step
+static void wheelundo(GTUNDO_OBJECT *ed, int top, int control)
 {
   unsigned now = SDL_GetTicks();
+
+  if (undoValidateUndoAreas(ed))
+  {
+    if ((fxlast == control) && (fxundotop == top) && (fxundocount == undoCounter - 1) && (now - fxtime < FXPAUSE))
+      undoJoinStep(top);
+    fxundotop = currentUndoPosition;
+    fxundocount = undoCounter;
+    fxlast = control;
+    fxtime = now;
+  }
+  else undoFreeUndoObject(ed);
+}
+
+// OCTAVE: transposes by d octaves
+static void octavewheel(int d)
+{
+  int top = currentUndoPosition;
+  GTUNDO_OBJECT *ed = undoCreateEditorInfo();
+  int patt = patterntranspose(d * 12);
+
+  undoAreaSetCheckForChange(UNDO_AREA_PATTERN, patt, UNDO_AREA_DIRTY_CHECK);
+  wheelundo(ed, top, CONTROL_OCTAVE);
+  octavelast = (d > 0) ? 1 : -1;
+  gui_message("Pattern %02X: octave %s", patt, (d > 0) ? "up" : "down");
+}
+
+// The orderlist position of the pattern d patterns after (d < 0: before)
+// position pos in channel c's orderlist of subtune s, -1 if there is none
+static int nextpatternpos(int s, int c, int pos, int d)
+{
+  int step = (d > 0) ? 1 : -1;
+  int n = (d > 0) ? d : -d;
+
+  while (n--)
+  {
+    do
+    {
+      pos += step;
+      if ((pos < 0) || (pos >= songlen[s][c])) return -1;
+    }
+    while (songorder[s][c][pos] >= MAX_PATT);
+  }
+  return pos;
+}
+
+// The wheel over a channel's box: the channel goes d patterns on in its
+// orderlist
+static void chnwheel(int c, int d)
+{
+  int pos, row, newpos;
+
+  chnposition(c, &pos, &row);
+  if (isplaying())
+  {
+    if ((playstarting()) || (!chn[c].advance)) return;
+    newpos = nextpatternpos(psnum, c, pos, d);
+    if (newpos < 0) return;
+    playjump(c, newpos);
+    jumppos[c] = newpos;
+    jumptime[c] = SDL_GetTicks();
+    return;
+  }
+
+  newpos = nextpatternpos(editorInfo.esnum, c, pos, d);
+  if (newpos < 0) return;
+  editorUndoInfo.editorInfo[c].espos = newpos;
+  if (editorUndoInfo.editorInfo[c].esend <= newpos) editorUndoInfo.editorInfo[c].esend = 0;
+  editorUndoInfo.editorInfo[c].epnum = songorder[editorInfo.esnum][c][newpos];
+  if (editorInfo.epmarkchn == c) editorInfo.epmarkchn = -1;
+  if ((editorInfo.epchn == c) && (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[c].epnum]))
+    editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[c].epnum];
+}
+
+// The mouse wheel over the effects panel (up = bigger): the value of the
+// command picked, OCTAVE, LOOP or a channel box. Returns nonzero if the
+// wheel was over the panel
+static int fxwheel(int d)
+{
   GTUNDO_OBJECT *ed;
-  int top, v;
+  int top, v, patt, row;
 
   if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (mousey < 2) || (mousey > PATTROWY + VISIBLEPATTROWS)) return 0;
+
+  if ((mousey >= OCTAVEY) && (mousey <= OCTAVEY + 1))
+  {
+    octavewheel(d);
+    return 1;
+  }
+  if ((mousey >= LOOPY) && (mousey <= LOOPY + 1))
+  {
+    playloop = clampvalue(playloop + d, 0, 0xff);
+    return 1;
+  }
+  if ((mousey >= CHNBOXY) && (mousey < CHNBOXY + MAX_CHN * 2))
+  {
+    chnwheel((mousey - CHNBOXY) / 2, d);
+    return 1;
+  }
   if (fxsel < 0) return 1;
 
   v = clampvalue(fxcurrent() + d, 0, 0xff);
   top = currentUndoPosition;
   ed = undoCreateEditorInfo();
-  if (fxsel < FXCOMMANDS)
+  fxvalue[fxsel] = (unsigned char)v;
+  if (fxrow(&patt, &row))
   {
-    int patt, row;
-
-    fxvalue[fxsel] = (unsigned char)v;
-    if (fxrow(&patt, &row))
-    {
-      pattern[patt][row * 4 + 2] = (unsigned char)fxsel;
-      pattern[patt][row * 4 + 3] = (unsigned char)v;
-      undoAreaSetCheckForChange(UNDO_AREA_PATTERN, patt, UNDO_AREA_DIRTY_CHECK);
-    }
+    pattern[patt][row * 4 + 2] = (unsigned char)fxsel;
+    pattern[patt][row * 4 + 3] = (unsigned char)v;
+    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, patt, UNDO_AREA_DIRTY_CHECK);
   }
-  // Instrument 0 is "no instrument" and can't be edited
-  else if (editorInfo.einum)
-  {
-    INSTR *iptr = &instr[editorInfo.einum];
-
-    (&iptr->ad)[fxsel - FXCOMMANDS] = (unsigned char)v;
-    // As when typing: the gate timer can't be 0
-    if (!(iptr->gatetimer & 0x3f)) iptr->gatetimer |= 1;
-    undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, editorInfo.einum, UNDO_AREA_DIRTY_CHECK);
-  }
-
-  if (undoValidateUndoAreas(ed))
-  {
-    if ((fxlast == fxsel) && (fxundotop == top) && (fxundocount == undoCounter - 1) && (now - fxtime < FXPAUSE))
-      undoJoinStep(top);
-    fxundotop = currentUndoPosition;
-    fxundocount = undoCounter;
-    fxlast = fxsel;
-    fxtime = now;
-  }
-  else undoFreeUndoObject(ed);
+  wheelundo(ed, top, fxsel);
   return 1;
 }
 
@@ -789,21 +925,7 @@ void retro_printstatus(void)
     }
   }
 
-  printtext(80, 35, CTITLE, " CHN1   CHN2   CHN3 ");
-  for (c = 0; c < MAX_CHN; c++)
-  {
-    int chnpos = chn[c].songptr;
-    int chnrow = chn[c].pattptr/4;
-    chnpos--;
-    if (chnpos < 0) chnpos = 0;
-    if (chnrow > pattlen[chn[c].pattnum]) chnrow = pattlen[chn[c].pattnum];
-    if (chnrow >= 100) chnrow -= 100;
-
-    sprintf(textbuffer, "%03d/%02d",
-      chnpos,chnrow);
-    printtext(80+7*c, 36, CEDIT, textbuffer);
-  }
-
+  // The channels' song positions are in the effects panel (fxprint())
   if (editorInfo.etlock) printtext(78, 36, CTITLE, " ");
     else printtext(78, 36, CTITLE, "U");
 
@@ -1296,12 +1418,6 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_LEFT) seteditstep(editstep < MAX_EDITSTEP ? editstep + 1 : 0);
     if (mouseb & MOUSEB_RIGHT) seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
   }
-  for (c = 0; c < MAX_CHN; c++)
-  {
-    if ((!prevmouseb) && (mousey >= 23 + 3 + 9) && (mousex >= 80 + 7 * c) && (mousex <= 85 + 7 * c))
-      mutechannel(c);
-  }
-
   // Titlebar actions
   if (!menu)
   {

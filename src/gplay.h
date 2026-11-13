@@ -56,6 +56,15 @@ typedef struct
   unsigned char jamnote;
   unsigned char jaminstr;
   unsigned char jamtime;
+  // LOOP (playloop): looping, the patterns read since the loop's first one,
+  // and the sequencer's state (orderlist position, transpose, repeat) before
+  // that one was read. The state before the last pattern read, for a loop
+  // started while it plays
+  unsigned char looping;
+  unsigned char loopcount;
+  unsigned char loopsongptr, looptrans, looprepeat;
+  unsigned char lastvalid;
+  unsigned char lastsongptr, lasttrans, lastrepeat;
 } CHN;
 
 #ifndef GPLAY_C
@@ -80,5 +89,13 @@ int playstarting(void);
 // The filtertable row the player runs next (1-based, 0 = stopped)
 int playfilterptr(void);
 void playroutine(void);
+
+// LOOP on the retro screen: while the song plays, each channel plays its
+// next playloop patterns again and again, from the one playing when the
+// loop was set (or the first one, set before playing). 0 = no loop
+extern int playloop;
+// While the song plays, channel c goes to orderlist position n (in the
+// player's next frame), at the same row: playjump(c, n)
+void playjump(int c, int pos);
 
 #endif

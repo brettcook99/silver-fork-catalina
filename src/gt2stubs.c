@@ -17,4 +17,3 @@ void gui_togglefullscreen(void) { }
 void gui_message(const char *fmt, ...) { (void)fmt; }
 int gui_designeractive(void) { return 0; }
 void gui_designermidicc(int cc, int value) { (void)cc; (void)value; }
-void gui_midipatch(int cc) { (void)cc; }

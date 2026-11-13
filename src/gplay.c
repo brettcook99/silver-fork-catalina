@@ -49,8 +49,16 @@ int songinit = 0;
 // A note played while the song plays sounds at least this many frames
 // before the pattern's next note (see playroutine())
 #define JAMMINFRAMES 3
+// A note played from the keyboard or MIDI starts after this many hardrestart
+// frames (fewer if the instrument's gate timer is shorter): enough for the
+// envelope to start again cleanly, and quicker than waiting the instrument's
+// whole gate timer (often 2-3 frames, 40-60 ms) as a pattern note does
+#define JAMHRFRAMES 1
 int lastsonginit = 0;
 int startpattpos = 0;
+int playloop = 0;
+// Positions channels jump to (playjump()), -1 = none
+static volatile int jumpto[MAX_CHN] = { -1, -1, -1 };
 
 void sequencer(int c, CHN *cptr);
 
@@ -120,6 +128,20 @@ void rewindsong(void)
   initsong(psnum, lastsonginit);
 }
 
+// Frames until a played note of instrument ins starts (see JAMHRFRAMES)
+static int jamframes(int ins)
+{
+  int t = instr[ins].gatetimer & 0x3f;
+
+  if (t > JAMHRFRAMES) t = JAMHRFRAMES;
+  return t + 1;
+}
+
+void playjump(int c, int pos)
+{
+  if ((c >= 0) && (c < MAX_CHN)) jumpto[c] = pos;
+}
+
 void playtestnote(int note, int ins, int chnnum)
 {
   if (note == KEYON) return;
@@ -143,7 +165,7 @@ void playtestnote(int note, int ins, int chnnum)
   {
     chn[chnnum].instr = ins;
     chn[chnnum].newnote = note;
-    chn[chnnum].tick = (instr[ins].gatetimer & 0x3f)+1;
+    chn[chnnum].tick = jamframes(ins);
     chn[chnnum].gatetimer = instr[ins].gatetimer & 0x3f;
   }
   else
@@ -153,7 +175,7 @@ void playtestnote(int note, int ins, int chnnum)
     // take its place (see playroutine())
     chn[chnnum].jamnote = note;
     chn[chnnum].jaminstr = ins;
-    chn[chnnum].jamtime = (instr[ins].gatetimer & 0x3f)+1;
+    chn[chnnum].jamtime = jamframes(ins);
   }
 }
 
@@ -277,6 +299,9 @@ void playroutine(void)
       cptr->jamnote = 0;
       cptr->jamtime = 0;
       cptr->repeat = 0;
+      cptr->looping = 0;
+      cptr->lastvalid = 0;
+      jumpto[c] = -1;
       if (editorInfo.multiplier)
         cptr->tick = 6* editorInfo.multiplier-1;
       else
@@ -387,6 +412,32 @@ void playroutine(void)
     for (c = 0; c < MAX_CHN; c++)
     {
       int jam = 0;
+
+      // The channel goes to another orderlist position (playjump()): the
+      // pattern there from the same row on, so that it stays in time with
+      // the other channels. Between two patterns the next one read is the
+      // one there. A loop starts again from there
+      if (jumpto[c] >= 0)
+      {
+        int pos = jumpto[c];
+
+        jumpto[c] = -1;
+        if ((songinit != PLAY_STOPPED) && (cptr->advance) && (pos < songlen[psnum][c]))
+        {
+          unsigned pattptr = cptr->pattptr;
+
+          cptr->songptr = pos;
+          cptr->repeat = 0;
+          cptr->looping = 0;
+          cptr->lastvalid = 0;
+          if (pattptr != 0x7fffffff)
+          {
+            cptr->pattptr = 0x7fffffff;
+            sequencer(c, cptr);
+            if (pattlen[cptr->pattnum]) cptr->pattptr = ((pattptr / 4) % pattlen[cptr->pattnum]) * 4;
+          }
+        }
+      }
 
       iptr = &instr[cptr->instr];
 
@@ -1036,6 +1087,43 @@ void sequencer(int c, CHN *cptr)
   {
     cptr->pattptr = startpattpos * 4;
     if (!cptr->advance) goto SEQDONE;
+    // LOOP: after the loop's last pattern the sequencer goes back to its
+    // state before the first one. A loop set while a pattern plays starts
+    // with that pattern
+    if (playloop > 0)
+    {
+      if (!cptr->looping)
+      {
+        cptr->looping = 1;
+        if (cptr->lastvalid)
+        {
+          cptr->loopsongptr = cptr->lastsongptr;
+          cptr->looptrans = cptr->lasttrans;
+          cptr->looprepeat = cptr->lastrepeat;
+          cptr->loopcount = 1;
+        }
+        else
+        {
+          cptr->loopsongptr = cptr->songptr;
+          cptr->looptrans = cptr->trans;
+          cptr->looprepeat = cptr->repeat;
+          cptr->loopcount = 0;
+        }
+      }
+      if (cptr->loopcount >= playloop)
+      {
+        cptr->songptr = cptr->loopsongptr;
+        cptr->trans = cptr->looptrans;
+        cptr->repeat = cptr->looprepeat;
+        cptr->loopcount = 0;
+      }
+      cptr->loopcount++;
+    }
+    else cptr->looping = 0;
+    cptr->lastsongptr = cptr->songptr;
+    cptr->lasttrans = cptr->trans;
+    cptr->lastrepeat = cptr->repeat;
+    cptr->lastvalid = 1;
     // Song loop
     if (songorder[psnum][c][cptr->songptr] == LOOPSONG)
     {

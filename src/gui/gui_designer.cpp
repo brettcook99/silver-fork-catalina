@@ -40,22 +40,22 @@ namespace gui
 
 // The frame: Scott's template (designerframe.png, made from measurements on
 // his 520 x 345 image: white panel with a blue bar along the top, the C64
-// nameplate badge, the violet screen). It fills the retro screen's place,
-// the tracker's title bar over its blue bar. The violet area, in the
-// template's pixels:
+// nameplate badge). It fills the retro screen's place, the tracker's title
+// bar over its blue bar. On its white middle the designer's window, as in
+// Scott's picture of the right look: a lavender border, like a C64's border,
+// around the violet screen. The border's place, in the template's pixels:
 #define FRAME_W 520.0f
 #define FRAME_H 345.0f
-#define VIOLET_X0 13.0f
-#define VIOLET_Y0 49.07f
-#define VIOLET_X1 508.0f
-#define VIOLET_Y1 335.2f
-#define BORDERCOLOR 0x755df9          // Violet: the template's screen, here the
-                                      // border around the designer's screen
-#define SCREENCOLOR 0x332974          // Dark blue: the designer's screen (BLUE)
-#define BORDERW 0.035f                // Border at the sides (of its width)
-#define LABELCOLOR 0xa594ff           // Light violet: labels and lines (LIGHTBLUE)
-#define FAINTCOLOR 0x9c96bc           // Greyed out text (GREY)
-#define DIMCOLOR 0x5a4bb4             // Disabled things (DARKGREY)
+#define BORDER_X0 13.0f
+#define BORDER_Y0 49.07f
+#define BORDER_X1 508.0f
+#define BORDER_Y1 335.2f
+#define BORDERCOLOR 0xf7c1ff          // Lavender: the border
+#define SCREENCOLOR 0x755df9          // Violet: the designer's screen (BLUE)
+#define BORDERW 0.0323f               // Border at the sides (of its width)
+#define LABELCOLOR 0xc9b4ff           // Lavender: labels and lines (LIGHTBLUE)
+#define FAINTCOLOR 0xa29cc0           // Greyed out text (GREY)
+#define DIMCOLOR 0x5443c8             // Disabled things (DARKGREY)
 #define WARNCOLOR 0xff8a7a            // Lights, warnings (LIGHTRED)
 
 enum { PAGE_PATCH, PAGE_WAVE, PAGE_PULSE, PAGE_FILTER, PAGE_EMU, PAGE_BROWSER, NUM_PAGES };
@@ -2665,7 +2665,8 @@ static void freeframe(void)
 }
 
 // Draws the frame over a-b (ImGui points: the retro screen's place), pixel
-// for pixel. Returns the violet area
+// for pixel, and the designer's lavender border on it. Returns the border's
+// area
 static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen0, ImVec2 *screen1)
 {
   ImGuiIO &io = ImGui::GetIO();
@@ -2676,9 +2677,11 @@ static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen
   int h = (int)((b.y - a.y) * sy + 0.5f);
   float u = (b.x - a.x) / FRAME_W;      // One template pixel
   float v = (b.y - a.y) / FRAME_H;
+  ImU32 border = IM_COL32((BORDERCOLOR >> 16) & 0xff, (BORDERCOLOR >> 8) & 0xff, BORDERCOLOR & 0xff, 255);
 
-  *screen0 = ImVec2(a.x + VIOLET_X0 * u, a.y + VIOLET_Y0 * v);
-  *screen1 = ImVec2(a.x + VIOLET_X1 * u, a.y + VIOLET_Y1 * v);
+  // In whole device pixels, so that the border's edges stay sharp
+  *screen0 = ImVec2(floorf((a.x + BORDER_X0 * u) * sx + 0.5f) / sx, floorf((a.y + BORDER_Y0 * v) * sy + 0.5f) / sy);
+  *screen1 = ImVec2(floorf((a.x + BORDER_X1 * u) * sx + 0.5f) / sx, floorf((a.y + BORDER_Y1 * v) * sy + 0.5f) / sy);
 
   if ((!framepixels) && (!framefailed))
   {
@@ -2697,15 +2700,10 @@ static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen
     frametexw = w;
     frameteth = h;
   }
-  if (frametexture)
-  {
-    dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)frametexture), a, b);
-    return;
-  }
-
-  // Without the image: a plain white panel and the violet
-  dl->AddRectFilled(a, b, IM_COL32(255, 255, 255, 255), 8.0f * u);
-  dl->AddRectFilled(*screen0, *screen1, IM_COL32((BORDERCOLOR >> 16) & 0xff, (BORDERCOLOR >> 8) & 0xff, BORDERCOLOR & 0xff, 255));
+  // Without the image: a plain white panel
+  if (frametexture) dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)frametexture), a, b);
+  else dl->AddRectFilled(a, b, IM_COL32(255, 255, 255, 255), 8.0f * u);
+  dl->AddRectFilled(*screen0, *screen1, border);
 }
 
 static void readinput(void)
@@ -2763,12 +2761,12 @@ void gui::drawdesigner(SDL_Renderer *renderer)
   bg->ChannelsSetCurrent(0);
   drawframe(renderer, s0, s1, &c0, &c1);
   bg->ChannelsMerge();
-  // The dark blue screen in the violet, like a C64's screen in its border
+  // The violet screen in the lavender border, like a C64's screen
   pad = (c1.x - c0.x) * BORDERW;
   c0 = ImVec2(c0.x + pad, c0.y + pad);
   c1 = ImVec2(c1.x - pad, c1.y - pad);
 
-  // Its colors on the dark blue screen
+  // Its colors on the violet screen
   setcolor(BLUE, SCREENCOLOR);
   setcolor(LIGHTBLUE, LABELCOLOR);
   setcolor(GREY, FAINTCOLOR);
@@ -2825,35 +2823,12 @@ void gui::drawdesigner(SDL_Renderer *renderer)
  * Opening and closing, keys
  */
 
-// The instrument the tracker uses where its pattern cursor is: the cursor
-// row's instrument number, or the last one set above it in the pattern (the
-// one that row plays with). 0 if there is none
-static int cursorinstrument(void)
-{
-  int p = editorUndoInfo.editorInfo[editorInfo.epchn].epnum;
-  int row = editorInfo.eppos;
-
-  if ((p < 0) || (p >= MAX_PATT)) return 0;
-  if (row >= pattlen[p]) row = pattlen[p] - 1;
-  for (; row >= 0; row--)
-  {
-    int i = pattern[p][row * 4 + 1];
-    if ((i > 0) && (i < MAX_INSTR)) return i;
-  }
-  return 0;
-}
-
 void gui::opendesigner(void)
 {
   if (showdesigner) return;
   savededitmode = editorInfo.editmode;
-  // From the patterns: the instrument used there (elsewhere the instrument
-  // the tracker has selected)
-  if (editorInfo.editmode == EDIT_PATTERN)
-  {
-    int i = cursorinstrument();
-    if (i) editorInfo.einum = i;
-  }
+  // The tracker's current instrument (INSTRUMENT NUM.), wherever the cursor
+  // is
   if (editorInfo.einum < 1) editorInfo.einum = 1;
   editorInfo.editmode = EDIT_INSTRUMENT;
   showdesigner = true;
@@ -3030,40 +3005,9 @@ extern "C" void gui_designermidi(int noteon_, int noteoff_)
   if ((noteoff_) && (noteoff_ == heldnote)) noteoff(SRC_MIDI, 0);
 }
 
-// MIDI CC14-CC21 choose patch 1-8: the instruments from 01 on, those of a
-// patch with oscillators counted once. In the tracker the instrument (its
-// first oscillator) becomes the current one. Not over a classic dialog
-extern "C" void gui_midipatch(int cc)
-{
-  char base[MAX_INSTRNAMELEN + 1];
-  int ins = patch_nth(cc - MIDICC_PATCH);
-  int k;
-
-  if (!ins) return;
-  if (gui_designeractive())
-  {
-    if (nameedit) return;
-    bindpatch();
-    for (k = 0; k < PATCH_OSC; k++)
-    {
-      if (osc[k] == ins) return;
-    }
-    closeedit();
-    editorInfo.einum = ins;
-    for (k = 0; k < PATCH_OSC; k++) oscmute[k] = false;
-    patch_splitname(instr[ins].name, base);
-    gui_message("PATCH %02X %s (MIDI CC %d)", ins, base, cc);
-    return;
-  }
-  if ((textscreenactive) && (!((retromode) && (retroatmainscreen)))) return;
-  if (ins == editorInfo.einum) return;
-  editorInfo.einum = ins;
-  gui_message("Instrument %02X %.*s (MIDI CC %d)", ins, MAX_INSTRNAMELEN, instr[ins].name, cc);
-}
-
 // MIDI knobs: the envelope of the oscillators that are heard (on and not
-// muted), the filter's cutoff and resonance. A knob turned without a pause
-// is one undo step
+// muted), the filter's cutoff, resonance, type and voice. A knob turned
+// without a pause is one undo step
 extern "C" void gui_designermidicc(int cc, int value)
 {
   static const char *names[4] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
@@ -3076,9 +3020,9 @@ extern "C" void gui_designermidicc(int cc, int value)
   {
     case 73: part = 0; break;
     case 75: part = 1; break;
-    case 70: case 76: part = 2; break;
+    case 70: case 76: case 20: part = 2; break;
     case 72: part = 3; break;
-    case 74: case 71: break;
+    case 74: case 71: case 4: case 7: break;
     default: return;
   }
 
@@ -3105,9 +3049,32 @@ extern "C" void gui_designermidicc(int cc, int value)
     return;
   }
 
-  // Cutoff / resonance: the filter part (a new one on the first oscillator
-  // if the patch has none)
+  // The filter part (a new one on the first oscillator if the patch has
+  // none). Type and voice: the knob's range in three, LP / BP / HP and SID
+  // voice 1 / 2 / 3 (only that one goes through the filter)
   if (firstosc() < 0) return;
+  if ((cc == 4) || (cc == 7))
+  {
+    static const char *types[3] = { "LP", "BP", "HP" };
+    int owner = filterowner();
+    int fi = (owner >= 0) ? osc[owner] : 0;
+    int row = fi ? patch_filterrow(fi) : -1;
+    int sel = (value & 0x7f) * 3 / 128;
+    int v = (cc == 4) ? (0x10 << sel) : (1 << sel);
+    int old = (row < 0) ? -1 : (cc == 4) ? (ltable[FTBL][row] & 0x70) : (rtable[FTBL][row] & 7);
+
+    if (old == v) return;
+    openedit();
+    fi = needfilter(1 << firstosc());
+    row = fi ? patch_filterrow(fi) : -1;
+    if (row < 0) return;
+    if (cc == 4) ltable[FTBL][row] = (unsigned char)((ltable[FTBL][row] & ~0x70) | v);
+    else rtable[FTBL][row] = (unsigned char)((rtable[FTBL][row] & ~7) | v);
+    cctime = SDL_GetTicks();
+    if (cc == 4) gui_message("FILTER %s (MIDI CC 4)", types[sel]);
+    else gui_message("FILTER VOICE %d (MIDI CC 7)", sel + 1);
+    return;
+  }
   {
     int owner = filterowner();
     int fi = (owner >= 0) ? osc[owner] : 0;

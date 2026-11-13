@@ -322,7 +322,33 @@ extern "C" int gui_init(void)
   fullscreen = win_fullscreen ? 1 : 0;
   if (fullscreen) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
-  window = SDL_CreateWindow("GoatTracker Ultimate", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
+  // Where the window was last, if its top is on a screen now (else
+  // centered)
+  {
+    int x = SDL_WINDOWPOS_CENTERED;
+    int y = SDL_WINDOWPOS_CENTERED;
+
+    if ((windowposset) && (!fullscreen))
+    {
+      SDL_Rect top, r, cut;
+      int d;
+
+      top.x = windowedxpos;
+      top.y = windowedypos;
+      top.w = w;
+      top.h = 32;
+      for (d = 0; d < SDL_GetNumVideoDisplays(); d++)
+      {
+        if ((SDL_GetDisplayUsableBounds(d, &r) == 0) && (SDL_IntersectRect(&top, &r, &cut)) && (cut.w >= 100) && (cut.h >= 16))
+        {
+          x = windowedxpos;
+          y = windowedypos;
+          break;
+        }
+      }
+    }
+    window = SDL_CreateWindow("GoatTracker Ultimate", x, y, w, h, flags);
+  }
   if (!window) return 0;
   SDL_SetWindowMinimumSize(window, 960, 600);
   loadicon();
@@ -847,6 +873,16 @@ static void pollevents(int textscreen)
         {
           windowedxsize = e.window.data1;
           windowedysize = e.window.data2;
+        }
+      }
+      // Where the window is, for the next start
+      if ((e.window.event == SDL_WINDOWEVENT_MOVED) && (!fullscreen))
+      {
+        if (!(SDL_GetWindowFlags(window) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)))
+        {
+          windowedxpos = e.window.data1;
+          windowedypos = e.window.data2;
+          windowposset = 1;
         }
       }
       break;

@@ -79,6 +79,9 @@ void playfromrow(int row, int follow);
 void playstoppattern(int follow);
 void patternjump(int row);
 void patternscroll(int steps);
+// Transposes the marked rows' notes (nothing marked: the cursor channel's
+// pattern) by steps halfsteps. Returns the pattern number
+int patterntranspose(int steps);
 void nextpattern(void);
 void prevpattern(void);
 void patternup(void);

@@ -1462,3 +1462,34 @@ void patternscroll(int steps)
   editorInfo.eppos = row;
   editorInfo.epview = editorInfo.eppos-VISIBLEPATTROWS/2;
 }
+
+// Transposes the notes of the marked rows (or, with nothing marked, of the
+// cursor channel's pattern) by steps halfsteps, as SHIFT+W / SHIFT+S do by
+// an octave: notes that would go past the highest or lowest note stop there.
+// Returns the pattern changed
+int patterntranspose(int steps)
+{
+  int chn = (editorInfo.epmarkchn != -1) ? editorInfo.epmarkchn : editorInfo.epchn;
+  int patt = editorUndoInfo.editorInfo[chn].epnum;
+  int first = 0;
+  int last = pattlen[patt] - 1;
+  int c;
+
+  if (editorInfo.epmarkchn != -1)
+  {
+    first = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkstart : editorInfo.epmarkend;
+    last = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkend : editorInfo.epmarkstart;
+    if (last >= pattlen[patt]) last = pattlen[patt] - 1;
+  }
+  for (c = first; c <= last; c++)
+  {
+    int note = pattern[patt][c * 4];
+
+    if ((note < FIRSTNOTE) || (note > LASTNOTE)) continue;
+    note += steps;
+    if (note > LASTNOTE) note = LASTNOTE;
+    if (note < FIRSTNOTE) note = FIRSTNOTE;
+    pattern[patt][c * 4] = (unsigned char)note;
+  }
+  return patt;
+}

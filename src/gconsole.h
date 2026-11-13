@@ -45,6 +45,13 @@ void printblank(int x, int y, int length);
 void printblankc(int x, int y, int color, int length);
 void drawbox(int x, int y, int color, int sx, int sy);
 void printbg(int x, int y, int color, int length);
+// Prints text centered on the line between columns centerx - 1 and centerx:
+// text of an odd length is drawn half a character to the left (CELL_HALFLEFT)
+void printtextcentered(int centerx, int y, int color, const char *text);
+// A panel box behind the text of w x h cells: drawn by the retro interface in
+// its own color, inset from the edge cells (CELL_BOX...) so that boxes next
+// to each other stay apart. Print the text in it first
+void printpanelbox(int x, int y, int w, int h);
 // Runs one frame of the user interface (with the text screen shown, as the
 // classic dialogs expect) and takes the next key / mouse input
 void getkey(void);
@@ -68,8 +75,16 @@ void input_clearkeys(void);
 // there was none
 int input_nextmidi(void);
 
-// The text screen: one unsigned per character, char | color << 16
+// The text screen: one unsigned per character, char | flags | color << 16
 extern unsigned *scrbuffer;
+// Flags of a character (bits 8-15): drawn half a character to the left; in a
+// panel box, at its top / bottom / left / right edge
+#define CELL_HALFLEFT 0x100
+#define CELL_BOX 0x200
+#define CELL_BOXTOP 0x400
+#define CELL_BOXBOTTOM 0x800
+#define CELL_BOXLEFT 0x1000
+#define CELL_BOXRIGHT 0x2000
 // Set while a classic dialog is drawing on the text screen
 extern int textscreenactive;
 // Nonzero with the retro interface (the classic full-window text screen)
@@ -95,6 +110,9 @@ extern unsigned bigwindow;
 extern unsigned bigwindowcmdline;
 extern unsigned windowedxsize;
 extern unsigned windowedysize;
+extern unsigned windowposset;
+extern int windowedxpos;
+extern int windowedypos;
 extern unsigned textsizepercent;
 extern unsigned retrogradient;
 #define DEFAULT_METERBOTTOM 0xffdcf6ffu

@@ -80,17 +80,15 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
     }
     desired.channels = 1;
     if (mixmode & STEREO) desired.channels = 2;
-    desired.samples = bufferlength * mixrate / 1000;
+    // The length asked for, rounded up (SDL2 doesn't need a power of two).
+    // On macOS SDL queues 2 buffers of 15 ms or more, but more of shorter
+    // ones (4 of 14.9 ms), so a 15 ms buffer is the shortest delay there
     {
-        int bits = 0;
+        unsigned samples = (bufferlength * mixrate + 999) / 1000;
 
-        for (;;)
-        {
-            desired.samples >>= 1;
-            if (!desired.samples) break;
-            bits++;
-        }
-        desired.samples = 1 << bits;    
+        if (samples < 64) samples = 64;
+        if (samples > 32768) samples = 32768;
+        desired.samples = (Uint16)samples;
     }
 
     desired.callback = snd_mixer;

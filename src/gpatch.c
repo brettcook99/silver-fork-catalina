@@ -551,28 +551,6 @@ int patch_splitname(const char *name, char *base)
   return 0;
 }
 
-int patch_nth(int n)
-{
-  char base[MAX_INSTRNAMELEN + 1], b[MAX_INSTRNAMELEN + 1];
-  int c, d;
-
-  for (c = 1; c < MAX_INSTR; c++)
-  {
-    // An oscillator of a patch counted already
-    if (patch_splitname(instr[c].name, base))
-    {
-      for (d = 1; d < c; d++)
-      {
-        if ((patch_splitname(instr[d].name, b)) && (!strcmp(b, base))) break;
-      }
-      if (d < c) continue;
-    }
-    if (!n) return c;
-    n--;
-  }
-  return 0;
-}
-
 int patch_findosc(const char *base, int n)
 {
   char b[MAX_INSTRNAMELEN + 1];

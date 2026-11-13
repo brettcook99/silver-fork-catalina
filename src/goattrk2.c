@@ -139,7 +139,7 @@ char* usage[] = {
 	"Usage: goattrk2 [songname] [options]",
 	"Options:",
 	"-Axx Set ADSR parameter for hardrestart in hex. DEFAULT=0F00",
-	"-Bxx Set sound buffer length in milliseconds DEFAULT=25",
+	"-Bxx Set sound buffer length in milliseconds DEFAULT=15",
 	"-Cxx Use CatWeasel MK3 PCI SID (0 = off, 1 = on)",
 	"-Dxx Pattern row display (0 = decimal, 1 = hex, 2 = decimal w/dots, 3 = hex w/dots)",
 	"-Exx Set emulated SID model (0 = 6581 1 = 8580) DEFAULT=8580",
@@ -289,11 +289,22 @@ int main(int argc, char **argv)
 		for (c = 0; c < METERPRESETS * 3; c++)
 			getparam(configfile, &retrometerpresets[c / 3][c % 3]);
 		getpathparam(configfile, browserfolder);
+		getparam(configfile, &windowposset);
+		{
+			// The position may be negative (a screen left of or above the
+			// main one)
+			float x = (float)windowedxpos;
+			float y = (float)windowedypos;
+			getfloatparam(configfile, &x);
+			getfloatparam(configfile, &y);
+			windowedxpos = (int)x;
+			windowedypos = (int)y;
+		}
 		fclose(configfile);
 
-		// A config file saved with the old default sound buffer gets the
+		// A config file saved with an old default sound buffer gets the
 		// new, shorter one (a length set by hand stays)
-		if (b == OLDDEFAULTBUF) b = DEFAULTBUF;
+		if ((b == OLDDEFAULTBUF) || (b == PREVDEFAULTBUF)) b = DEFAULTBUF;
 	}
 
 	// Init pathnames. The file dialogs start in the folders used last time
@@ -720,6 +731,7 @@ int main(int argc, char **argv)
 		for (c = 0; c < METERPRESETS * 3; c++)
 			fprintf(configfile, "$%08X\n", retrometerpresets[c / 3][c % 3]);
 		fprintf(configfile, "\n;Folder of the SID designer's instrument browser (0 = none)\n%s\n\n", browserfolder[0] ? browserfolder : "0");
+		fprintf(configfile, ";Window position in windowed mode: saved (0 = no: centered), left, top\n%d\n%d\n%d\n\n", windowposset, windowedxpos, windowedypos);
 		fclose(configfile);
 	}
 

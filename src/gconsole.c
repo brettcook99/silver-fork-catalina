@@ -50,6 +50,9 @@ unsigned bigwindow = 1;           // Initial size as a multiple of 1x (-w option
 unsigned bigwindowcmdline = 0;    // -w was given on the command line
 unsigned windowedxsize = 0;       // Size of the window when not fullscreen,
 unsigned windowedysize = 0;       // 0 = automatic
+unsigned windowposset = 0;        // Where it was last (not fullscreen or
+int windowedxpos = 0;             // maximized; windowposset 0 = not known:
+int windowedypos = 0;             // centered)
 unsigned textsizepercent = 100;   // Text size (CTRL/CMD + and -)
 unsigned retrogradient = 0;       // Retro screen background: 0 = black,
                                   // 1 = gradient (View menu)
@@ -250,14 +253,11 @@ int input_nextmidi(void)
   {
     event = midi_getevent(&midinote);
     if (!event) return 0;
-    // Control changes are handled at once: CC14-CC21 choose patch 1-8
-    // (whatever the value: buttons send one when pressed and another when
-    // let go, or switch between two), the knobs go to the SID designer. The
-    // others are dropped
+    // Control changes (knobs) go to the SID designer at once, if it is
+    // shown. The others are dropped
     if (event == MIDI_CONTROL)
     {
-      if ((midinote >= MIDICC_PATCH) && (midinote < MIDICC_PATCH + MIDICC_PATCHES)) gui_midipatch(midinote);
-      else if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
+      if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
       continue;
     }
     note = FIRSTNOTE + midinote - 12;
@@ -363,6 +363,42 @@ void printtextcp(int cp, int y, int color, const char *text)
   int x = cp - (strlen(text) / 2);
 
   printtext(x, y, color, text);
+}
+
+void printtextcentered(int centerx, int y, int color, const char *text)
+{
+  int len = (int)strlen(text);
+  int x = centerx - len / 2;
+  unsigned *dptr;
+
+  printtext(x, y, color, text);
+  if ((!(len & 1)) || (!scrbuffer) || (y < 0) || (y >= MAX_ROWS)) return;
+  dptr = scrbuffer + y * MAX_COLUMNS;
+  for (; len; len--, x++)
+  {
+    if ((x >= 0) && (x < MAX_COLUMNS)) dptr[x] |= CELL_HALFLEFT;
+  }
+}
+
+void printpanelbox(int x, int y, int w, int h)
+{
+  int cx, cy;
+
+  if (!scrbuffer) return;
+  for (cy = y; cy < y + h; cy++)
+  {
+    if ((cy < 0) || (cy >= MAX_ROWS)) continue;
+    for (cx = x; cx < x + w; cx++)
+    {
+      unsigned flags = CELL_BOX;
+      if ((cx < 0) || (cx >= MAX_COLUMNS)) continue;
+      if (cy == y) flags |= CELL_BOXTOP;
+      if (cy == y + h - 1) flags |= CELL_BOXBOTTOM;
+      if (cx == x) flags |= CELL_BOXLEFT;
+      if (cx == x + w - 1) flags |= CELL_BOXRIGHT;
+      scrbuffer[cy * MAX_COLUMNS + cx] |= flags;
+    }
+  }
 }
 
 void printblank(int x, int y, int length)
