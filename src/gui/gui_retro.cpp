@@ -359,64 +359,52 @@ static void drawmeters(void)
   }
 }
 
-// Panel boxes (printpanelbox()): their color (from Scott's picture) and how
-// far they are inset from their edge characters, in font pixels, so that
-// boxes on rows next to each other stay apart. The corner pixels are left
-// out (rounded a little)
-#define BOXCOLOR 0xff22273eu
-#define BOXINSETX 4
-#define BOXINSETY 2
-
-static bool inbox(unsigned cell, int px, int py)
+// Characters out of their cell (CELL_HALFLEFT, CELL_DOWN)
+static bool shifted(unsigned cell)
 {
-  int top = (cell & CELL_BOXTOP) ? BOXINSETY : -1;
-  int bottom = (cell & CELL_BOXBOTTOM) ? FONT_YSIZE - 1 - BOXINSETY : FONT_YSIZE;
-  int left = (cell & CELL_BOXLEFT) ? BOXINSETX : -1;
-  int right = (cell & CELL_BOXRIGHT) ? FONT_XSIZE - 1 - BOXINSETX : FONT_XSIZE;
-
-  if ((py < top) || (py > bottom) || (px < left) || (px > right)) return false;
-  if (((py == top) || (py == bottom)) && ((px == left) || (px == right))) return false;
-  return true;
+  return (cell != 0xffffffff) && (cell & (CELL_HALFLEFT | CELL_DOWNMASK));
 }
 
-// Draws a character into the pixel buffer: its background (a panel box's
-// color in the box) and, if glyph is set, the character
+static bool lowered(unsigned cell)
+{
+  return (cell != 0xffffffff) && (cell & CELL_DOWNMASK);
+}
+
+// Draws a character into the pixel buffer: its background and, if glyph is
+// set, the character
 static void drawcell(int x, int y, unsigned cell, bool glyph)
 {
   const unsigned char *g = chardata + (cell & 0xff) * 16 + 1;
   Uint32 fg = palette[(cell >> 16) & 0xf];
   Uint32 bg = palette[(cell >> 20) & 0xf];
-  bool black = !((cell >> 20) & 0xf);
   Uint32 *dptr = pixels + (y * FONT_YSIZE) * BASE_XSIZE + x * FONT_XSIZE;
   int px, py;
 
   // Black background: clear over the gradient
-  if ((retrogradient) && (black)) bg = 0;
+  if ((retrogradient) && (!((cell >> 20) & 0xf))) bg = 0;
   for (py = 0; py < FONT_YSIZE; py++)
   {
     unsigned char bits = glyph ? g[py] : 0;
     for (px = 0; px < FONT_XSIZE; px++)
-    {
-      Uint32 b = bg;
-      if ((black) && (cell & CELL_BOX) && (inbox(cell, px, py))) b = BOXCOLOR;
-      dptr[px] = ((bits >> (7 - px)) & 1) ? fg : b;
-    }
+      dptr[px] = ((bits >> (7 - px)) & 1) ? fg : bg;
     dptr += BASE_XSIZE;
   }
 }
 
-// Draws a character half a character to the left (CELL_HALFLEFT), over the
-// backgrounds drawn already
-static void drawhalfleft(int x, int y, unsigned cell)
+// Draws a character out of its cell: half a character to the left
+// (CELL_HALFLEFT) and / or thirds of a row lower (CELL_DOWN, into the row
+// below), over the backgrounds drawn already
+static void drawshifted(int x, int y, unsigned cell)
 {
   const unsigned char *g = chardata + (cell & 0xff) * 16 + 1;
   Uint32 fg = palette[(cell >> 16) & 0xf];
-  int x0 = x * FONT_XSIZE - FONT_XSIZE / 2;
+  int x0 = x * FONT_XSIZE - ((cell & CELL_HALFLEFT) ? FONT_XSIZE / 2 : 0);
+  int y0 = y * FONT_YSIZE + ((int)CELL_DOWNTHIRDS(cell) * FONT_YSIZE + 1) / 3;
   int px, py;
 
-  for (py = 0; py < FONT_YSIZE; py++)
+  for (py = 0; (py < FONT_YSIZE) && (y0 + py < BASE_YSIZE); py++)
   {
-    Uint32 *dptr = pixels + (y * FONT_YSIZE + py) * BASE_XSIZE;
+    Uint32 *dptr = pixels + (y0 + py) * BASE_XSIZE;
     for (px = 0; px < FONT_XSIZE; px++)
     {
       if ((x0 + px >= 0) && ((g[py] >> (7 - px)) & 1)) dptr[x0 + px] = fg;
@@ -425,11 +413,14 @@ static void drawhalfleft(int x, int y, unsigned cell)
 }
 
 // Draws the changed characters into the pixel buffer and updates the
-// texture with the rows that changed. A row with characters half a
-// character to the left (now or before) is drawn whole when something in it
-// changed, as they reach into their neighbors
+// texture with the rows that changed. Characters out of their cell reach
+// into their neighbors: a row with such characters (now or before) is drawn
+// whole when something in it changed, and when lowered text changed the row
+// below it is drawn again too. The characters out of their cell are drawn
+// last, over the rows they reach into
 static void updatetexture(void)
 {
+  bool changed[MAX_ROWS], whole[MAX_ROWS], down[MAX_ROWS], redraw[MAX_ROWS];
   int firstrow = MAX_ROWS;
   int lastrow = -1;
   int x, y;
@@ -453,31 +444,51 @@ static void updatetexture(void)
   {
     unsigned *row = scrbuffer + y * MAX_COLUMNS;
     unsigned *prev = prevscreen + y * MAX_COLUMNS;
-    bool changed = false;
-    bool halfleft = false;
 
+    changed[y] = whole[y] = down[y] = false;
     for (x = 0; x < MAX_COLUMNS; x++)
     {
-      if (row[x] != prev[x]) changed = true;
-      if ((row[x] & CELL_HALFLEFT) || ((prev[x] != 0xffffffff) && (prev[x] & CELL_HALFLEFT))) halfleft = true;
+      if (row[x] != prev[x]) changed[y] = true;
+      if ((shifted(row[x])) || (shifted(prev[x]))) whole[y] = true;
+      if ((lowered(row[x])) || (lowered(prev[x]))) down[y] = true;
     }
-    if (!changed) continue;
+  }
+  for (y = 0; y < MAX_ROWS; y++)
+  {
+    // Below lowered text that changed: drawn whole again
+    bool below = (y > 0) && (down[y - 1]) && (changed[y - 1]);
+    redraw[y] = (changed[y]) || (below);
+    if (below) whole[y] = true;
+  }
+
+  for (y = 0; y < MAX_ROWS; y++)
+  {
+    unsigned *row = scrbuffer + y * MAX_COLUMNS;
+    unsigned *prev = prevscreen + y * MAX_COLUMNS;
+
+    if (!redraw[y]) continue;
     if (y < firstrow) firstrow = y;
     if (y > lastrow) lastrow = y;
-
     for (x = 0; x < MAX_COLUMNS; x++)
     {
-      if ((!halfleft) && (row[x] == prev[x])) continue;
+      if ((!whole[y]) && (row[x] == prev[x])) continue;
       prev[x] = row[x];
-      drawcell(x, y, row[x], !(row[x] & CELL_HALFLEFT));
+      drawcell(x, y, row[x], !shifted(row[x]));
     }
-    if (halfleft)
+  }
+  // The characters out of their cell, of the rows drawn and of those whose
+  // lowered text reaches into a row drawn
+  for (y = 0; y < MAX_ROWS; y++)
+  {
+    unsigned *row = scrbuffer + y * MAX_COLUMNS;
+
+    if ((!redraw[y]) && ((!down[y]) || (y + 1 >= MAX_ROWS) || (!redraw[y + 1]))) continue;
+    for (x = 0; x < MAX_COLUMNS; x++)
     {
-      for (x = 0; x < MAX_COLUMNS; x++)
-      {
-        if (row[x] & CELL_HALFLEFT) drawhalfleft(x, y, row[x]);
-      }
+      if (shifted(row[x])) drawshifted(x, y, row[x]);
     }
+    if ((down[y]) && (y + 1 < MAX_ROWS) && (y + 1 > lastrow)) lastrow = y + 1;
+    if (y < firstrow) firstrow = y;
   }
 
   if (meters) drawmeters();

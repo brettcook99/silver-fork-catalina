@@ -10,7 +10,6 @@
 #include <string.h>
 #include "gcommon.h"
 #include "gmidifile.h"
-#include "gsngwrite.h"
 
 #define MIDI_MAXSIZE (16*1024*1024)
 #define DEFAULT_USPQN 500000      // Microseconds per quarter note (120 BPM)
@@ -25,6 +24,7 @@ typedef struct
   unsigned end;
   int chn;                        // MIDI channel 0-15
   int note;                       // MIDI note 0-127
+  int track;                      // Track of the file it is in
 } MNOTE;
 
 typedef struct
@@ -67,6 +67,7 @@ static int numnotes, maxnotes;
 static MTEMPO *tempos;
 static int numtempos, maxtempos;
 static int firstprogram[16];
+static int trackprogram[16];      // The first program change of tracks 0-15
 static char trackname[MAX_STR];
 static char copyright[MAX_STR];
 
@@ -111,7 +112,7 @@ static int readvlq(const unsigned char **p, const unsigned char *end, unsigned *
   return 0;
 }
 
-static int addnote(unsigned tick, int chn, int note)
+static int addnote(unsigned tick, int chn, int note, int track)
 {
   if (numnotes >= maxnotes)
   {
@@ -125,6 +126,7 @@ static int addnote(unsigned tick, int chn, int note)
   notes[numnotes].end = tick;
   notes[numnotes].chn = chn;
   notes[numnotes].note = note;
+  notes[numnotes].track = track;
   return numnotes++;
 }
 
@@ -193,7 +195,7 @@ static int parsetrack(const unsigned char *p, const unsigned char *end, int trac
         int n;
         // The same key again while it sounds: the old note ends here
         if (active[chn][d1]) notes[active[chn][d1] - 1].end = tick;
-        n = addnote(tick, chn, d1);
+        n = addnote(tick, chn, d1, tracknum);
         if (n < 0) return 0;
         active[chn][d1] = n + 1;
       }
@@ -208,6 +210,7 @@ static int parsetrack(const unsigned char *p, const unsigned char *end, int trac
       else if (type == 0xc0)
       {
         if (firstprogram[chn] < 0) firstprogram[chn] = d1;
+        if ((tracknum < 16) && (trackprogram[tracknum] < 0)) trackprogram[tracknum] = d1;
       }
     }
     else if (b == 0xff)
@@ -276,7 +279,21 @@ static unsigned tickstorows(unsigned tick, unsigned ppq, int rowsperbeat)
   return (unsigned)(((unsigned long long)tick * rowsperbeat + ppq / 2) / ppq);
 }
 
-int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *opt, char *report, int reportsize)
+static void freemidi(void)
+{
+  free(notes);
+  free(tempos);
+  notes = NULL;
+  tempos = NULL;
+  numnotes = maxnotes = 0;
+  numtempos = maxtempos = 0;
+}
+
+// Reads the file into notes[] and tempos[]: ppq gets the ticks per quarter
+// note, smpte 1 if the file counts time in seconds, bytracks 1 if its
+// tracks are read as the MIDI channels. Returns 0 (nothing allocated) on
+// failure
+static int loadmidi(const char *midiname, unsigned *ppqout, int *smpteout, int *bytracks, char *report, int reportsize)
 {
   FILE *f;
   unsigned char *data = NULL;
@@ -286,40 +303,20 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
   unsigned ppq;
   int smpte = 0;
   int ok = 0;
-  int c, d;
-  char msg[256];
-
-  // Conversion state
-  PLACED *placed = NULL;
-  int numplaced = 0, dropped = 0, clampedtempos = 0;
-  int instrnum[16];
-  int numinstr = 0;
-  int instrchn[16];
-  unsigned char *grid[MAX_CHN] = {NULL, NULL, NULL};
-  unsigned char *patterns = NULL;
-  SNGDATA *sng = NULL;
-  int numpatterns = 0;
-  unsigned char orderlist[MAX_CHN][MAX_SONGLEN];
-  int songlen = 0;
-  int patternlength;
-  int totalrows = 0;
-  int firsttempo = 6;
-  int rowsperbeat;
+  int c;
 
   notes = NULL;
   numnotes = maxnotes = 0;
   tempos = NULL;
   numtempos = maxtempos = 0;
-  for (c = 0; c < 16; c++) firstprogram[c] = -1;
+  for (c = 0; c < 16; c++)
+  {
+    firstprogram[c] = -1;
+    trackprogram[c] = -1;
+  }
   memset(trackname, 0, sizeof trackname);
   memset(copyright, 0, sizeof copyright);
-
-  rowsperbeat = opt->rowsperbeat;
-  if (rowsperbeat < 1) rowsperbeat = 1;
-  if (rowsperbeat > 32) rowsperbeat = 32;
-  patternlength = opt->patternlength;
-  if (patternlength < 16) patternlength = 16;
-  if (patternlength > MAX_PATTROWS) patternlength = MAX_PATTROWS;
+  *bytracks = 0;
 
   // Read the whole file
   f = fopen(midiname, "rb");
@@ -430,6 +427,92 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
     p = trackend;
   }
 
+  // All the notes on one MIDI channel, in several tracks: the tracks (with
+  // notes) are read as channels 1, 2... (10 is skipped: drums). The notes
+  // are in the order of their tracks
+  {
+    int chn0 = -1, onechn = 1, ntracks = 0;
+    for (c = 0; c < numnotes; c++)
+    {
+      if (chn0 < 0) chn0 = notes[c].chn;
+      else if (notes[c].chn != chn0) onechn = 0;
+      if ((!c) || (notes[c].track != notes[c-1].track)) ntracks++;
+    }
+    if ((onechn) && (ntracks >= 2) && (chn0 != DRUMCHANNEL))
+    {
+      int rank = -1;
+      for (c = 0; c < 16; c++) firstprogram[c] = -1;
+      for (c = 0; c < numnotes; c++)
+      {
+        int chn;
+        if ((!c) || (notes[c].track != notes[c-1].track)) rank++;
+        chn = (rank < DRUMCHANNEL) ? rank : ((rank + 1 < 16) ? rank + 1 : 15);
+        notes[c].chn = chn;
+        if ((firstprogram[chn] < 0) && (notes[c].track < 16)) firstprogram[chn] = trackprogram[notes[c].track];
+      }
+      *bytracks = 1;
+    }
+  }
+
+  *ppqout = ppq;
+  *smpteout = smpte;
+  ok = 1;
+
+done:
+  free(data);
+  if (!ok) freemidi();
+  return ok;
+}
+
+int midi2sng_scan(const char *midiname, MIDISCAN *scan, char *report, int reportsize)
+{
+  unsigned ppq;
+  int smpte, c;
+
+  memset(scan, 0, sizeof *scan);
+  if (!loadmidi(midiname, &ppq, &smpte, &scan->bytracks, report, reportsize)) return 0;
+  for (c = 0; c < numnotes; c++) scan->notes[notes[c].chn & 15]++;
+  strcpy(scan->name, trackname);
+  freemidi();
+  setreport(report, reportsize, "");
+  return 1;
+}
+
+SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *report, int reportsize)
+{
+  unsigned ppq;
+  int smpte = 0, bytracks = 0;
+  int ok = 0;
+  int c, d;
+  char msg[256];
+
+  // Conversion state
+  PLACED *placed = NULL;
+  int numplaced = 0, dropped = 0, clampedtempos = 0, otherchn = 0;
+  int tempovoice = 0;             // SID channel of the tempo commands
+  int instrnum[16];
+  int numinstr = 0;
+  int instrchn[16];
+  unsigned char *grid[MAX_CHN] = {NULL, NULL, NULL};
+  unsigned char *patterns = NULL;
+  SNGDATA *sng = NULL;
+  int numpatterns = 0;
+  unsigned char orderlist[MAX_CHN][MAX_SONGLEN];
+  int songlen = 0;
+  int patternlength;
+  int totalrows = 0;
+  int firsttempo = 6;
+  int rowsperbeat;
+
+  rowsperbeat = opt->rowsperbeat;
+  if (rowsperbeat < 1) rowsperbeat = 1;
+  if (rowsperbeat > 32) rowsperbeat = 32;
+  patternlength = opt->patternlength;
+  if (patternlength < 16) patternlength = 16;
+  if (patternlength > MAX_PATTROWS) patternlength = MAX_PATTROWS;
+
+  if (!loadmidi(midiname, &ppq, &smpte, &bytracks, report, reportsize)) return NULL;
+
   // Leave out the channels not wanted, convert ticks to rows and notes to
   // GoatTracker notes
   d = 0;
@@ -437,8 +520,14 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
   {
     MNOTE n = notes[c];
     int gtnote;
-    if ((n.chn == DRUMCHANNEL) && (!opt->drums)) continue;
     if ((opt->channelmask) && (!(opt->channelmask & (1 << n.chn)))) continue;
+    // Split: only MIDI channels 1-3 have a SID channel
+    if ((opt->split) && (n.chn >= MAX_CHN))
+    {
+      otherchn++;
+      continue;
+    }
+    if ((n.chn == DRUMCHANNEL) && (!opt->drums)) continue;
 
     // MIDI note 60 (middle C) = C-4. Notes outside the range go an octave
     // up/down until they fit
@@ -455,7 +544,9 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
   numnotes = d;
   if (!numnotes)
   {
-    setreport(report, reportsize, "No notes found in the MIDI file");
+    if (otherchn) setreport(report, reportsize, "No notes on MIDI channels 1-3");
+    else if (opt->channelmask) setreport(report, reportsize, "No notes on the MIDI channel chosen");
+    else setreport(report, reportsize, "No notes found in the MIDI file");
     goto done;
   }
 
@@ -467,6 +558,45 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
     goto done;
   }
 
+  if (opt->split)
+  {
+    // MIDI channel n on SID channel n, one note at a time: a new note cuts
+    // the one before; of notes starting together (highest first) the first
+    // plays
+    int lastplaced[MAX_CHN];
+
+    for (c = 0; c < MAX_CHN; c++) lastplaced[c] = -1;
+    for (c = 0; c < numnotes; c++)
+    {
+      MNOTE *n = &notes[c];
+      int v = n->chn;
+
+      if (lastplaced[v] >= 0)
+      {
+        PLACED *last = &placed[lastplaced[v]];
+        if (last->start == (int)n->start)
+        {
+          dropped++;
+          continue;
+        }
+        if (last->end > (int)n->start) last->end = n->start;
+      }
+      placed[numplaced].start = n->start;
+      placed[numplaced].end = n->end;
+      placed[numplaced].voice = v;
+      placed[numplaced].note = n->note;
+      placed[numplaced].chn = n->chn;
+      lastplaced[v] = numplaced++;
+    }
+
+    // The tempo on the first SID channel that has notes
+    tempovoice = MAX_CHN - 1;
+    for (c = 0; c < numplaced; c++)
+    {
+      if (placed[c].voice < tempovoice) tempovoice = placed[c].voice;
+    }
+  }
+  else
   // Share the notes out to the 3 SID channels
   {
     int busyuntil[MAX_CHN];       // Row where the channel is free again
@@ -576,6 +706,7 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
   }
 
   // An instrument for every MIDI channel, in the order they first play
+  // (split: in the order of the channels)
   for (c = 0; c < 16; c++) instrnum[c] = 0;
   for (c = 0; c < numplaced; c++)
   {
@@ -588,6 +719,16 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
     if (placed[c].end > totalrows) totalrows = placed[c].end;
   }
   totalrows++;                    // Room for the last keyoff
+  if (opt->split)
+  {
+    numinstr = 0;
+    for (c = 0; c < 16; c++)
+    {
+      if (!instrnum[c]) continue;
+      instrchn[numinstr] = c;
+      instrnum[c] = ++numinstr;
+    }
+  }
 
   // Patterns: try the wanted length, then the longest if the song doesn't
   // fit the orderlist / pattern limits
@@ -660,8 +801,8 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
         if (tempo > MAXTEMPO) tempo = MAXTEMPO;
         if (!row) firsttempo = tempo;
         if ((unsigned)tempo == prevtempo) continue;
-        grid[0][row*4+2] = CMD_SETTEMPO;
-        grid[0][row*4+3] = tempo;
+        grid[tempovoice][row*4+2] = CMD_SETTEMPO;
+        grid[tempovoice][row*4+3] = tempo;
         prevtempo = tempo;
       }
 
@@ -762,6 +903,8 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
 
       if (chn == DRUMCHANNEL) pr = &drumpreset;
       else if ((firstprogram[chn] >= 32) && (firstprogram[chn] <= 39)) pr = &basspreset;
+      // Split: the same sound for a channel every time (CH1 PULSE...)
+      else if (opt->split) pr = &presets[chn % NUMPRESETS];
       else pr = &presets[(others++) % NUMPRESETS];
 
       // Wavetable: the waveform (and a fixed note for drums), then stop
@@ -807,28 +950,43 @@ int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *
       memcpy(sng->pattern[c], &patterns[c*(patternlength+1)*4], patternlength * 4);
     }
   }
-  if (!sngwrite(sngname, sng))
-  {
-    setreport(report, reportsize, "Could not write the song file");
-    goto done;
-  }
 
-  sprintf(msg, "%d notes, %d patterns, tempo %d", numplaced, numpatterns, firsttempo);
-  if (dropped) sprintf(msg + strlen(msg), ", %d left out", dropped);
+  // (Split: the patterns are counted where they go)
+  if (opt->split) sprintf(msg, "%d notes, tempo %d", numplaced, firsttempo);
+  else sprintf(msg, "%d notes, %d patterns, tempo %d", numplaced, numpatterns, firsttempo);
+  if (dropped)
+  {
+    if (opt->split) sprintf(msg + strlen(msg), ", %d chord note%s left out", dropped, (dropped == 1) ? "" : "s");
+    else sprintf(msg + strlen(msg), ", %d left out", dropped);
+  }
+  if (otherchn) sprintf(msg + strlen(msg), ", %d note%s on other MIDI channels left out", otherchn, (otherchn == 1) ? "" : "s");
+  if (bytracks) sprintf(msg + strlen(msg), ", MIDI tracks read as channels");
   if (clampedtempos) sprintf(msg + strlen(msg), ", tempo out of range");
   setreport(report, reportsize, msg);
   ok = 1;
 
 done:
   for (c = 0; c < MAX_CHN; c++) free(grid[c]);
-  free(sng);
   free(patterns);
   free(placed);
-  free(notes);
-  free(tempos);
-  free(data);
-  notes = NULL;
-  tempos = NULL;
+  freemidi();
+  if (!ok)
+  {
+    free(sng);
+    sng = NULL;
+  }
+  return sng;
+}
+
+int midi2sng(const char *midiname, const char *sngname, const MIDI2SNG_OPTIONS *opt, char *report, int reportsize)
+{
+  SNGDATA *sng = midi2sngdata(midiname, opt, report, reportsize);
+  int ok;
+
+  if (!sng) return 0;
+  ok = sngwrite(sngname, sng);
+  free(sng);
+  if (!ok) setreport(report, reportsize, "Could not write the song file");
   return ok;
 }
 
@@ -840,4 +998,5 @@ void midi2sng_defaults(MIDI2SNG_OPTIONS *opt)
   opt->drums = 0;
   opt->channelmask = 0;
   opt->ntsc = 0;
+  opt->split = 0;
 }

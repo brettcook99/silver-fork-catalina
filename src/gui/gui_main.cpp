@@ -702,14 +702,15 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     return;
   }
 
-  // CTRL + [ ] \ (CMD too on macOS): mute / unmute channel 1, 2 or 3. By
+  // CTRL + [ ] \ (CMD too on macOS): mute / unmute channel 1, 2 or 3, also
+  // in the SID designer (its oscillators play on those SID voices). By
   // scancode: the three keys right of P whatever the keyboard layout
   // (ISO keyboards may report \ as NONUSHASH)
   if (((k.keysym.scancode == SDL_SCANCODE_LEFTBRACKET) || (k.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) ||
     (k.keysym.scancode == SDL_SCANCODE_BACKSLASH) || (k.keysym.scancode == SDL_SCANCODE_NONUSHASH)) &&
     (mod & (KMOD_CTRL | KMOD_GUI)) && (!(mod & (KMOD_ALT | KMOD_SHIFT))))
   {
-    if ((!k.repeat) && (!textscreen) && (!designerwanted(textscreen)) && (!editorsblocked()))
+    if ((!k.repeat) && (!textscreen) && (!editorsblocked()))
     {
       int c = (k.keysym.scancode == SDL_SCANCODE_LEFTBRACKET) ? 0 : (k.keysym.scancode == SDL_SCANCODE_RIGHTBRACKET) ? 1 : 2;
       mutechannel(c);

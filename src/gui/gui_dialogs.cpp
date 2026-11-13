@@ -537,6 +537,118 @@ static void sidimportdialog(void)
 }
 
 /*
+ * MIDI import: which MIDI channels go to which tracks
+ */
+
+static bool wantmidiimport = false;
+static char midiimportpath[MAX_PATHNAME] = "";
+static MIDISCAN midiscan;
+
+extern "C" void gui_openmidiimport(const char *path, const MIDISCAN *scan)
+{
+  snprintf(midiimportpath, sizeof midiimportpath, "%s", path ? path : "");
+  midiscan = *scan;
+  // The choice last made, unless the file has no notes for it
+  if ((midiimportmode >= MIDIIMPORT_CHN1) && (midiimportmode <= MIDIIMPORT_CHN3) &&
+    (!midiscan.notes[midiimportmode - MIDIIMPORT_CHN1]))
+    midiimportmode = MIDIIMPORT_ALL;
+  if ((midiimportmode == MIDIIMPORT_ALL) && (!midiscan.notes[0]) && (!midiscan.notes[1]) && (!midiscan.notes[2]))
+    midiimportmode = MIDIIMPORT_MIXED;
+  wantmidiimport = true;
+}
+
+static void midiimportdialog(void)
+{
+  MIDI2SNG_OPTIONS *o = &midiimportoptions;
+  float labelw;
+  char text[160];
+  int c;
+  bool any = false;
+
+  if (wantmidiimport)
+  {
+    ImGui::OpenPopup("##midiimport");
+    wantmidiimport = false;
+  }
+  if (!beginmodal("##midiimport", ImGui::GetFontSize() * 30.0f)) return;
+  labelw = ImGui::GetFontSize() * 8.5f;
+
+  title("Import MIDI file");
+  ImGui::PushFont(fontbold, 0.0f);
+  ImGui::TextWrapped("%s", midiscan.name[0] ? midiscan.name : gt_basename(midiimportpath));
+  ImGui::PopFont();
+  if (midiscan.name[0]) body(gt_basename(midiimportpath));
+
+  // The MIDI channels that have notes
+  snprintf(text, sizeof text, "Notes on MIDI channel");
+  for (c = 0; c < 16; c++)
+  {
+    if (!midiscan.notes[c]) continue;
+    snprintf(text + strlen(text), sizeof text - strlen(text), "%s %d (%d)", any ? "," : "", c + 1, midiscan.notes[c]);
+    any = true;
+  }
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
+  ImGui::TextWrapped("%s", any ? text : "No notes in this file");
+  if (midiscan.bytracks)
+    ImGui::TextWrapped("All the notes are on one MIDI channel: the file's tracks are read as channels 1, 2, 3...");
+  ImGui::PopStyleColor();
+
+  sectiontitle("IMPORT");
+  {
+    bool none = (!midiscan.notes[0]) && (!midiscan.notes[1]) && (!midiscan.notes[2]);
+    ImGui::BeginDisabled(none);
+    ImGui::RadioButton("All: MIDI channels 1-3 to tracks 1-3", &midiimportmode, MIDIIMPORT_ALL);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      tooltip("Channel 1 to track 1, 2 to 2, 3 to 3. A track whose channel has no notes keeps what it has");
+  }
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    snprintf(text, sizeof text, "Channel %d to track %d", c + 1, c + 1);
+    ImGui::BeginDisabled(!midiscan.notes[c]);
+    ImGui::RadioButton(text, &midiimportmode, MIDIIMPORT_CHN1 + c);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    {
+      snprintf(text, sizeof text, "Only track %d is replaced: the other tracks stay as they are", c + 1);
+      tooltip(midiscan.notes[c] ? text : "No notes on this MIDI channel");
+    }
+  }
+  ImGui::RadioButton("Mixed: all MIDI channels shared out to the 3 tracks", &midiimportmode, MIDIIMPORT_MIXED);
+  if (ImGui::IsItemHovered())
+    tooltip("Chords too: up to 3 notes at once, from any MIDI channel (the import as it was before)");
+  body(midiimportmode == MIDIIMPORT_MIXED ?
+    "All 3 tracks of the subtune are replaced. The instruments and the other subtunes stay. CTRL+Z undoes the import." :
+    "One note at a time on each track (of notes starting together, the highest). Only the tracks that get notes are replaced: the other tracks, the instruments and the other subtunes stay. CTRL+Z undoes the import.");
+
+  sectiontitle("GRID");
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Rhythm grid");
+  ImGui::SameLine(labelw);
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+  ImGui::SliderInt("##mrows", &o->rowsperbeat, 1, 16, "%d rows per beat");
+  if (ImGui::IsItemHovered()) tooltip("Pattern rows per quarter note: notes are moved to the nearest row");
+
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Pattern length");
+  ImGui::SameLine(labelw);
+  ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+  ImGui::SliderInt("##mplen", &o->patternlength, 16, MAX_PATTROWS, "%d rows");
+
+  {
+    const char *labels[] = { "Import", "Cancel" };
+    int r = buttons(labels, 2, 1);
+    if (r == 0)
+    {
+      cmd_postfile(GTCMD_IMPORTMIDINOW, midiimportpath);
+      ImGui::CloseCurrentPopup();
+    }
+    if (r == 1) ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+/*
  * VIEW menu of the retro menu bar, About, level meter colors
  */
 
@@ -843,6 +955,7 @@ void gui::drawdialogs(void)
   metercolorsdialog();
   exportdialog();
   sidimportdialog();
+  midiimportdialog();
   // One at a time: the first one wanted opens
   savedialog();
   quitdialog();

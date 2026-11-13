@@ -30,6 +30,10 @@ unsigned midi_eventtime(void);
 // Number of MIDI input devices currently open
 int midi_devicecount(void);
 
+// A relative (endless) knob's control change value as steps: 1-63 = that
+// many steps up, 65-127 = (value - 64) steps down, 0 and 64 = none
+int midi_relativesteps(int value);
+
 #ifndef GMIDI_C
 extern unsigned midiinput;
 #endif

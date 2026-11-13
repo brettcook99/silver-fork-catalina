@@ -239,6 +239,26 @@ int input_nextkey(void)
   return 1;
 }
 
+// MIDI CC 60 in the tracker: the instrument knob. Value 1 = the next
+// instrument, 65 = the one before (01-3F)
+static void instrumentknob(int value)
+{
+  int steps = midi_relativesteps(value);
+
+  if (!steps) return;
+  while ((steps > 0) && (editorInfo.einum < MAX_INSTR - 1))
+  {
+    nextinstr();
+    steps--;
+  }
+  while ((steps < 0) && (editorInfo.einum > 1))
+  {
+    previnstr();
+    steps++;
+  }
+  gui_message("Instrument %02X (MIDI CC 60)", editorInfo.einum);
+}
+
 int input_nextmidi(void)
 {
   int midinote;
@@ -254,10 +274,12 @@ int input_nextmidi(void)
     event = midi_getevent(&midinote);
     if (!event) return 0;
     // Control changes (knobs) go to the SID designer at once, if it is
-    // shown. The others are dropped
+    // shown. In the tracker CC 60 chooses the instrument, the others are
+    // dropped
     if (event == MIDI_CONTROL)
     {
       if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
+      else if (midinote == 60) instrumentknob(midi_eventvalue());
       continue;
     }
     note = FIRSTNOTE + midinote - 12;
@@ -367,37 +389,23 @@ void printtextcp(int cp, int y, int color, const char *text)
 
 void printtextcentered(int centerx, int y, int color, const char *text)
 {
+  printtextcentereddown(centerx, y, 0, color, text);
+}
+
+void printtextcentereddown(int centerx, int y, int thirds, int color, const char *text)
+{
   int len = (int)strlen(text);
   int x = centerx - len / 2;
+  unsigned flags = CELL_DOWN((thirds < 0) ? 0 : (thirds > 2) ? 2 : thirds);
   unsigned *dptr;
 
   printtext(x, y, color, text);
-  if ((!(len & 1)) || (!scrbuffer) || (y < 0) || (y >= MAX_ROWS)) return;
+  if (len & 1) flags |= CELL_HALFLEFT;
+  if ((!flags) || (!scrbuffer) || (y < 0) || (y >= MAX_ROWS)) return;
   dptr = scrbuffer + y * MAX_COLUMNS;
   for (; len; len--, x++)
   {
-    if ((x >= 0) && (x < MAX_COLUMNS)) dptr[x] |= CELL_HALFLEFT;
-  }
-}
-
-void printpanelbox(int x, int y, int w, int h)
-{
-  int cx, cy;
-
-  if (!scrbuffer) return;
-  for (cy = y; cy < y + h; cy++)
-  {
-    if ((cy < 0) || (cy >= MAX_ROWS)) continue;
-    for (cx = x; cx < x + w; cx++)
-    {
-      unsigned flags = CELL_BOX;
-      if ((cx < 0) || (cx >= MAX_COLUMNS)) continue;
-      if (cy == y) flags |= CELL_BOXTOP;
-      if (cy == y + h - 1) flags |= CELL_BOXBOTTOM;
-      if (cx == x) flags |= CELL_BOXLEFT;
-      if (cx == x + w - 1) flags |= CELL_BOXRIGHT;
-      scrbuffer[cy * MAX_COLUMNS + cx] |= flags;
-    }
+    if ((x >= 0) && (x < MAX_COLUMNS)) dptr[x] |= flags;
   }
 }
 

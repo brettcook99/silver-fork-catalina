@@ -31,20 +31,27 @@ static char timechar[] = {':', ' '};
 //   "DOWN" in green tells which way it went last
 // - LOOP: the wheel sets how many patterns the playback loops (playloop),
 //   00 = no loop
-// - CHN1-CHN3 in boxes: each channel's song position / row (stopped: its
-//   start position). The wheel moves the channel to the next or previous
-//   pattern in its orderlist: while the song plays it goes there at once
-//   (same row), stopped the start position goes there. A click mutes it
+// - CHN1-CHN3: each channel's song position / row (stopped: its start
+//   position), on the last six pattern rows. The wheel moves the channel to
+//   the next or previous pattern in its orderlist: while the song plays it
+//   goes there at once (same row), stopped the start position goes there. A
+//   click mutes it
+// OCTAVE and LOOP (two rows each) share the six rows between TEMPO and CHN1
+// evenly, as Scott placed them: OCTAVE two thirds of a row lower than row
+// OCTAVEY, LOOP a third lower than LOOPY. The wheel works on all three rows
+// of each
 #define FXFIRSTCOLUMN (MAX_CHN * 15 + 2)   // Clicks & wheel: to column RX - 2
 #define FXCENTER 52
 #define FXVALUEY (PATTROWY - 2)
 #define FXNUM 16
 #define FXPAUSE 600                        // ms: a pause ends the wheel's undo step
-#define OCTAVEY (PATTROWY + FXNUM + 1)     // "OCTAVE", its value under it
+#define OCTAVEY (PATTROWY + FXNUM)         // "OCTAVE", its value under it
+#define OCTAVEDOWN 2
 #define LOOPY (OCTAVEY + 3)                // "LOOP", its value under it
-#define CHNBOXY (LOOPY + 3)                // The channel boxes, 2 rows each
-#define CHNBOXX (FXCENTER - 4)
-#define CHNBOXW 8
+#define LOOPDOWN 1
+#define CHNY (PATTROWY + VISIBLEPATTROWS - MAX_CHN * 2) // The channels, 2 rows each
+#define CHNX (FXCENTER - 4)
+#define CHNW 8
 #define JUMPWAIT 100                       // ms: a channel's jump still pending
 
 static const char *fxname[FXNUM] =
@@ -126,7 +133,7 @@ static int fxcurrent(void)
   return fxvalue[fxsel];
 }
 
-// A channel's song position and row as its box shows them: while playing
+// A channel's song position and row as the panel shows them: while playing
 // where the playback is (a jump asked for shows at once), stopped its start
 // position
 static void chnposition(int c, int *pos, int *row)
@@ -153,7 +160,7 @@ static void fxprint(void)
 
   if (!recordmode) fxsel = -1;
 
-  for (k = FXVALUEY; k < CHNBOXY + MAX_CHN * 2; k++)
+  for (k = FXVALUEY; k < CHNY + MAX_CHN * 2; k++)
     printblankc(FXFIRSTCOLUMN, k, CNORMAL, RX - 1 - FXFIRSTCOLUMN);
 
   if (fxsel >= 0)
@@ -164,16 +171,16 @@ static void fxprint(void)
   for (k = 0; k < FXNUM; k++)
     printtextcentered(FXCENTER, PATTROWY + k, (k == fxsel) ? CTITLE : CNORMAL, fxname[k]);
 
-  printtextcentered(FXCENTER, OCTAVEY, CTITLE, "OCTAVE");
-  if (octavelast) printtextcentered(FXCENTER, OCTAVEY + 1, CEDIT, (octavelast > 0) ? "UP" : "DOWN");
+  printtextcentereddown(FXCENTER, OCTAVEY, OCTAVEDOWN, CTITLE, "OCTAVE");
+  if (octavelast) printtextcentereddown(FXCENTER, OCTAVEY + 1, OCTAVEDOWN, CEDIT, (octavelast > 0) ? "UP" : "DOWN");
 
-  printtextcentered(FXCENTER, LOOPY, CTITLE, "LOOP");
+  printtextcentereddown(FXCENTER, LOOPY, LOOPDOWN, CTITLE, "LOOP");
   sprintf(textbuffer, "%02X", playloop);
-  printtextcentered(FXCENTER, LOOPY + 1, CEDIT, textbuffer);
+  printtextcentereddown(FXCENTER, LOOPY + 1, LOOPDOWN, CEDIT, textbuffer);
 
   for (c = 0; c < MAX_CHN; c++)
   {
-    int y = CHNBOXY + c * 2;
+    int y = CHNY + c * 2;
     int pos, row;
 
     sprintf(textbuffer, "CHN%d", c + 1);
@@ -181,19 +188,18 @@ static void fxprint(void)
     chnposition(c, &pos, &row);
     sprintf(textbuffer, "%03d/%02d", pos, row);
     printtextcentered(FXCENTER, y + 1, CEDIT, textbuffer);
-    printpanelbox(CHNBOXX, y, CHNBOXW, 2);
   }
 }
 
 // A left click on a command picks it (in edit mode), on the one picked lets
-// it go. A click on a channel's box mutes it (or lets it be heard again)
+// it go. A click on a channel mutes it (or lets it be heard again)
 static void fxclick(void)
 {
   int k = mousey - PATTROWY;
 
-  if ((mousex >= CHNBOXX) && (mousex < CHNBOXX + CHNBOXW) && (mousey >= CHNBOXY) && (mousey < CHNBOXY + MAX_CHN * 2))
+  if ((mousex >= CHNX) && (mousex < CHNX + CHNW) && (mousey >= CHNY) && (mousey < CHNY + MAX_CHN * 2))
   {
-    mutechannel((mousey - CHNBOXY) / 2);
+    mutechannel((mousey - CHNY) / 2);
     return;
   }
   if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (k < 0) || (k >= FXNUM)) return;
@@ -260,7 +266,7 @@ static int nextpatternpos(int s, int c, int pos, int d)
   return pos;
 }
 
-// The wheel over a channel's box: the channel goes d patterns on in its
+// The wheel over a channel (CHN1-3): the channel goes d patterns on in its
 // orderlist
 static void chnwheel(int c, int d)
 {
@@ -289,7 +295,7 @@ static void chnwheel(int c, int d)
 }
 
 // The mouse wheel over the effects panel (up = bigger): the value of the
-// command picked, OCTAVE, LOOP or a channel box. Returns nonzero if the
+// command picked, OCTAVE, LOOP or a channel. Returns nonzero if the
 // wheel was over the panel
 static int fxwheel(int d)
 {
@@ -298,19 +304,19 @@ static int fxwheel(int d)
 
   if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (mousey < 2) || (mousey > PATTROWY + VISIBLEPATTROWS)) return 0;
 
-  if ((mousey >= OCTAVEY) && (mousey <= OCTAVEY + 1))
+  if ((mousey >= OCTAVEY) && (mousey <= OCTAVEY + 2))
   {
     octavewheel(d);
     return 1;
   }
-  if ((mousey >= LOOPY) && (mousey <= LOOPY + 1))
+  if ((mousey >= LOOPY) && (mousey <= LOOPY + 2))
   {
     playloop = clampvalue(playloop + d, 0, 0xff);
     return 1;
   }
-  if ((mousey >= CHNBOXY) && (mousey < CHNBOXY + MAX_CHN * 2))
+  if ((mousey >= CHNY) && (mousey < CHNY + MAX_CHN * 2))
   {
-    chnwheel((mousey - CHNBOXY) / 2, d);
+    chnwheel((mousey - CHNY) / 2, d);
     return 1;
   }
   if (fxsel < 0) return 1;

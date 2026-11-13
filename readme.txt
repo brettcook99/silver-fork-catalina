@@ -261,7 +261,10 @@ CTRL/CMD+Z undoes it). A C64 character ROM named chargen in the settings
 folder replaces the built-in characters.
 
 CTRL+[, CTRL+] and CTRL+\ (CMD too on macOS) mute or unmute channel 1, 2 and
-3, from any editor.
+3, from any editor and in the SID Designer, where the oscillator on that SID
+voice goes grey (a click on its light unmutes it). SPACE starts and stops
+playing in the SID Designer as in the tracker (RETURN presses the control
+that has the keyboard).
 
 The file dialogs start in the folder used last time for their kind of file,
 also after a restart: one folder for songs (open, save, merge), one for
@@ -465,7 +468,25 @@ MIDI controllers: in the SID Designer knobs sending CC73, CC75, CC70 (or
 CC76 or CC20) and CC72 set attack, decay, sustain and release of the
 oscillators heard, CC74 the filter cutoff and CC71 the resonance. CC4 sets
 the filter type and CC7 the SID voice that goes through the filter: the
-knob's range in three parts, LP / BP / HP and voice 1 / 2 / 3.
+knob's range in three parts, LP / BP / HP and voice 1 / 2 / 3. CC60 is a
+relative (endless) knob that chooses the patch in the SID Designer and the
+instrument in the tracker: value 1 = the next one, 65 = the one before
+(2-63 and 66-127 move that many steps at once).
+
+MIDI files: File > Import MIDI File asks what goes where:
+- All: MIDI channel 1 to track 1, 2 to track 2 and 3 to track 3
+- Channel 1 to track 1, channel 2 to track 2 or channel 3 to track 3 alone
+- Mixed: the notes of all MIDI channels shared out to the 3 tracks
+The notes go into the current subtune. Only the tracks that get notes are
+replaced; the other tracks (an earlier import, say), the instruments and the
+other subtunes stay, and CTRL/CMD+Z undoes the import. Each track plays one
+note at a time: a new note cuts the one before, of notes starting together
+the highest plays. Each MIDI channel gets an instrument (Ch1 Pulse, Ch2 Saw,
+Ch3 Triangle); one of that name already in the song is used again, so a
+sound made for it in the SID Designer stays when the file is imported again.
+When all the notes are on one MIDI channel in several tracks of the file (as
+many sequencers save them), the tracks are read as channels 1, 2, 3. A MIDI
+file opened from the Finder or the command line becomes a new song.
 
 Notes played (keys or MIDI) start after one hardrestart frame (20 ms; none
 if the instrument's gate timer is 0), enough for the envelope to start

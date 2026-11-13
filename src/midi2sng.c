@@ -19,11 +19,13 @@ static void usage(void)
          "-cxx MIDI channels to use, e.g. -c1,2,4 DEFAULT=all\n"
          "-d   Include drums (MIDI channel 10)\n"
          "-n   Tempo for NTSC (60Hz) playback\n"
+         "-s   Split: MIDI channels 1-3 to SID channels 1-3, one note at a time\n"
          "\n"
          "The notes go to the 3 SID channels. When more than 3 notes play at\n"
          "once, the highest and lowest new notes win and the rest are left out.\n"
          "Every MIDI channel gets an instrument of its own. MIDI note 60 (middle\n"
-         "C) is C-4.\n");
+         "C) is C-4. When all notes are on one MIDI channel in several tracks,\n"
+         "the tracks are read as channels 1, 2, 3...\n");
 }
 
 int main(int argc, char **argv)
@@ -76,6 +78,10 @@ int main(int argc, char **argv)
 
         case 'n':
         opt.ntsc = 1;
+        break;
+
+        case 's':
+        opt.split = 1;
         break;
 
         default:

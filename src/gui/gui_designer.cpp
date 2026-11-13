@@ -38,24 +38,31 @@ namespace gui
 #define PAGE_H 30
 #define HINT_Y 39
 
-// The frame: Scott's template (designerframe.png, made from measurements on
-// his 520 x 345 image: white panel with a blue bar along the top, the C64
-// nameplate badge). It fills the retro screen's place, the tracker's title
-// bar over its blue bar. On its white middle the designer's window, as in
-// Scott's picture of the right look: a lavender border, like a C64's border,
-// around the violet screen. The border's place, in the template's pixels:
-#define FRAME_W 520.0f
-#define FRAME_H 345.0f
-#define BORDER_X0 13.0f
-#define BORDER_Y0 49.07f
-#define BORDER_X1 508.0f
-#define BORDER_Y1 335.2f
-#define BORDERCOLOR 0xf7c1ff          // Lavender: the border
-#define SCREENCOLOR 0x755df9          // Violet: the designer's screen (BLUE)
-#define BORDERW 0.0323f               // Border at the sides (of its width)
-#define LABELCOLOR 0xc9b4ff           // Lavender: labels and lines (LIGHTBLUE)
-#define FAINTCOLOR 0xa29cc0           // Greyed out text (GREY)
-#define DIMCOLOR 0x5443c8             // Disabled things (DARKGREY)
+// The frame: Scott's template, his own picture (designerframe.png: blue bar
+// along the top, tan panel, the C64 nameplate badge, a violet border, its
+// middle made flat). It fills the retro screen's place, the tracker's title
+// bar over its blue bar. In the violet border, like a C64's border, the
+// designer's dark blue screen, where his picture has it. Places in the
+// template's pixels:
+#define FRAME_W 4196.0f
+#define FRAME_H 2784.0f
+#define BORDER_X0 97.0f
+#define BORDER_Y0 398.0f
+#define BORDER_X1 4096.0f
+#define BORDER_Y1 2699.0f
+#define SCREEN_X0 233.5f              // The 80 x 40 characters
+#define SCREEN_Y0 596.0f
+#define SCREEN_X1 3954.5f
+#define SCREEN_Y1 2457.0f
+// Colours as Scott listed them (the frame image has the same: badge #5C5950,
+// its white text and the rainbow lines #C13930 #CB694A #EBCC4F #68B057
+// #459CD5, stripes #908776)
+#define PANELCOLOR 0xb6a994           // Tan: the panel (without the image)
+#define BORDERCOLOR 0x715ef0          // Violet: the border ("edge")
+#define SCREENCOLOR 0x312a70          // Dark blue: the designer's screen (BLUE)
+#define LABELCOLOR 0xa594ff           // Light violet: labels and lines (LIGHTBLUE)
+#define FAINTCOLOR 0x9c96bc           // Greyed out text (GREY)
+#define DIMCOLOR 0x5a4bb4             // Disabled things (DARKGREY)
 #define WARNCOLOR 0xff8a7a            // Lights, warnings (LIGHTRED)
 
 enum { PAGE_PATCH, PAGE_WAVE, PAGE_PULSE, PAGE_FILTER, PAGE_EMU, PAGE_BROWSER, NUM_PAGES };
@@ -220,6 +227,13 @@ static void bindpatch(void)
   }
   for (k = 0; k < PATCH_OSC; k++)
     osc[k] = (k == n - 1) ? primary : patch_findosc(patchbase, k + 1);
+}
+
+// Oscillator k is not heard: muted here (its light) or its SID voice's
+// channel muted (CTRL+[ ] \ as in the tracker)
+static bool muted(int k)
+{
+  return (oscmute[k]) || (chn[k].mute);
 }
 
 static bool multiosc(void)
@@ -450,7 +464,7 @@ static void noteon(int note, int source, int key)
   heldkey = key;
   for (k = 0; k < PATCH_OSC; k++)
   {
-    heldvoice[k] = (osc[k] != 0) && (!oscmute[k]);
+    heldvoice[k] = (osc[k] != 0) && (!muted(k));
     if (heldvoice[k]) playtestnote(note, osc[k], k);
   }
 }
@@ -857,8 +871,8 @@ static void drawheader(void)
     initpatch();
 }
 
-// The badge's rainbow colors (the C64's own red and orange are too dark on
-// the violet screen)
+// The stripes' rainbow colors, light as in Scott's template (the C64's own
+// red and orange are too dark on the screen)
 static const ImU32 rainbow[5] =
 {
   IM_COL32(0xff, 0x5b, 0x57, 255), IM_COL32(0xff, 0xcc, 0x90, 255), IM_COL32(0xff, 0xff, 0x6f, 255),
@@ -926,7 +940,7 @@ static void drawhint(void)
     text = msg;
     col = WHITE;
   }
-  if (!text) text = "TAB PAGES  ARROWS/ENTER CONTROLS  Z-M Q-P PLAY  PGUP/PGDN OCTAVE  ESC TRACKER";
+  if (!text) text = "TAB PAGES  ARROWS/ENTER CONTROLS  Z-M Q-P NOTES  SPACE PLAY/STOP  ESC TRACKER";
   snprintf(line, sizeof line, "%s", text);
   print(0, HINT_Y, line, col);
 }
@@ -972,13 +986,19 @@ static void drawosc(int k)
 
   // LED and title: switches the oscillator on / off
   {
-    bool lit = on && !oscmute[k];
+    bool lit = on && !muted(k);
     const char *ledtip = !on ? "CLICK TO ADD THIS OSCILLATOR (A COPY OF THE FIRST, IN THE NEXT EMPTY INSTRUMENT)" :
       lit ? "CLICK TO MUTE THIS OSCILLATOR WHILE YOU PLAY" : "CLICK TO HEAR THIS OSCILLATOR AGAIN";
     if (area(WID(area0, 1), x0 + 1, PAGE_Y, 16, 1, ledtip, &state))
     {
       if (!on) addosc(k);
-      else oscmute[k] = !oscmute[k];
+      else if (!lit)
+      {
+        // Heard again, also if its channel was muted
+        oscmute[k] = false;
+        if (chn[k].mute) mutechannel(k);
+      }
+      else oscmute[k] = true;
     }
     put(x0 + 1, PAGE_Y, SC_SPACE, boxcol);
     put(x0 + 2, PAGE_Y, lit ? SC_BALL : SC_CIRCLE, lit ? LIGHTRED : (state ? WHITE : GREY));
@@ -1006,7 +1026,7 @@ static void drawosc(int k)
     name[MAX_INSTRNAMELEN - 1] = 0;
     name[13] = 0;
     printfmt(x0 + 2, PAGE_Y + 1, YELLOW, "%02X", ins);
-    print(x0 + 5, PAGE_Y + 1, name, oscmute[k] ? GREY : WHITE);
+    print(x0 + 5, PAGE_Y + 1, name, muted(k) ? GREY : WHITE);
   }
 
   // Waveforms
@@ -2665,8 +2685,8 @@ static void freeframe(void)
 }
 
 // Draws the frame over a-b (ImGui points: the retro screen's place), pixel
-// for pixel, and the designer's lavender border on it. Returns the border's
-// area
+// for pixel, and the designer's violet border on it. Returns the screen's
+// area in it
 static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen0, ImVec2 *screen1)
 {
   ImGuiIO &io = ImGui::GetIO();
@@ -2678,10 +2698,14 @@ static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen
   float u = (b.x - a.x) / FRAME_W;      // One template pixel
   float v = (b.y - a.y) / FRAME_H;
   ImU32 border = IM_COL32((BORDERCOLOR >> 16) & 0xff, (BORDERCOLOR >> 8) & 0xff, BORDERCOLOR & 0xff, 255);
+  ImVec2 border0, border1;
 
-  // In whole device pixels, so that the border's edges stay sharp
-  *screen0 = ImVec2(floorf((a.x + BORDER_X0 * u) * sx + 0.5f) / sx, floorf((a.y + BORDER_Y0 * v) * sy + 0.5f) / sy);
-  *screen1 = ImVec2(floorf((a.x + BORDER_X1 * u) * sx + 0.5f) / sx, floorf((a.y + BORDER_Y1 * v) * sy + 0.5f) / sy);
+  // The border in whole device pixels, so that its edges stay sharp (the
+  // screen is placed in whole pixels by c64::layout())
+  border0 = ImVec2(floorf((a.x + BORDER_X0 * u) * sx + 0.5f) / sx, floorf((a.y + BORDER_Y0 * v) * sy + 0.5f) / sy);
+  border1 = ImVec2(floorf((a.x + BORDER_X1 * u) * sx + 0.5f) / sx, floorf((a.y + BORDER_Y1 * v) * sy + 0.5f) / sy);
+  *screen0 = ImVec2(a.x + SCREEN_X0 * u, a.y + SCREEN_Y0 * v);
+  *screen1 = ImVec2(a.x + SCREEN_X1 * u, a.y + SCREEN_Y1 * v);
 
   if ((!framepixels) && (!framefailed))
   {
@@ -2700,10 +2724,10 @@ static void drawframe(SDL_Renderer *renderer, ImVec2 a, ImVec2 b, ImVec2 *screen
     frametexw = w;
     frameteth = h;
   }
-  // Without the image: a plain white panel
+  // Without the image: a plain tan panel
   if (frametexture) dl->AddImage(ImTextureRef((ImTextureID)(intptr_t)frametexture), a, b);
-  else dl->AddRectFilled(a, b, IM_COL32(255, 255, 255, 255), 8.0f * u);
-  dl->AddRectFilled(*screen0, *screen1, border);
+  else dl->AddRectFilled(a, b, IM_COL32((PANELCOLOR >> 16) & 0xff, (PANELCOLOR >> 8) & 0xff, PANELCOLOR & 0xff, 255));
+  dl->AddRectFilled(border0, border1, border);
 }
 
 static void readinput(void)
@@ -2739,7 +2763,6 @@ void gui::drawdesigner(SDL_Renderer *renderer)
   ImGuiIO &io = ImGui::GetIO();
   ImDrawList *bg = ImGui::GetBackgroundDrawList();
   ImVec2 s0, s1, c0, c1;
-  float pad;
   int titlecol;
 
   drawnlastframe = true;
@@ -2761,12 +2784,8 @@ void gui::drawdesigner(SDL_Renderer *renderer)
   bg->ChannelsSetCurrent(0);
   drawframe(renderer, s0, s1, &c0, &c1);
   bg->ChannelsMerge();
-  // The violet screen in the lavender border, like a C64's screen
-  pad = (c1.x - c0.x) * BORDERW;
-  c0 = ImVec2(c0.x + pad, c0.y + pad);
-  c1 = ImVec2(c1.x - pad, c1.y - pad);
 
-  // Its colors on the violet screen
+  // Its colors on the dark blue screen
   setcolor(BLUE, SCREENCOLOR);
   setcolor(LIGHTBLUE, LABELCOLOR);
   setcolor(GREY, FAINTCOLOR);
@@ -2956,9 +2975,11 @@ void gui::designerkey(const SDL_KeyboardEvent &k, bool down)
     case SDLK_DOWN: pushnav(NAV_DOWN, shift); return;
     case SDLK_LEFT: pushnav(NAV_LEFT, shift); return;
     case SDLK_RIGHT: pushnav(NAV_RIGHT, shift); return;
-    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE:
+    case SDLK_RETURN: case SDLK_KP_ENTER:
       if (!k.repeat) pushnav(NAV_ENTER, shift);
       return;
+    // SPACE starts and stops playing, as in the tracker
+    case SDLK_SPACE: if (!k.repeat) cmd_post(GTCMD_PLAYSTOP); return;
   }
 
   // Note keys (as in the pattern editor)
@@ -3005,9 +3026,9 @@ extern "C" void gui_designermidi(int noteon_, int noteoff_)
   if ((noteoff_) && (noteoff_ == heldnote)) noteoff(SRC_MIDI, 0);
 }
 
-// MIDI knobs: the envelope of the oscillators that are heard (on and not
-// muted), the filter's cutoff, resonance, type and voice. A knob turned
-// without a pause is one undo step
+// MIDI knobs: the patch (CC 60), the envelope of the oscillators that are
+// heard (on and not muted), the filter's cutoff, resonance, type and voice.
+// A knob turned without a pause is one undo step
 extern "C" void gui_designermidicc(int cc, int value)
 {
   static const char *names[4] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
@@ -3016,6 +3037,29 @@ extern "C" void gui_designermidicc(int cc, int value)
 
   if (nameedit) return;
   bindpatch();
+
+  // CC 60: the patch knob, a relative (endless) knob: value 1 = the next
+  // patch, 65 = the one before
+  if (cc == 60)
+  {
+    int steps = midi_relativesteps(value);
+    int before = editorInfo.einum;
+
+    if (!active) closeedit();
+    for (; steps > 0; steps--)
+    {
+      steppatch(1);
+      bindpatch();
+    }
+    for (; steps < 0; steps++)
+    {
+      steppatch(-1);
+      bindpatch();
+    }
+    if (editorInfo.einum != before) gui_message("PATCH %02X (MIDI CC 60)", editorInfo.einum);
+    return;
+  }
+
   switch (cc)
   {
     case 73: part = 0; break;
@@ -3034,7 +3078,7 @@ extern "C" void gui_designermidicc(int cc, int value)
     for (k = 0; k < PATCH_OSC; k++)
     {
       unsigned char *reg;
-      if ((!osc[k]) || (oscmute[k])) continue;
+      if ((!osc[k]) || (muted(k))) continue;
       reg = (part < 2) ? &instr[osc[k]].ad : &instr[osc[k]].sr;
       if (((*reg >> shift) & 15) == v) continue;
       openedit();

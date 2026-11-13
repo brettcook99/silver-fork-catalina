@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#include "../gmidifile.h"
+
 // Opens the window. Returns 0 on failure
 int gui_init(void);
 void gui_shutdown(void);
@@ -81,6 +83,8 @@ void gui_savefinished(int ok);
 void gui_openexport(void);
 // SID import dialog: shows the file's info and the conversion options
 void gui_opensidimport(const char *path);
+// The MIDI import dialog for the file (scan: what it has in it)
+void gui_openmidiimport(const char *path, const MIDISCAN *scan);
 
 // Information / error box
 void gui_alert(const char *title, const char *text);

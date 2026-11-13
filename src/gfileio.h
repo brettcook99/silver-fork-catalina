@@ -6,6 +6,7 @@
 // line.
 
 #include "gsidimport.h"
+#include "gmidifile.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,6 +19,15 @@ extern char currentsongpath[];
 extern char suggestedsongname[];
 // Options of the SID import dialog
 extern SID2SNG_OPTIONS sidimportoptions;
+// The MIDI import dialog: rows per beat and pattern length, and which MIDI
+// channels go to which tracks
+#define MIDIIMPORT_ALL 0        // MIDI channels 1-3 to tracks 1-3
+#define MIDIIMPORT_CHN1 1       // Only MIDI channel 1 to track 1
+#define MIDIIMPORT_CHN2 2       // ... 2 to track 2
+#define MIDIIMPORT_CHN3 3       // ... 3 to track 3
+#define MIDIIMPORT_MIXED 4      // All MIDI channels shared out to the 3 tracks
+extern MIDI2SNG_OPTIONS midiimportoptions;
+extern int midiimportmode;
 
 // Kind of file by its extension
 #define GTFILE_UNKNOWN 0
@@ -34,7 +44,11 @@ int gt_mergesong(const char *path);
 int gt_savesong(const char *path);
 int gt_loadinstrument(const char *path, int slot);
 int gt_saveinstrument(const char *path, int slot);
+// Shows the MIDI import dialog for the file
 int gt_importmidi(const char *path);
+// Converts the MIDI file with the dialog's choice into the current song's
+// tracks (the others stay; undoable)
+int gt_importmidi_run(const char *path);
 // Shows the SID import dialog for the file
 int gt_importsid(const char *path);
 // Converts and loads a SID with the dialog's options
@@ -42,8 +56,9 @@ int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt);
 int gt_importpatch(const char *path);
 // Opens any supported file by its type (a song replaces the current song)
 int gt_openfile(const char *path);
-// The same, but a SID file is converted at once with the import options last
-// used, without the import dialog. Returns 1 if the file was opened
+// The same, but a SID or MIDI file is converted at once with the import
+// options last used, without the import dialog (a MIDI file becomes a new
+// song). Returns 1 if the file was opened
 int gt_openfile_direct(const char *path);
 
 // File dialogs: the native ones on macOS, the classic file selector

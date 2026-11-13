@@ -334,3 +334,11 @@ int midi_devicecount(void)
 }
 
 #endif
+
+int midi_relativesteps(int value)
+{
+  value &= 0x7f;
+  if ((value > 0) && (value < 64)) return value;
+  if (value > 64) return -(value - 64);
+  return 0;
+}

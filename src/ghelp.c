@@ -160,6 +160,7 @@ void onlinehelp(int standalone,int context)
     "SPC Play song from cursor / stop",
     "Wheel over a value changes it",
     "MIDI keyboard plays test notes",
+    "MIDI CC 60 (1/65) Next/prev. instr.",
     "RET Go to table",
     "- + < > Select instrument",
     "/ * Select octave",
