@@ -3026,9 +3026,9 @@ extern "C" void gui_designermidi(int noteon_, int noteoff_)
   if ((noteoff_) && (noteoff_ == heldnote)) noteoff(SRC_MIDI, 0);
 }
 
-// MIDI knobs: the patch (CC 60), the envelope of the oscillators that are
-// heard (on and not muted), the filter's cutoff, resonance, type and voice.
-// A knob turned without a pause is one undo step
+// MIDI knobs: the patch (CC 60), the pulse width (CC 1) and the envelope of
+// the oscillators that are heard (on and not muted), the filter's cutoff,
+// resonance, type and voice. A knob turned without a pause is one undo step
 extern "C" void gui_designermidicc(int cc, int value)
 {
   static const char *names[4] = { "ATTACK", "DECAY", "SUSTAIN", "RELEASE" };
@@ -3057,6 +3057,36 @@ extern "C" void gui_designermidicc(int cc, int value)
       bindpatch();
     }
     if (editorInfo.einum != before) gui_message("PATCH %02X (MIDI CC 60)", editorInfo.einum);
+    return;
+  }
+
+  // CC 1 (the mod wheel): the PW slider, 0-127 = pulse width $000-$FFF, of
+  // the oscillators heard that play pulse (none does: the ones that have a
+  // pulse width already)
+  if (cc == 1)
+  {
+    int v = ((value & 0x7f) * 0xfff + 63) / 127;
+    bool any = false;
+    bool pulse = false;
+
+    for (k = 0; k < PATCH_OSC; k++)
+    {
+      if ((osc[k]) && (!muted(k)) && (wavebits(waveleft(osc[k])) & 4)) pulse = true;
+    }
+    for (k = 0; k < PATCH_OSC; k++)
+    {
+      if ((!osc[k]) || (muted(k))) continue;
+      if (pulse ? (!(wavebits(waveleft(osc[k])) & 4)) : (patch_pulserow(osc[k]) < 0)) continue;
+      if ((patch_pulserow(osc[k]) >= 0) && (pulsewidth(osc[k]) == v)) continue;
+      openedit();
+      setpulsewidth(osc[k], v);
+      any = true;
+    }
+    if (any)
+    {
+      cctime = SDL_GetTicks();
+      gui_message("PULSE WIDTH %03X (MIDI CC 1)", v);
+    }
     return;
   }
 

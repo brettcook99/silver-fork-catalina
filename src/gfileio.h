@@ -22,12 +22,15 @@ extern SID2SNG_OPTIONS sidimportoptions;
 // The MIDI import dialog: rows per beat and pattern length, and which MIDI
 // channels go to which tracks
 #define MIDIIMPORT_ALL 0        // MIDI channels 1-3 to tracks 1-3
-#define MIDIIMPORT_CHN1 1       // Only MIDI channel 1 to track 1
-#define MIDIIMPORT_CHN2 2       // ... 2 to track 2
-#define MIDIIMPORT_CHN3 3       // ... 3 to track 3
-#define MIDIIMPORT_MIXED 4      // All MIDI channels shared out to the 3 tracks
+#define MIDIIMPORT_TRACKS 1     // The file's notes, whatever their MIDI channel
+                                // (or only midiimportchannel's), to the tracks
+                                // in midiimporttracks: one track = one note at
+                                // a time, 2-3 = the notes spread over them
+#define MIDIIMPORT_MIXED 2      // All MIDI channels shared out to the 3 tracks
 extern MIDI2SNG_OPTIONS midiimportoptions;
 extern int midiimportmode;
+extern unsigned midiimporttracks;       // Bit n = track n+1, 0 = the cursor's
+extern int midiimportchannel;           // 1-16, 0 = any MIDI channel
 
 // Kind of file by its extension
 #define GTFILE_UNKNOWN 0

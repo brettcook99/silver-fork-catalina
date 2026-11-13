@@ -548,12 +548,13 @@ extern "C" void gui_openmidiimport(const char *path, const MIDISCAN *scan)
 {
   snprintf(midiimportpath, sizeof midiimportpath, "%s", path ? path : "");
   midiscan = *scan;
-  // The choice last made, unless the file has no notes for it
-  if ((midiimportmode >= MIDIIMPORT_CHN1) && (midiimportmode <= MIDIIMPORT_CHN3) &&
-    (!midiscan.notes[midiimportmode - MIDIIMPORT_CHN1]))
-    midiimportmode = MIDIIMPORT_ALL;
+  // The choice last made, unless the file has no notes for it. The tracks
+  // at first: the cursor's
+  if ((midiimportchannel >= 1) && (midiimportchannel <= 16) && (!midiscan.notes[midiimportchannel - 1]))
+    midiimportchannel = 0;
+  if (!(midiimporttracks & ((1u << MAX_CHN) - 1))) midiimporttracks = 1u << editorInfo.epchn;
   if ((midiimportmode == MIDIIMPORT_ALL) && (!midiscan.notes[0]) && (!midiscan.notes[1]) && (!midiscan.notes[2]))
-    midiimportmode = MIDIIMPORT_MIXED;
+    midiimportmode = MIDIIMPORT_TRACKS;
   wantmidiimport = true;
 }
 
@@ -602,24 +603,70 @@ static void midiimportdialog(void)
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
       tooltip("Channel 1 to track 1, 2 to 2, 3 to 3. A track whose channel has no notes keeps what it has");
   }
-  for (c = 0; c < MAX_CHN; c++)
+  // To tracks: the whole file (any MIDI channel, or one chosen) to the
+  // tracks ticked. One track: one note at a time. 2-3: spread over them
   {
-    snprintf(text, sizeof text, "Channel %d to track %d", c + 1, c + 1);
-    ImGui::BeginDisabled(!midiscan.notes[c]);
-    ImGui::RadioButton(text, &midiimportmode, MIDIIMPORT_CHN1 + c);
-    ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    int ntracks = 0;
+
+    ImGui::RadioButton("To track", &midiimportmode, MIDIIMPORT_TRACKS);
+    if (ImGui::IsItemHovered())
+      tooltip("The file's notes to the tracks ticked, whatever their MIDI channel: replaces those tracks only");
+    for (c = 0; c < MAX_CHN; c++)
     {
-      snprintf(text, sizeof text, "Only track %d is replaced: the other tracks stay as they are", c + 1);
-      tooltip(midiscan.notes[c] ? text : "No notes on this MIDI channel");
+      bool on = (midiimporttracks & (1u << c)) != 0;
+      ImGui::SameLine();
+      snprintf(text, sizeof text, "%d##mtrack%d", c + 1, c);
+      if (ImGui::Checkbox(text, &on))
+      {
+        unsigned m = on ? (midiimporttracks | (1u << c)) : (midiimporttracks & ~(1u << c));
+        if (m & ((1u << MAX_CHN) - 1)) midiimporttracks = m;
+        midiimportmode = MIDIIMPORT_TRACKS;
+      }
+      if (ImGui::IsItemHovered())
+        tooltip("Tick 2 or 3 tracks to spread the notes over them: each new note goes to the track free the longest, notes played together to different tracks");
+      if (midiimporttracks & (1u << c)) ntracks++;
     }
+
+    // The MIDI channel the notes come from (only the channels with notes)
+    ImGui::SameLine();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "from");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
+    if (midiimportchannel) snprintf(text, sizeof text, "MIDI channel %d", midiimportchannel);
+    else snprintf(text, sizeof text, "Any channel");
+    if (ImGui::BeginCombo("##mchannel", text))
+    {
+      if (ImGui::Selectable("Any channel", midiimportchannel == 0))
+      {
+        midiimportchannel = 0;
+        midiimportmode = MIDIIMPORT_TRACKS;
+      }
+      for (c = 0; c < 16; c++)
+      {
+        if (!midiscan.notes[c]) continue;
+        snprintf(text, sizeof text, "MIDI channel %d (%d notes)", c + 1, midiscan.notes[c]);
+        if (ImGui::Selectable(text, midiimportchannel == c + 1))
+        {
+          midiimportchannel = c + 1;
+          midiimportmode = MIDIIMPORT_TRACKS;
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    ImGui::RadioButton("Mixed: all MIDI channels shared out to the 3 tracks", &midiimportmode, MIDIIMPORT_MIXED);
+    if (ImGui::IsItemHovered())
+      tooltip("Chords too: up to 3 notes at once, from any MIDI channel (the import as it was before)");
+
+    if (midiimportmode == MIDIIMPORT_MIXED)
+      body("All 3 tracks of the subtune are replaced. The instruments and the other subtunes stay. CTRL+Z undoes the import.");
+    else if (midiimportmode == MIDIIMPORT_ALL)
+      body("One note at a time on each track (of notes starting together, the highest). Only the tracks that get notes are replaced: the other tracks, the instruments and the other subtunes stay. CTRL+Z undoes the import.");
+    else if (ntracks <= 1)
+      body("Every note goes to the track ticked, one at a time (of notes starting together, the highest), whatever its MIDI channel. Only that track is replaced: the other tracks, the song tempo (if the other tracks have notes), the instruments and the other subtunes stay. CTRL+Z undoes the import.");
+    else
+      body("The notes are spread over the tracks ticked: each new note goes to the track that has been free the longest (so that notes ring on), notes played together to different tracks. Only those tracks are replaced; the song tempo stays if the other tracks have notes. CTRL+Z undoes the import.");
   }
-  ImGui::RadioButton("Mixed: all MIDI channels shared out to the 3 tracks", &midiimportmode, MIDIIMPORT_MIXED);
-  if (ImGui::IsItemHovered())
-    tooltip("Chords too: up to 3 notes at once, from any MIDI channel (the import as it was before)");
-  body(midiimportmode == MIDIIMPORT_MIXED ?
-    "All 3 tracks of the subtune are replaced. The instruments and the other subtunes stay. CTRL+Z undoes the import." :
-    "One note at a time on each track (of notes starting together, the highest). Only the tracks that get notes are replaced: the other tracks, the instruments and the other subtunes stay. CTRL+Z undoes the import.");
 
   sectiontitle("GRID");
   ImGui::AlignTextToFramePadding();

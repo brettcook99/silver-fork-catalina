@@ -143,8 +143,8 @@ static void contextmenu(void)
   if (ImGui::MenuItem("Transpose Octave Up", "SHIFT+W")) cmd_post(GTCMD_TRANSPOSEOCTUP);
   if (ImGui::MenuItem("Transpose Octave Down", "SHIFT+S")) cmd_post(GTCMD_TRANSPOSEOCTDOWN);
   ImGui::Separator();
-  if (ImGui::MenuItem("Insert Row", "INS")) cmd_post(GTCMD_INSERTROW);
-  if (ImGui::MenuItem("Delete Row", "DEL")) cmd_post(GTCMD_DELETEROW);
+  if (ImGui::MenuItem("Insert Row", "CTRL+BACKSPACE")) cmd_post(GTCMD_INSERTROW);
+  if (ImGui::MenuItem("Delete Row", "BACKSPACE")) cmd_post(GTCMD_DELETEROW);
   ImGui::Separator();
   if (ImGui::MenuItem("Split Pattern Here", "SHIFT+K")) cmd_post(GTCMD_SPLITPATTERN);
   if (ImGui::MenuItem("Join With Next Pattern", "SHIFT+J")) cmd_post(GTCMD_JOINPATTERN);

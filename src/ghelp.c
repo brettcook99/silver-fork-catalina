@@ -20,9 +20,11 @@ int printrows(int column, int row, int color, char *strings[] ) {
 void onlinehelp(int standalone,int context)
 {
   char *mackeys[] = {
-    "FN+SHIFT+BACKSPACE  Insert",
     "OPTION+BACKSPACE    Insert",
-    "FN+BACKSPACE        Delete",
+    "FN+SHIFT+BACKSPACE  Insert",
+    "  (patterns: CTRL+BACKSP.)",
+    "FN+BACKSPACE        DEL",
+    "CMD+CRSR   = CTRL+CRSR",
     "CMD+Z, CTRL+Z       Undo",
     "CMD+1-9    Same as F1-F9",
     "CMD+X,C,V  Cut,copy,paste",
@@ -45,6 +47,9 @@ void onlinehelp(int standalone,int context)
     "  VIEW (meter colors...)",
     "CTRL+NUMPAD 7 SID Designer",
     "  (top bar too; ESC: back)",
+    "BPM (top bar): one beat =",
+    "  the highlighting step",
+    "  (SHIFT+M,N in patterns)",
     NULL
   };
 
@@ -77,6 +82,7 @@ void onlinehelp(int standalone,int context)
     "TAB Cycle between editing modes",
     "INS Insert row (Press on endmark to",
     "DEL Delete row change patt. length)",
+    "  (patterns: CTRL+BACKSPC, BACKSPC)",
     "SHIFT+ESC Clear/optimize all musicdata",
     "ESC Exit program",
     "Mouse wheel over a value changes it",
@@ -92,8 +98,9 @@ void onlinehelp(int standalone,int context)
     "  jam mode lets it go. Wheel over",
     "  OCTAVE: transpose pattern/marked",
     "  rows; LOOP: patterns looped (00",
-    "  off); CHNn: go to next/previous",
-    "  pattern. Click CHNn: mute",
+    "  off; below 00 HIGHLIGHT: loop the",
+    "  marked rows); CHNn: go to next/",
+    "  previous pattern. Click CHNn: mute",
     NULL
   };
 
@@ -110,17 +117,19 @@ void onlinehelp(int standalone,int context)
     "  (in all editors but song info)",
     "NUMPAD . or middle mouse button",
     "  Switch between jam/editmode",
-    "BACKSPC Insert rest",
+    "DEL Clear field (SHIFT: +command)",
+    "BACKSPC Delete row (CTRL: insert)",
     "RET Keyoff (/w SHIFT = Keyon)",
     "- + < > Select instrument",
     "/ * Select octave",
-    "[ ] Select pattern",
+    "[ ] ALT+LEFT/RIGHT Select pattern",
     "BACKQUOTE Select channel",
     "SHIFT+SPC Play, don't follow",
     "NUMPAD 1-8 Go to row 0,8,16...56",
     "CTRL+NUMPAD 1-3 Go to track 1-3",
     "Mouse wheel Scroll pattern",
     "SHIFT+CRSR Mark pattern",
+    "CTRL+CRSR Nudge note/marked rows",
     "SHIFT+Q,W Transpose half/octave up",
     "SHIFT+A,S Transpose half/octave down",
     "SHIFT+E,R Copy,paste effects",

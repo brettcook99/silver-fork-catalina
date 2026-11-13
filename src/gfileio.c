@@ -17,6 +17,8 @@ SID2SNG_OPTIONS sidimportoptions;
 static int sidimportoptionsset = 0;
 MIDI2SNG_OPTIONS midiimportoptions;
 int midiimportmode = MIDIIMPORT_ALL;
+unsigned midiimporttracks = 0;
+int midiimportchannel = 0;
 static int midiimportoptionsset = 0;
 // Set by gt_openfile_direct(): SID and MIDI files are converted without the
 // import dialogs
@@ -342,11 +344,21 @@ static void midiimportopt(int mode, MIDI2SNG_OPTIONS *opt, unsigned *dest)
   opt->ntsc = editorInfo.ntsc;
   opt->split = 1;
   opt->channelmask = 0;
+  opt->voicemask = 0;
   *dest = (1u << MAX_CHN) - 1;
-  if ((mode >= MIDIIMPORT_CHN1) && (mode <= MIDIIMPORT_CHN3))
+  if (mode == MIDIIMPORT_TRACKS)
   {
-    opt->channelmask = 1u << (mode - MIDIIMPORT_CHN1);
-    *dest = 1u << (mode - MIDIIMPORT_CHN1);
+    unsigned tracks = midiimporttracks & ((1u << MAX_CHN) - 1);
+
+    if (!tracks) tracks = 1u << editorInfo.epchn;
+    opt->split = 0;
+    opt->voicemask = tracks;
+    *dest = tracks;
+    if ((midiimportchannel >= 1) && (midiimportchannel <= 16))
+    {
+      opt->channelmask = 1u << (midiimportchannel - 1);
+      if (midiimportchannel == 10) opt->drums = 1;
+    }
   }
   if (mode == MIDIIMPORT_MIXED) opt->split = 0;
 }
@@ -661,6 +673,28 @@ done:
   return ok;
 }
 
+// Nonzero if the current subtune's tracks other than those in mask have notes
+static int othertrackshavenotes(unsigned mask)
+{
+  int es = editorInfo.esnum;
+  int c, e, r;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if (mask & (1u << c)) continue;
+    for (e = 0; e < songlen[es][c]; e++)
+    {
+      int p = songorder[es][c][e];
+      if (p >= MAX_PATT) continue;
+      for (r = 0; r < pattlen[p]; r++)
+      {
+        if ((pattern[p][r*4] >= FIRSTNOTE) && (pattern[p][r*4] <= LASTNOTE)) return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 // Converts the MIDI file with the import dialog's choice and puts it into
 // the song
 int gt_importmidi_run(const char *path)
@@ -673,6 +707,9 @@ int gt_importmidi_run(const char *path)
   int ok, c, t, newinstr;
 
   midiimportopt(midiimportmode, &opt, &dest);
+  // Tracks put into a song that has other music: the song's tempo stays
+  // (the notes are on its rows anyway)
+  if ((midiimportmode == MIDIIMPORT_TRACKS) && (othertrackshavenotes(dest))) opt.notempo = 1;
   report[0] = 0;
   d = midi2sngdata(path, &opt, report, sizeof report);
   if (!d)

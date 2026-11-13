@@ -8,7 +8,10 @@
 // and go to the 3 SID channels in one of two ways:
 // - shared out (split 0): when more than 3 notes play at once, the highest
 //   and lowest new notes take over a channel from an older held note, other
-//   notes are left out.
+//   notes are left out. With voicemask only the SID channels in it get
+//   notes, each new note the one that has been free the longest (so that
+//   the notes go to them in turn and ring on), whatever its MIDI channel;
+//   with one channel in it, one note at a time.
 // - split (split 1): MIDI channel 1 to SID channel 1, 2 to 2, 3 to 3, the
 //   other MIDI channels are left out. One note at a time on each: a new note
 //   cuts the one before; of notes starting together the highest plays.
@@ -31,6 +34,10 @@ typedef struct
   unsigned channelmask;   // Bit n = use MIDI channel n+1, 0 = all (default 0)
   int ntsc;               // 1 = tempo for 60Hz (NTSC) playback (default 0)
   int split;              // 1 = MIDI channel n to SID channel n (default 0)
+  unsigned voicemask;     // Shared out: bit n = SID channel n+1 gets notes,
+                          // 0 = all 3 the usual way (default 0)
+  int notempo;            // 1 = no tempo commands: the tracks are put into a
+                          // song whose tempo stays (default 0)
 } MIDI2SNG_OPTIONS;
 
 // What a MIDI file has in it (for the import dialog)

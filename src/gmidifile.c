@@ -503,6 +503,8 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
   int totalrows = 0;
   int firsttempo = 6;
   int rowsperbeat;
+  int drums;
+  unsigned voicemask;             // Shared out: the SID channels used, 0 = all
 
   rowsperbeat = opt->rowsperbeat;
   if (rowsperbeat < 1) rowsperbeat = 1;
@@ -512,6 +514,20 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
   if (patternlength > MAX_PATTROWS) patternlength = MAX_PATTROWS;
 
   if (!loadmidi(midiname, &ppq, &smpte, &bytracks, report, reportsize)) return NULL;
+  voicemask = opt->split ? 0 : (opt->voicemask & ((1u << MAX_CHN) - 1));
+
+  // A file with nothing but drums (MIDI channel 10): the drums are taken
+  drums = opt->drums;
+  if (!drums)
+  {
+    drums = 1;
+    for (c = 0; c < numnotes; c++)
+    {
+      if ((opt->channelmask) && (!(opt->channelmask & (1 << notes[c].chn)))) continue;
+      if ((opt->split) && (notes[c].chn >= MAX_CHN)) continue;
+      if (notes[c].chn != DRUMCHANNEL) drums = 0;
+    }
+  }
 
   // Leave out the channels not wanted, convert ticks to rows and notes to
   // GoatTracker notes
@@ -527,7 +543,7 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
       otherchn++;
       continue;
     }
-    if ((n.chn == DRUMCHANNEL) && (!opt->drums)) continue;
+    if ((n.chn == DRUMCHANNEL) && (!drums)) continue;
 
     // MIDI note 60 (middle C) = C-4. Notes outside the range go an octave
     // up/down until they fit
@@ -640,8 +656,9 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
         int v;
 
         // A free channel that played the same MIDI channel, or else the
-        // channel free for the longest time
-        for (v = 0; v < MAX_CHN; v++)
+        // channel free for the longest time. With voicemask (the notes
+        // spread over the channels in it) always the one free the longest
+        for (v = 0; (v < MAX_CHN) && (!voicemask); v++)
         {
           if ((busyuntil[v] <= row) && (lastchn[v] == n->chn))
           {
@@ -653,6 +670,7 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
         {
           for (v = 0; v < MAX_CHN; v++)
           {
+            if ((voicemask) && (!(voicemask & (1u << v)))) continue;
             if ((busyuntil[v] <= row) && ((voice < 0) || (busyuntil[v] < busyuntil[voice])))
               voice = v;
           }
@@ -662,7 +680,7 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
         // that started earlier (on the same MIDI channel if possible)
         if ((voice < 0) && (d < 2))
         {
-          for (v = 0; v < MAX_CHN; v++)
+          for (v = 0; (v < MAX_CHN) && (!voicemask); v++)
           {
             if ((laststart[v] < row) && (lastchn[v] == n->chn))
             {
@@ -674,6 +692,7 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
           {
             for (v = 0; v < MAX_CHN; v++)
             {
+              if ((voicemask) && (!(voicemask & (1u << v)))) continue;
               if ((laststart[v] < row) && ((voice < 0) || (laststart[v] < laststart[voice])))
                 voice = v;
             }
@@ -702,6 +721,17 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
         numplaced++;
       }
       groupstart = groupend;
+    }
+
+    // Spread over chosen channels: the tempo on the first of them that has
+    // notes (the others may not be replaced)
+    if (voicemask)
+    {
+      tempovoice = MAX_CHN - 1;
+      for (c = 0; c < numplaced; c++)
+      {
+        if (placed[c].voice < tempovoice) tempovoice = placed[c].voice;
+      }
     }
   }
 
@@ -800,7 +830,7 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
         if (tempo < MINTEMPO) tempo = MINTEMPO;
         if (tempo > MAXTEMPO) tempo = MAXTEMPO;
         if (!row) firsttempo = tempo;
-        if ((unsigned)tempo == prevtempo) continue;
+        if (((unsigned)tempo == prevtempo) || (opt->notempo)) continue;
         grid[tempovoice][row*4+2] = CMD_SETTEMPO;
         grid[tempovoice][row*4+3] = tempo;
         prevtempo = tempo;
@@ -903,8 +933,9 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
 
       if (chn == DRUMCHANNEL) pr = &drumpreset;
       else if ((firstprogram[chn] >= 32) && (firstprogram[chn] <= 39)) pr = &basspreset;
-      // Split: the same sound for a channel every time (CH1 PULSE...)
-      else if (opt->split) pr = &presets[chn % NUMPRESETS];
+      // Split or chosen SID channels: the same sound for a MIDI channel
+      // every time (CH1 PULSE...), so that a new import finds it by name
+      else if ((opt->split) || (voicemask)) pr = &presets[chn % NUMPRESETS];
       else pr = &presets[(others++) % NUMPRESETS];
 
       // Wavetable: the waveform (and a fixed note for drums), then stop
@@ -951,17 +982,19 @@ SNGDATA *midi2sngdata(const char *midiname, const MIDI2SNG_OPTIONS *opt, char *r
     }
   }
 
-  // (Split: the patterns are counted where they go)
-  if (opt->split) sprintf(msg, "%d notes, tempo %d", numplaced, firsttempo);
+  // (Split or chosen SID channels: the patterns are counted where they go)
+  if (opt->notempo) sprintf(msg, "%d notes, the song's tempo kept", numplaced);
+  else if ((opt->split) || (voicemask)) sprintf(msg, "%d notes, tempo %d", numplaced, firsttempo);
   else sprintf(msg, "%d notes, %d patterns, tempo %d", numplaced, numpatterns, firsttempo);
   if (dropped)
   {
-    if (opt->split) sprintf(msg + strlen(msg), ", %d chord note%s left out", dropped, (dropped == 1) ? "" : "s");
+    if ((opt->split) || ((voicemask) && (!(voicemask & (voicemask - 1)))))
+      sprintf(msg + strlen(msg), ", %d chord note%s left out", dropped, (dropped == 1) ? "" : "s");
     else sprintf(msg + strlen(msg), ", %d left out", dropped);
   }
   if (otherchn) sprintf(msg + strlen(msg), ", %d note%s on other MIDI channels left out", otherchn, (otherchn == 1) ? "" : "s");
   if (bytracks) sprintf(msg + strlen(msg), ", MIDI tracks read as channels");
-  if (clampedtempos) sprintf(msg + strlen(msg), ", tempo out of range");
+  if ((clampedtempos) && (!opt->notempo)) sprintf(msg + strlen(msg), ", tempo out of range");
   setreport(report, reportsize, msg);
   ok = 1;
 
@@ -999,4 +1032,6 @@ void midi2sng_defaults(MIDI2SNG_OPTIONS *opt)
   opt->channelmask = 0;
   opt->ntsc = 0;
   opt->split = 0;
+  opt->voicemask = 0;
+  opt->notempo = 0;
 }

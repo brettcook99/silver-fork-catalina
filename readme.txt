@@ -409,7 +409,7 @@ ALT+NUMPAD 1,2,3 MIDI INPUT 1, 2 or 3 PATTERNS (OPTION on macOS)
 
 - + or < >  Select instrument
 / *         Select octave
-[ ]         Select pattern
+[ ]         Select pattern (also ALT/OPTION+CRSR LEFT,RIGHT)
 BACKQUOTE   Select channel
 0-9 & A-F   Enter parameters
 SPACE       Play from cursor position / stop
@@ -421,8 +421,20 @@ SHIFT+RET.  Insert keyon
             speedtable entry (when cursor is over the command)
             Go into an empty table entry (when parameter is zero on a
             table-utilizing command)
-BACKSPACE   Insert rest
-SHIFT+BKSP. Insert rest and clear commands
+DEL         Clear: on the note a rest, on the instrument or command that
+            (the cursor moves down)
+SHIFT+DEL   Insert rest and clear commands
+BACKSPACE   Delete row (on the end mark: shorten the pattern). DEL used to
+            do this; it shifted the rest of the pattern out of step with
+            the other channels too easily
+CTRL+BKSP.  Insert row (also INS, OPTION+BACKSPACE; on the end mark:
+            lengthen the pattern)
+CTRL+CRSR   Nudge the cursor row (note, instrument, command) a row up or
+            down, or to the track left or right (same row). It changes
+            places with the row it goes to, so nothing is lost, and the
+            cursor goes along. With rows marked on the cursor's track, the
+            marked rows go together. CMD+CRSR too on macOS (where CTRL+CRSR
+            belongs to Mission Control)
 SHIFT+SPACE Play from cursor position without following
 SHIFT+Q     Transpose halfstep up
 SHIFT+A     Transpose halfstep down
@@ -436,7 +448,7 @@ SHIFT+H     Calculate "hifi" left/right shifted speedtable entry for
             portamento or vibrato
 SHIFT+I     Invert selection / whole pattern if no selection
 SHIFT+CRSR UP,DOWN Mark pattern
-SHIFT+CRSR LEFT,RIGHT Select pattern
+SHIFT+CRSR LEFT,RIGHT Select pattern (as ALT+CRSR LEFT,RIGHT)
 SHIFT+L     Mark/unmark entire pattern
 SHIFT+M,N   Choose highlighting step size
 SHIFT+X,C,V Cut,copy,paste pattern
@@ -466,7 +478,9 @@ MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
 
 MIDI controllers: in the SID Designer knobs sending CC73, CC75, CC70 (or
 CC76 or CC20) and CC72 set attack, decay, sustain and release of the
-oscillators heard, CC74 the filter cutoff and CC71 the resonance. CC4 sets
+oscillators heard, CC1 (the mod wheel) the pulse width (the PW slider) of
+the oscillators heard that play pulse, CC74 the filter cutoff and CC71 the
+resonance. CC4 sets
 the filter type and CC7 the SID voice that goes through the filter: the
 knob's range in three parts, LP / BP / HP and voice 1 / 2 / 3. CC60 is a
 relative (endless) knob that chooses the patch in the SID Designer and the
@@ -475,13 +489,19 @@ instrument in the tracker: value 1 = the next one, 65 = the one before
 
 MIDI files: File > Import MIDI File asks what goes where:
 - All: MIDI channel 1 to track 1, 2 to track 2 and 3 to track 3
-- Channel 1 to track 1, channel 2 to track 2 or channel 3 to track 3 alone
+- To track 1, 2 and/or 3 (ticked), from any MIDI channel or one chosen: the
+  file's notes whatever their MIDI channel (Lead.mid to track 3, say). With
+  one track ticked it plays one note at a time; with 2 or 3 the notes are
+  spread over them: each new note goes to the track free the longest, so
+  that notes ring on, and notes played together go to different tracks.
+  When the song's other tracks have notes, its tempo stays (no tempo
+  commands are imported)
 - Mixed: the notes of all MIDI channels shared out to the 3 tracks
 The notes go into the current subtune. Only the tracks that get notes are
 replaced; the other tracks (an earlier import, say), the instruments and the
-other subtunes stay, and CTRL/CMD+Z undoes the import. Each track plays one
-note at a time: a new note cuts the one before, of notes starting together
-the highest plays. Each MIDI channel gets an instrument (Ch1 Pulse, Ch2 Saw,
+other subtunes stay, and CTRL/CMD+Z undoes the import. With All (and one
+track ticked) each track plays one note at a time: a new note cuts the one
+before, of notes starting together the highest plays. Each MIDI channel gets an instrument (Ch1 Pulse, Ch2 Saw,
 Ch3 Triangle); one of that name already in the song is used again, so a
 sound made for it in the SID Designer stays when the file is imported again.
 When all the notes are on one MIDI channel in several tracks of the file (as
@@ -718,11 +738,16 @@ edit mode.
 Below the commands:
 - OCTAVE: the mouse wheel transposes the marked rows (nothing marked: the
   cursor channel's pattern) an octave up or down, as SHIFT+W and SHIFT+S do;
-  UP or DOWN in green shows which way it went last. It can be undone
+  UP or DOWN in green shows which way it went last (UP at the start). It
+  can be undone
 - LOOP: the mouse wheel sets how many patterns the playback loops, 00-FF
   (00 = no loop). Set while the song plays, each channel loops from the
   pattern it is playing (01: that pattern again and again, 02: it and the
-  next one...); set before, from where the playback starts
+  next one...); set before, from where the playback starts. Below 00 comes
+  HIGHLIGHT: the rows marked in the pattern editor (SHIFT+CRSR UP,DOWN or
+  the right mouse button) play again and again, on each channel playing
+  the pattern the editor shows for it. It is green while rows are marked.
+  SPACE then starts at the first marked row, unless the cursor is on one
 - CHN1, CHN2, CHN3: each channel's song position and row (with the song
   stopped: the channel's start position, green in the orderlist). The mouse
   wheel moves the channel to the next or previous pattern in its orderlist:
@@ -746,6 +771,13 @@ On Windows and Linux, where the retro screen has no menu bar, VIEW at the
 right end of the menu bar (hold the right button on the title bar) has the
 SID Designer, Gradient Background, Meter Colors and About; the modern
 interface's View menu has them too.
+
+The title bar shows the tempo in BPM before FV, as DAWs do: one beat is one
+highlighting step (SHIFT+M,N; 4 rows unless changed), so tempo 6 on PAL is
+125 BPM. While the song plays it is the cursor channel's tempo (a funktempo
+counts as the average of its two), stopped the tempo the song starts with.
+Messages (file opened, saved, imported...) show at the bottom right, under
+the song info; at the start the credits show there for a while.
 
 
 3. Song data

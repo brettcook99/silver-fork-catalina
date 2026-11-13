@@ -188,6 +188,16 @@ int input_nextkey(void)
       shiftpressed = 1;
       break;
 
+      case SDLK_LEFT:
+      case SDLK_RIGHT:
+      case SDLK_UP:
+      case SDLK_DOWN:
+      // CMD + cursor keys = CTRL + cursor keys (nudging notes in the pattern
+      // editor): macOS keeps CTRL + cursor keys for Mission Control
+      ctrlpressed = 1;
+      shiftpressed = 1;
+      break;
+
       case SDLK_f:
       menucommand = MENUCMD_FOLLOW;
       rawkey = 0;
@@ -228,10 +238,12 @@ int input_nextkey(void)
     // in some cases (table editor). Observed with a Dell USB keyboard on macOS 11.
     key = 0;
 
+  // macbook keyboard insert using alt/option+backspace or fn+shift+backspace.
+  // In the pattern editor SHIFT+DEL clears the note and command instead (DEL
+  // and BACKSPACE are swapped there; CTRL+BACKSPACE inserts)
   if ((rawkey == SDLK_BACKSPACE && altpressed) ||
-      (rawkey == SDLK_DELETE && shiftpressed))
+      (rawkey == SDLK_DELETE && shiftpressed && editorInfo.editmode != EDIT_PATTERN))
   {
-    // macbook keyboard insert using alt/option+backspace or fn+shift+backspace
     rawkey = SDLK_INSERT;
     key = 0;
   }

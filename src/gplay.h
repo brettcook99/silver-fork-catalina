@@ -92,8 +92,14 @@ void playroutine(void);
 
 // LOOP on the retro screen: while the song plays, each channel plays its
 // next playloop patterns again and again, from the one playing when the
-// loop was set (or the first one, set before playing). 0 = no loop
+// loop was set (or the first one, set before playing). 0 = no loop.
+// PLAYLOOP_HIGHLIGHT: the rows marked (highlighted) in the pattern editor
+// play again and again: each channel that plays the pattern the editor shows
+// for it goes back to the first marked row after the last one
 extern int playloop;
+#define PLAYLOOP_HIGHLIGHT -1
+// The rows LOOP HIGHLIGHT loops (first, last), 0 if no rows are marked
+int playhighlightrows(int *first, int *last);
 // While the song plays, channel c goes to orderlist position n (in the
 // player's next frame), at the same row: playjump(c, n)
 void playjump(int c, int pos);

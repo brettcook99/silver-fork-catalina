@@ -20,6 +20,8 @@ static void usage(void)
          "-d   Include drums (MIDI channel 10)\n"
          "-n   Tempo for NTSC (60Hz) playback\n"
          "-s   Split: MIDI channels 1-3 to SID channels 1-3, one note at a time\n"
+         "-vxx Only these SID channels, the notes spread over them, e.g. -v2,3\n"
+         "     (-v3: all notes to SID channel 3, one at a time)\n"
          "\n"
          "The notes go to the 3 SID channels. When more than 3 notes play at\n"
          "once, the highest and lowest new notes win and the rest are left out.\n"
@@ -82,6 +84,23 @@ int main(int argc, char **argv)
 
         case 's':
         opt.split = 1;
+        break;
+
+        case 'v':
+        {
+          char *s = &argv[c][2];
+          while (*s)
+          {
+            int chn = (int)strtol(s, &s, 10);
+            if ((chn >= 1) && (chn <= 3)) opt.voicemask |= 1u << (chn - 1);
+            else
+            {
+              printf("Illegal SID channel list %s\n", &argv[c][2]);
+              return EXIT_FAILURE;
+            }
+            while ((*s == ',') || (*s == ' ')) s++;
+          }
+        }
         break;
 
         default:

@@ -123,6 +123,115 @@ static void midipolynote(int note)
   playtestnote(note, editorInfo.einum, c);
 }
 
+// INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
+// last row drops off). On the end mark the pattern gets one row longer
+static void patterninsertrow(void)
+{
+  int p = editorUndoInfo.editorInfo[editorInfo.epchn].epnum;
+
+  if (editorInfo.epmarkchn == editorInfo.epchn) editorInfo.epmarkchn = -1;
+  if ((pattlen[p]-editorInfo.eppos)*4-4 >= 0)
+  {
+    memmove(&pattern[p][editorInfo.eppos*4+4], &pattern[p][editorInfo.eppos*4], (pattlen[p]-editorInfo.eppos)*4-4);
+    pattern[p][editorInfo.eppos*4] = REST;
+    pattern[p][editorInfo.eppos*4+1] = 0x00;
+    pattern[p][editorInfo.eppos*4+2] = 0x00;
+    pattern[p][editorInfo.eppos*4+3] = 0x00;
+  }
+  else if ((editorInfo.eppos == pattlen[p]) && (pattlen[p] < MAX_PATTROWS))
+  {
+    pattern[p][editorInfo.eppos*4] = REST;
+    pattern[p][editorInfo.eppos*4+1] = 0x00;
+    pattern[p][editorInfo.eppos*4+2] = 0x00;
+    pattern[p][editorInfo.eppos*4+3] = 0x00;
+    pattern[p][editorInfo.eppos*4+4] = ENDPATT;
+    pattern[p][editorInfo.eppos*4+5] = 0x00;
+    pattern[p][editorInfo.eppos*4+6] = 0x00;
+    pattern[p][editorInfo.eppos*4+7] = 0x00;
+    countthispattern();
+    editorInfo.eppos = pattlen[p];
+  }
+}
+
+// CTRL+cursor keys: nudges the cursor row (note, instrument and command) one
+// row up / down (drow) or to the track left / right (dchn). It trades places
+// with the row it goes to, so nothing is lost (an empty row: it just moves).
+// The cursor goes along. With rows marked on the cursor's track the marked
+// rows go together, and the mark with them
+static void patternnudge(int drow, int dchn)
+{
+  int c = editorInfo.epchn;
+  int p = editorUndoInfo.editorInfo[c].epnum;
+  int len = pattlen[p];
+  int marked = (editorInfo.epmarkchn == c);
+  int first = editorInfo.eppos;
+  int last = editorInfo.eppos;
+  int r, k;
+
+  if (marked)
+  {
+    first = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkstart : editorInfo.epmarkend;
+    last = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkend : editorInfo.epmarkstart;
+    if (last >= len) last = len - 1;
+  }
+  if ((first < 0) || (first > last) || (first >= len)) return;
+
+  if (drow)
+  {
+    unsigned char temp[4];
+
+    if ((first + drow < 0) || (last + drow >= len)) return;
+    if (drow < 0)
+    {
+      // The row above goes below the moved rows
+      memcpy(temp, &pattern[p][(first-1)*4], 4);
+      memmove(&pattern[p][(first-1)*4], &pattern[p][first*4], (last-first+1)*4);
+      memcpy(&pattern[p][last*4], temp, 4);
+    }
+    else
+    {
+      memcpy(temp, &pattern[p][(last+1)*4], 4);
+      memmove(&pattern[p][(first+1)*4], &pattern[p][first*4], (last-first+1)*4);
+      memcpy(&pattern[p][first*4], temp, 4);
+    }
+    editorInfo.eppos += drow;
+    if (marked)
+    {
+      editorInfo.epmarkstart += drow;
+      editorInfo.epmarkend += drow;
+    }
+  }
+  else
+  {
+    int c2 = c + dchn;
+    int p2;
+
+    if ((c2 < 0) || (c2 >= MAX_CHN)) return;
+    p2 = editorUndoInfo.editorInfo[c2].epnum;
+    if (p2 == p)
+    {
+      gui_message("Tracks %d and %d show the same pattern (%02X)", c + 1, c2 + 1, p);
+      return;
+    }
+    if (last >= pattlen[p2])
+    {
+      gui_message("Pattern %02X of track %d is too short", p2, c2 + 1);
+      return;
+    }
+    for (r = first; r <= last; r++)
+    {
+      for (k = 0; k < 4; k++)
+      {
+        unsigned char b = pattern[p][r*4+k];
+        pattern[p][r*4+k] = pattern[p2][r*4+k];
+        pattern[p2][r*4+k] = b;
+      }
+    }
+    editorInfo.epchn = c2;
+    if (marked) editorInfo.epmarkchn = c2;
+  }
+}
+
 void patterncommands(void)
 {
   int c, scrrep;
@@ -199,7 +308,9 @@ void patterncommands(void)
       if (midichord <= 1) newnote = midinoteon;
       else midipolynote(midinoteon);
     }
-    if ((rawkey == 0x08) && (!editorInfo.epcolumn)) newnote = REST;
+    // DEL clears the note (a rest; with SHIFT the command too). It used to
+    // delete the row, which BACKSPACE does now (see below)
+    if ((rawkey == KEY_DEL) && (!editorInfo.epcolumn)) newnote = REST;
     if ((rawkey == 0x14) && (!editorInfo.epcolumn)) newnote = KEYOFF;
     if (rawkey == KEY_ENTER)
     {
@@ -893,7 +1004,30 @@ void patterncommands(void)
     }
     break;
 
+    // DEL on the instrument or command: clears it (on the note see above)
     case KEY_DEL:
+    if ((recordmode) && (editorInfo.epcolumn) && (editorInfo.eppos < pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]))
+    {
+      unsigned char *row = &pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4];
+      if (editorInfo.epcolumn <= 2) row[1] = 0;
+      else row[2] = row[3] = 0;
+      if (autoadvance < 2)
+      {
+        editorInfo.eppos++;
+        if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) editorInfo.eppos = 0;
+      }
+    }
+    break;
+
+    // BACKSPACE deletes the row (DEL did before), CTRL+BACKSPACE inserts one
+    // (as INS), so that the much used DEL key can't shift the pattern out of
+    // step with the other channels
+    case KEY_BACKSPACE:
+    if (ctrlpressed)
+    {
+      patterninsertrow();
+      break;
+    }
     if (editorInfo.epmarkchn == editorInfo.epchn) editorInfo.epmarkchn = -1;
     if ((pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]-editorInfo.eppos)*4-4 >= 0)
     {
@@ -923,40 +1057,14 @@ void patterncommands(void)
     break;
 
     case KEY_INS:
-    if (editorInfo.epmarkchn == editorInfo.epchn) editorInfo.epmarkchn = -1;
-    if ((pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]-editorInfo.eppos)*4-4 >= 0)
-    {
-      memmove(&pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+4],
-        &pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4],
-        (pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]-editorInfo.eppos)*4-4);
-      pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4] = REST;
-      pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+1] = 0x00;
-      pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+2] = 0x00;
-      pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3] = 0x00;
-    }
-    else
-    {
-      if (editorInfo.eppos == pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
-      {
-        if (pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum] < MAX_PATTROWS)
-        {
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4] = REST;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+1] = 0x00;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+2] = 0x00;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3] = 0x00;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+4] = ENDPATT;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+5] = 0x00;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+6] = 0x00;
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+7] = 0x00;
-          countthispattern();
-          editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
-        }
-      }
-    }
+    patterninsertrow();
     break;
 
+    // CTRL+cursor keys nudge the note (see patternnudge()). ALT+LEFT/RIGHT
+    // select the pattern (SHIFT+LEFT/RIGHT too; CTRL did before)
     case KEY_RIGHT:
-    if (!shiftpressed)
+    if (ctrlpressed) patternnudge(0, 1);
+    else if ((!shiftpressed) && (!altpressed))
     {
       editorInfo.epcolumn++;
       if (editorInfo.epcolumn >= 6)
@@ -979,7 +1087,8 @@ void patterncommands(void)
     break;
 
     case KEY_LEFT:
-    if (!shiftpressed)
+    if (ctrlpressed) patternnudge(0, -1);
+    else if ((!shiftpressed) && (!altpressed))
     {
       editorInfo.epcolumn--;
       if (editorInfo.epcolumn < 0)
@@ -1020,11 +1129,13 @@ void patterncommands(void)
     break;
 
     case KEY_UP:
-    patternup();
+    if (ctrlpressed) patternnudge(-1, 0);
+    else patternup();
     break;
 
     case KEY_DOWN:
-    patterndown();
+    if (ctrlpressed) patternnudge(1, 0);
+    else patterndown();
     break;
 
     case KEY_APOST2:
@@ -1392,7 +1503,14 @@ void joinpattern(void)
 // editor follows the playback
 void playfromcursor(int follow)
 {
-  playfromrow(editorInfo.eppos, follow);
+  int row = editorInfo.eppos;
+  int first, last;
+
+  // LOOP HIGHLIGHT: from the first marked row, unless the cursor is on one
+  // of the marked rows
+  if ((playloop == PLAYLOOP_HIGHLIGHT) && (playhighlightrows(&first, &last)) && ((row < first) || (row > last)))
+    row = first;
+  playfromrow(row, follow);
 }
 
 // Starts playing from a row of the patterns in the pattern editor

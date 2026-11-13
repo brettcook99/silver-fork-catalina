@@ -28,9 +28,11 @@ static char timechar[] = {':', ' '};
 //   stopped on the cursor row. Another click on it, or jam mode, lets it go
 // - OCTAVE: the wheel transposes the marked rows (nothing marked: the cursor
 //   channel's pattern) an octave up or down, as SHIFT+W / SHIFT+S; "UP" or
-//   "DOWN" in green tells which way it went last
+//   "DOWN" in green tells which way it went last ("UP" at the start, so that
+//   it shows what the control does)
 // - LOOP: the wheel sets how many patterns the playback loops (playloop),
-//   00 = no loop
+//   00 = no loop. Below 00 comes HIGHLIGHT: the rows marked in the pattern
+//   editor loop (green while rows are marked, grey while none are)
 // - CHN1-CHN3: each channel's song position / row (stopped: its start
 //   position), on the last six pattern rows. The wheel moves the channel to
 //   the next or previous pattern in its orderlist: while the song plays it
@@ -70,7 +72,7 @@ static int fxlast = -1;                    // What the wheel set last, when,
 static unsigned fxtime = 0;                // and the undo list after it
 static int fxundotop = -1;
 static int fxundocount = -1;
-static int octavelast = 0;                 // Last transpose: 1 up, -1 down
+static int octavelast = 1;                 // Last transpose: 1 up, -1 down
 static int jumppos[MAX_CHN] = { -1, -1, -1 };  // A channel's jump asked for
 static unsigned jumptime[MAX_CHN];
 
@@ -175,8 +177,16 @@ static void fxprint(void)
   if (octavelast) printtextcentereddown(FXCENTER, OCTAVEY + 1, OCTAVEDOWN, CEDIT, (octavelast > 0) ? "UP" : "DOWN");
 
   printtextcentereddown(FXCENTER, LOOPY, LOOPDOWN, CTITLE, "LOOP");
-  sprintf(textbuffer, "%02X", playloop);
-  printtextcentereddown(FXCENTER, LOOPY + 1, LOOPDOWN, CEDIT, textbuffer);
+  if (playloop == PLAYLOOP_HIGHLIGHT)
+  {
+    int first, last;
+    printtextcentereddown(FXCENTER, LOOPY + 1, LOOPDOWN, playhighlightrows(&first, &last) ? CEDIT : CNORMAL, "HIGHLIGHT");
+  }
+  else
+  {
+    sprintf(textbuffer, "%02X", playloop);
+    printtextcentereddown(FXCENTER, LOOPY + 1, LOOPDOWN, CEDIT, textbuffer);
+  }
 
   for (c = 0; c < MAX_CHN; c++)
   {
@@ -311,7 +321,16 @@ static int fxwheel(int d)
   }
   if ((mousey >= LOOPY) && (mousey <= LOOPY + 2))
   {
-    playloop = clampvalue(playloop + d, 0, 0xff);
+    int was = playloop;
+    playloop = clampvalue(playloop + d, PLAYLOOP_HIGHLIGHT, 0xff);
+    if ((playloop == PLAYLOOP_HIGHLIGHT) && (was != PLAYLOOP_HIGHLIGHT))
+    {
+      int first, last;
+      if (playhighlightrows(&first, &last))
+        gui_message("LOOP: rows %02d-%02d (the marked rows) play again and again", first, last);
+      else
+        gui_message("LOOP: mark rows (SHIFT+UP/DOWN or the right mouse button) to loop them");
+    }
     return 1;
   }
   if ((mousey >= CHNY) && (mousey < CHNY + MAX_CHN * 2))
@@ -336,13 +355,15 @@ static int fxwheel(int d)
 }
 
 // The bottom rows: OCTAVE, PLAYING/STOPPED, MIDI INPUT and STEPS, each two
-// columns after the one before, then the message area
+// columns after the one before. The message area is at the right, under the
+// song info (from the C of COPYR.), the table view lock "U" in the corner
 #define INPUTCOLUMN 19
 #define INPUTWIDTH 10
 #define STEPSCOLUMN (INPUTCOLUMN + INPUTWIDTH + 2)
 #define STEPSWIDTH 5
-#define MSGCOLUMN (STEPSCOLUMN + STEPSWIDTH + 2)
-#define MSGWIDTH (77 - MSGCOLUMN)
+#define MSGCOLUMN RX
+#define MSGWIDTH (MAX_COLUMNS - 2 - MSGCOLUMN)
+#define LOCKCOLUMN (MAX_COLUMNS - 1)
 
 // "POS xx" in the orderlist title
 #define POSCOLUMN (RX + 27)
@@ -363,6 +384,59 @@ static int fxwheel(int d)
 #define TB_MULT (TBX + 27)
 #define TB_INT (TBX + 32)
 #define TB_FP (TBX + 36)
+
+// The tempo in beats per minute (BPM), right before FV. One beat = one
+// highlighting step (SHIFT+M / N, 4 rows unless changed), as in other
+// trackers: tempo 6 on PAL is 125 BPM
+#define TB_BPMWIDTH 9
+#define TB_BPM (TBX - 2 - TB_BPMWIDTH)
+
+extern unsigned char funktable[2];         // Funktempo (gplay.c)
+
+// Frames per row the song starts with: 6 (times the speed multiplier), the
+// tempo instrument's ($3F: its AD, as the player takes it), or a tempo
+// command on the first row of the subtune's first patterns
+static double starttempo(void)
+{
+  double frames = editorInfo.multiplier ? 6 * editorInfo.multiplier : 6;
+  int c;
+
+  if ((instr[MAX_INSTR-1].ad >= 2) && (!(instr[MAX_INSTR-1].ptr[WTBL]))) frames = instr[MAX_INSTR-1].ad;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    unsigned char *order = songorder[editorInfo.esnum][c];
+    int e = 0;
+    unsigned char *row;
+
+    while ((e < songlen[editorInfo.esnum][c]) && (order[e] >= MAX_PATT) && (order[e] < LOOPSONG)) e++;
+    if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) continue;
+    row = &pattern[order[e]][0];
+    if ((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) return row[3] & 0x7f;
+    if ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN))
+      return (ltable[STBL][row[3]-1] + rtable[STBL][row[3]-1]) / 2.0;
+  }
+  return frames;
+}
+
+// The tempo now: while playing the cursor channel's (funktempo: the average
+// of the two), stopped the one the song starts with
+static double currentbpm(void)
+{
+  double fps = editorInfo.ntsc ? 60.0 : 50.0;
+  double frames;
+
+  if (editorInfo.multiplier) fps *= editorInfo.multiplier;
+  else fps /= 2;
+  if ((isplaying()) && (!playstarting()))
+  {
+    CHN *cptr = &chn[editorInfo.epchn];
+    if (cptr->tempo >= 2) frames = cptr->tempo + 1;
+    else frames = (funktable[0] + funktable[1] + 2) / 2.0;
+  }
+  else frames = starttempo();
+  if (frames < 1) frames = 1;
+  return fps * 60.0 / (frames * (stepsize > 0 ? stepsize : 4));
+}
 
 static const char *titlebarlabel(void)
 {
@@ -388,12 +462,36 @@ void retro_printtitlebar(void)
 
   printblankc(0, 0, 15+16, MAX_COLUMNS);
 
-  if (!strlen(loadedsongfilename))
-    sprintf(textbuffer, "%s", programname);
-  else
-    sprintf(textbuffer, "%s - %s", programname, gt_basename(loadedsongfilename));
-  textbuffer[TBX - 1] = 0;
-  printtext(0, 0, 15+16, textbuffer);
+  // The BPM, then the program and song name up to it (a name too long
+  // without the version number)
+  {
+    double bpm = currentbpm();
+    char text[16];
+    int whole = (int)(bpm + 0.5);
+    int x;
+
+    if ((bpm >= 1000.0) || ((bpm - whole < 0.05) && (whole - bpm < 0.05)))
+      snprintf(text, sizeof text, "%d BPM", whole);
+    else
+      snprintf(text, sizeof text, "%.1f BPM", bpm);
+    x = TB_BPM + TB_BPMWIDTH - (int)strlen(text);
+    printtext(x, 0, 15+16, text);
+
+    if (!strlen(loadedsongfilename))
+      sprintf(textbuffer, "%s", programname);
+    else
+    {
+      sprintf(textbuffer, "%s - %s", programname, gt_basename(loadedsongfilename));
+      if ((int)strlen(textbuffer) > x - 1)
+      {
+        const char *v = strrchr(programname, ' ');
+        int n = v ? (int)(v - programname) : (int)strlen(programname);
+        sprintf(textbuffer, "%.*s - %s", n, programname, gt_basename(loadedsongfilename));
+      }
+    }
+    textbuffer[x - 1] = 0;
+    printtext(0, 0, 15+16, textbuffer);
+  }
 
   printtext(TB_FV, 0, fg_inactive+16, "FV PO RO");
 
@@ -901,8 +999,9 @@ void retro_printstatus(void)
 
   printtext(10, 36, CEDIT, textbuffer);
 
-  // Messages (file opened, saved, imported...) where the credits used to be.
-  // A long one goes on two lines
+  // Messages (file opened, saved, imported...) under the song info. A long
+  // one goes on two lines: broken near the middle if both halves fit,
+  // otherwise as much as fits on the first
   printblankc(MSGCOLUMN, 35, CNORMAL, MSGWIDTH);
   printblankc(MSGCOLUMN, 36, CNORMAL, MSGWIDTH);
   {
@@ -920,8 +1019,16 @@ void retro_printstatus(void)
       else
       {
         int cut = MSGWIDTH;
+        int k;
+
         while ((cut > MSGWIDTH / 2) && (msg[cut] != ' ')) cut--;
         if (msg[cut] != ' ') cut = MSGWIDTH;
+        for (k = 1; k < len; k++)
+        {
+          if ((msg[k] == ' ') && (k <= MSGWIDTH) && (len - k - 1 <= MSGWIDTH) &&
+            ((msg[cut] != ' ') || (abs(2 * k - len) < abs(2 * cut - len))))
+            cut = k;
+        }
         snprintf(line, sizeof line, "%.*s", cut, msg);
         printtext(MSGCOLUMN, 35, CTITLE, line);
         while (msg[cut] == ' ') cut++;
@@ -932,8 +1039,8 @@ void retro_printstatus(void)
   }
 
   // The channels' song positions are in the effects panel (fxprint())
-  if (editorInfo.etlock) printtext(78, 36, CTITLE, " ");
-    else printtext(78, 36, CTITLE, "U");
+  if (editorInfo.etlock) printtext(LOCKCOLUMN, 36, CTITLE, " ");
+    else printtext(LOCKCOLUMN, 36, CTITLE, "U");
 
   // The level meters (gui/gui_retro.cpp) may be drawn over the patterns
   retromainshown = 1;

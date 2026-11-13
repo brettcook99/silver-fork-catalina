@@ -137,6 +137,19 @@ static int jamframes(int ins)
   return t + 1;
 }
 
+int playhighlightrows(int *first, int *last)
+{
+  int m = editorInfo.epmarkchn;
+  int p;
+
+  if ((m < 0) || (m >= MAX_CHN)) return 0;
+  p = editorUndoInfo.editorInfo[m].epnum;
+  *first = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkstart : editorInfo.epmarkend;
+  *last = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkend : editorInfo.epmarkstart;
+  if (*last >= pattlen[p]) *last = pattlen[p] - 1;
+  return (*first >= 0) && (*first <= *last);
+}
+
 void playjump(int c, int pos)
 {
   if ((c >= 0) && (c < MAX_CHN)) jumpto[c] = pos;
@@ -1033,6 +1046,8 @@ void playroutine(void)
       GETNEWNOTES:
       {
         unsigned char newnote;
+        int row = cptr->pattptr / 4;
+        int first, last;
 
         newnote = pattern[cptr->pattnum][cptr->pattptr];
         if (pattern[cptr->pattnum][cptr->pattptr+1])
@@ -1042,6 +1057,11 @@ void playroutine(void)
         cptr->pattptr += 4;
         if (pattern[cptr->pattnum][cptr->pattptr] == ENDPATT)
           cptr->pattptr = 0x7fffffff;
+        // LOOP HIGHLIGHT: after the last marked row the first one, in the
+        // pattern the editor shows for this channel
+        if ((playloop == PLAYLOOP_HIGHLIGHT) && (cptr->pattnum == editorUndoInfo.editorInfo[c].epnum) &&
+          (playhighlightrows(&first, &last)) && (row == last) && (first < pattlen[cptr->pattnum]))
+          cptr->pattptr = first * 4;
 
         if (newnote == KEYOFF)
           cptr->gate = 0xfe;

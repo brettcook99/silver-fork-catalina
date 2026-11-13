@@ -555,6 +555,10 @@ int main(int argc, char **argv)
 	if (!chooseinterface())
 		return EXIT_SUCCESS;
 
+	// The credits, for a while at the start (in the message area, like the
+	// other messages; a file opened at the start shows its message instead)
+	gui_message("%s", ABOUTTEXT);
+
 	// Reset channels/song
 	initchannels();
 	clearsong(1, 1, 1, 1, 1);
@@ -1064,8 +1068,9 @@ void docommand(void)
 			undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST, i + (editorInfo.esnum*MAX_CHN), UNDO_AREA_DIRTY_CHECK);
 		}
 		undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST_LEN, 0, UNDO_AREA_DIRTY_CHECK);
-		// The notes of a MIDI chord go to the other channels' patterns too
-		if ((midinoteon) && (midichord > 1))
+		// The notes of a MIDI chord go to the other channels' patterns too,
+		// so does a note nudged to the next track (CTRL+LEFT/RIGHT)
+		if (((midinoteon) && (midichord > 1)) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))))
 		{
 			for (int i = 0;i < MAX_CHN;i++)
 				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[i].epnum, UNDO_AREA_DIRTY_CHECK);
@@ -1932,7 +1937,8 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_DELETEROW:
-		patternkey(KEY_DEL, 0, 0);
+		// BACKSPACE deletes the row in the pattern editor (DEL clears)
+		patternkey(KEY_BACKSPACE, 8, 0);
 		break;
 
 	case GTCMD_SHRINKPATTERN:
