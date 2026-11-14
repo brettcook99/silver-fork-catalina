@@ -33,6 +33,7 @@ int midichordchn = 0;
 int midichordrow = 0;
 int midichordfirst = 1;
 int midichordmask = 0;
+int midinoterouted = 0;
 int editstep = 0;
 int followplay = 0;
 int followmode = 1;
