@@ -91,7 +91,9 @@ jobs:
           fi
           # Renders songs without a host, and the editor's picture
           t=build/test; mkdir -p "$t"
-          r() { build/core/gtcore_render "$PWD/$lib" "$PWD" "$@"; }
+          # (each run starts without a settings file: the test program keeps
+          # it in /tmp, and the saved reSID-fp values are rounded)
+          r() { rm -f /tmp/goattrk2.cfg; build/core/gtcore_render "$PWD/$lib" "$PWD" "$@"; }
           r "$PWD/examples/consultant.sng" "$t/consultant.wav" -bpm=125 -seconds=4 -frame="$t/editor.bmp"
           r "$PWD/examples/dojo.sng" "$t/dojo.wav" -bpm=125 -seconds=4
           test -s "$t/editor.bmp"
