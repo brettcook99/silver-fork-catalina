@@ -111,7 +111,7 @@ jobs:
           if [ -n "${AAX_SDK_PATH:-}" ]; then extra+=(-DAAX_SDK_PATH="$AAX_SDK_PATH"); fi
           cmake -S plugin -B build/shell -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="${ARCHS}" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DJUCE_DIR="$PWD/deps/JUCE" \
-            -DGTCORE_LIBRARY="$PWD/build/core/gtcore.dylib" "${extra[@]}"
+            -DGTCORE_LIBRARY="$PWD/build/core/gtcore.dylib" ${extra[@]+"${extra[@]}"}
           cmake --build build/shell --parallel 4
 
       - name: Sign (ad hoc) and validate
