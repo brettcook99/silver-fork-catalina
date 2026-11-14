@@ -83,13 +83,24 @@ jobs:
             nm -arch x86_64 "$lib" | grep ' [SD] _OBJC_CLASS_\$_' || true
             echo "::error::gtcore.dylib defines Objective-C classes"; exit 1
           fi
-          # Only system libraries
-          otool -L "$lib"
-          if otool -L "$lib" | tail -n +2 | grep -v -E '^\s*(/usr/lib/|/System/Library/)'; then
+          # Only system libraries (otool lists the library's own name first,
+          # and a header line per architecture)
+          otool -arch all -L "$lib"
+          if otool -arch all -L "$lib" | grep -v -E ':$' | grep -v -E '^\s*(/usr/lib/|/System/Library/|@rpath/gtcore\.dylib )'; then
             echo "::error::gtcore.dylib depends on a non-system library"; exit 1
           fi
-          # Renders a song without a host (and makes two instances)
-          build/core/gtcore_render "$PWD/$lib" "$PWD" "$PWD/examples/consultant.sng" /tmp/consultant.wav -bpm=125 -seconds=4 -instances=2
+          # Renders songs without a host, and the editor's picture
+          t=build/test; mkdir -p "$t"
+          r() { build/core/gtcore_render "$PWD/$lib" "$PWD" "$@"; }
+          r "$PWD/examples/consultant.sng" "$t/consultant.wav" -bpm=125 -seconds=4 -frame="$t/editor.bmp"
+          r "$PWD/examples/dojo.sng" "$t/dojo.wav" -bpm=125 -seconds=4
+          test -s "$t/editor.bmp"
+          # Two instances with different songs at once sound exactly as each
+          # one alone (each copy of the library has its own song)
+          r "$PWD/examples/consultant.sng" "$t/both.wav" -bpm=125 -seconds=4 -instances=2 -song2="$PWD/examples/dojo.sng"
+          cmp "$t/consultant.wav" "$t/both.wav.0.wav"
+          cmp "$t/dojo.wav" "$t/both.wav.1.wav"
+          if cmp -s "$t/consultant.wav" "$t/dojo.wav"; then echo "::error::the two songs render the same"; exit 1; fi
 
       - name: Plugin (VST3, AU, AAX)
         run: |
@@ -127,3 +138,11 @@ jobs:
             build/shell/GoatTrackerUltimate_artefacts/Release/AU
             build/shell/GoatTrackerUltimate_artefacts/Release/AAX
           if-no-files-found: error
+
+      - name: Upload the test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gtcore-test-output-macos
+          path: build/test
+          if-no-files-found: ignore
