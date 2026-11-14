@@ -65,6 +65,15 @@ typedef struct
   unsigned char loopsongptr, looptrans, looprepeat;
   unsigned char lastvalid;
   unsigned char lastsongptr, lasttrans, lastrepeat;
+  // Where the channel plays, for notes recorded from a host's MIDI tracks
+  // (plugin): the row read last (readvalid: it starts on the next tick 0),
+  // the row whose tick 0 came last, the frames since that tick 0 and the
+  // row's length in frames. A row whose note was recorded (and played)
+  // just before the row was read: its note isn't played again (skip)
+  unsigned char readpatt, readrow, readvalid, readtrans;
+  unsigned char playpatt, playrow, playvalid, playtrans;
+  unsigned char rowframe, rowlen;
+  unsigned char skippatt, skiprow, skipvalid;
 } CHN;
 
 #ifndef GPLAY_C
@@ -103,5 +112,21 @@ int playhighlightrows(int *first, int *last);
 // While the song plays, channel c goes to orderlist position n (in the
 // player's next frame), at the same row: playjump(c, n)
 void playjump(int c, int pos);
+
+// For following a host's tempo and position (plugin builds):
+// Player frames per row of channel 1 (the average of the two values with
+// funktempo)
+double playframesperrow(void);
+// Frames from the start of playback to the first row's tick 0
+int playstartframes(void);
+// Stops and clears the player and the SID registers (the channels' mutes
+// stay)
+void playerreset(void);
+// Starts the song (subtune num) from its beginning on the next frame, like
+// initsong(), also while the user interface's play commands are blocked
+void playerstartsong(int num);
+// The pattern and transpose a channel plays after its current pattern, from
+// the orderlist. Returns 0 if not known
+int playnextpattern(int c, int *patt, int *trans);
 
 #endif

@@ -12,6 +12,79 @@
 
 DIRENTRY direntry[MAX_DIRFILES];
 
+#ifdef GT_PLUGIN
+// In a plugin the file selector must not change the host's current folder
+// (chdir() is for the whole process): it keeps a folder of its own and uses
+// full paths
+static char fscwd[MAX_PATHNAME] = "";
+
+static int fs_isroot(const char *p)
+{
+  size_t len = strlen(p);
+  if ((len == 1) && ((p[0] == '/') || (p[0] == '\\'))) return 1;
+  if ((len <= 3) && (len >= 2) && (p[1] == ':')) return 1;
+  return 0;
+}
+
+static void fs_join(const char *dir, const char *name, char *out, int outsize)
+{
+  size_t len = strlen(dir);
+  int slash = (len) && ((dir[len - 1] == '/') || (dir[len - 1] == '\\'));
+  snprintf(out, outsize, "%s%s%s", dir, ((len) && (!slash)) ? "/" : "", name);
+}
+
+static char *fs_getcwd(char *buf, int size)
+{
+  if (!fscwd[0])
+  {
+    const char *home = getenv("HOME");
+#ifdef __WIN32__
+    if ((!home) || (!home[0])) home = getenv("USERPROFILE");
+#endif
+    snprintf(fscwd, sizeof fscwd, "%s", ((home) && (home[0])) ? home : "/");
+  }
+  snprintf(buf, size, "%s", fscwd);
+  return buf;
+}
+
+static int fs_chdir(const char *p)
+{
+  char target[MAX_PATHNAME];
+  struct stat st;
+  char cur[MAX_PATHNAME];
+
+  if ((!p) || (!p[0])) return -1;
+  fs_getcwd(cur, sizeof cur);
+  if (!strcmp(p, "."))
+    return 0;
+  if (!strcmp(p, ".."))
+  {
+    int len = (int)strlen(cur);
+    if (fs_isroot(cur)) return 0;
+    while ((len > 0) && ((cur[len - 1] == '/') || (cur[len - 1] == '\\'))) cur[--len] = 0;
+    while ((len > 0) && (cur[len - 1] != '/') && (cur[len - 1] != '\\')) cur[--len] = 0;
+    if ((len > 1) && (!(len == 3 && cur[1] == ':'))) cur[--len] = 0;
+    if (!cur[0]) strcpy(cur, "/");
+    snprintf(fscwd, sizeof fscwd, "%s", cur);
+    return 0;
+  }
+  if ((p[0] == '/') || (p[0] == '\\') || ((p[0]) && (p[1] == ':')))
+    snprintf(target, sizeof target, "%s", p);
+  else
+    fs_join(cur, p, target, sizeof target);
+  if ((stat(target, &st)) || (!(st.st_mode & S_IFDIR)))
+  {
+    // A drive root ("C:\\") may not stat as a folder
+    if (!fs_isroot(target)) return -1;
+  }
+  snprintf(fscwd, sizeof fscwd, "%s", target);
+  return 0;
+}
+
+#define chdir(p) fs_chdir(p)
+#define getcwd(b, s) fs_getcwd(b, s)
+#endif
+
 void initpaths(void)
 {
   int c;
@@ -98,6 +171,8 @@ int fileselector(char *name, char *path, char *filter, char *title, int filemode
   // Process directory
   #ifdef __amigaos__
   dir = opendir("");
+  #elif defined(GT_PLUGIN)
+  dir = opendir(path);
   #else
   dir = opendir(".");
   #endif
@@ -115,7 +190,15 @@ int fileselector(char *name, char *path, char *filter, char *title, int filemode
       {
         direntry[files].name = strdup(de->d_name);
         direntry[files].attribute = 0;
+#ifdef GT_PLUGIN
+        {
+          char full[MAX_PATHNAME * 2];
+          fs_join(path, de->d_name, full, sizeof full);
+          if (stat(full, &st)) memset(&st, 0, sizeof st);
+        }
+#else
         stat(de->d_name, &st);
+#endif
         if (st.st_mode & S_IFDIR)
         {
           direntry[files].attribute = 1;

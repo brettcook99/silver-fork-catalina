@@ -1,0 +1,129 @@
+name: macOS plugin build
+
+# Builds the GoatTracker Ultimate plugin for macOS (VST3 and AU, plus AAX when
+# the AAX SDK is given), universal (Intel + Apple Silicon), macOS 10.15 or
+# later: SDL2 (static, plugin settings), the core library gtcore.dylib, then
+# the JUCE plugin. Checks the core library (no Objective-C classes, renders a
+# song without a host), validates the AU with auval, ad-hoc signs the bundles
+# and uploads them as an artifact.
+#
+# The AAX plugin: put the AAX SDK zip at a URL the runner can read and set the
+# repository secret AAX_SDK_URL to it (the SDK's licence doesn't allow
+# publishing it). Pro Tools only loads AAX plugins signed with PACE's tools.
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'plugin/**'
+      - 'fonts/**'
+      - '.github/workflows/build-plugin-macos.yml'
+  pull_request:
+  workflow_dispatch:
+
+env:
+  SDL2_VERSION: 2.32.10
+  SDL2_SHA256: 5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
+  JUCE_TAG: 8.0.15
+  ARCHS: x86_64;arm64
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Get SDL2 and JUCE
+        run: |
+          set -euo pipefail
+          curl -sSL -o sdl2.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz"
+          echo "${SDL2_SHA256}  sdl2.tar.gz" | shasum -a 256 -c -
+          mkdir -p deps && tar -xzf sdl2.tar.gz -C deps
+          git clone --depth 1 -b "${JUCE_TAG}" https://github.com/juce-framework/JUCE.git deps/JUCE
+
+      - name: Get the AAX SDK (optional)
+        env:
+          AAX_SDK_URL: ${{ secrets.AAX_SDK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -n "${AAX_SDK_URL:-}" ]; then
+            curl -sSL -o aax.zip "$AAX_SDK_URL"
+            mkdir -p deps/aax && unzip -q aax.zip -d deps/aax
+            sdk="$(dirname "$(find deps/aax -name 'AAX.h' -path '*Interfaces*' | head -1)")/.."
+            echo "AAX_SDK_PATH=$(cd "$sdk" && pwd)" >> "$GITHUB_ENV"
+          else
+            echo "No AAX SDK: VST3 and AU only"
+          fi
+
+      - name: SDL2 (static, for the plugin)
+        run: |
+          set -euo pipefail
+          cmake -C plugin/cmake/sdl2-plugin.cmake -S "deps/SDL2-${SDL2_VERSION}" -B build/sdl2 \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="${ARCHS}" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -DCMAKE_INSTALL_PREFIX="$PWD/build/sdl2-install"
+          cmake --build build/sdl2 --parallel 4
+          cmake --install build/sdl2
+
+      - name: Core library (gtcore.dylib)
+        run: |
+          set -euo pipefail
+          cmake -S plugin/core -B build/core -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="${ARCHS}" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DSDL2_DIR="$PWD/build/sdl2-install/lib/cmake/SDL2"
+          cmake --build build/core --parallel 4
+
+      - name: Check the core library
+        run: |
+          set -euo pipefail
+          lib=build/core/gtcore.dylib
+          lipo -info "$lib"
+          # Each plugin instance loads its own copy: no Objective-C classes
+          # (two copies of a class would clash)
+          classes="$(nm -arch x86_64 "$lib" | grep -c ' [SD] _OBJC_CLASS_\$_' || true)"
+          if [ "$classes" != "0" ]; then
+            nm -arch x86_64 "$lib" | grep ' [SD] _OBJC_CLASS_\$_' || true
+            echo "::error::gtcore.dylib defines Objective-C classes"; exit 1
+          fi
+          # Only system libraries
+          otool -L "$lib"
+          if otool -L "$lib" | tail -n +2 | grep -v -E '^\s*(/usr/lib/|/System/Library/)'; then
+            echo "::error::gtcore.dylib depends on a non-system library"; exit 1
+          fi
+          # Renders a song without a host (and makes two instances)
+          build/core/gtcore_render "$PWD/$lib" "$PWD" "$PWD/examples/consultant.sng" /tmp/consultant.wav -bpm=125 -seconds=4 -instances=2
+
+      - name: Plugin (VST3, AU, AAX)
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ -n "${AAX_SDK_PATH:-}" ]; then extra+=(-DAAX_SDK_PATH="$AAX_SDK_PATH"); fi
+          cmake -S plugin -B build/shell -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="${ARCHS}" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DJUCE_DIR="$PWD/deps/JUCE" \
+            -DGTCORE_LIBRARY="$PWD/build/core/gtcore.dylib" "${extra[@]}"
+          cmake --build build/shell --parallel 4
+
+      - name: Sign (ad hoc) and validate
+        run: |
+          set -euo pipefail
+          out=build/shell/GoatTrackerUltimate_artefacts/Release
+          for b in "$out"/VST3/*.vst3 "$out"/AU/*.component "$out"/AAX/*.aaxplugin; do
+            [ -e "$b" ] || continue
+            codesign --force -s - "$b/Contents/Frameworks/gtcore.dylib"
+            codesign --force --deep -s - "$b"
+            codesign --verify --deep --strict "$b"
+            echo "signed: $b"
+          done
+          # The AU: installed for this user and validated
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "$out"/AU/*.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aumu Gtk2 Gtul
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: GoatTrackerUltimate-plugin-macos
+          path: |
+            build/shell/GoatTrackerUltimate_artefacts/Release/VST3
+            build/shell/GoatTrackerUltimate_artefacts/Release/AU
+            build/shell/GoatTrackerUltimate_artefacts/Release/AAX
+          if-no-files-found: error

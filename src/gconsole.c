@@ -14,6 +14,9 @@
 #include <string.h>
 #include "goattrk2.h"
 #include "gui/gui.h"
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+#endif
 
 unsigned *scrbuffer = NULL;
 int textscreenactive = 0;
@@ -37,6 +40,8 @@ int cursorflashdelay = 0;
 int midinoteon = 0;
 int midinoteoff = 0;
 unsigned midinotetime = 0;
+// The MIDI channel (0-15) of the note in midinoteon / midinoteoff
+int midinotechannel = 0;
 int menucommand = 0;
 int mouseb = 0;
 int prevmouseb = 0;
@@ -300,6 +305,7 @@ int input_nextmidi(void)
   if (event == MIDI_NOTEON) midinoteon = note;
   else midinoteoff = note;
   midinotetime = midi_eventtime();
+  midinotechannel = midi_eventchannel();
   return 1;
 }
 
@@ -316,13 +322,18 @@ int initscreen(void)
   clearscreen();
 
   if (!gui_init()) return 0;
+#ifndef GT_PLUGIN
+  // The plugin closes its window itself (an atexit() function would run
+  // when the host unloads it)
   atexit(closescreen);
+#endif
   return 1;
 }
 
 void closescreen(void)
 {
   gui_shutdown();
+  textscreenactive = 0;
   if (scrbuffer)
   {
     free(scrbuffer);
@@ -519,6 +530,9 @@ void getkey(void)
 
   cursorflashdelay += win_getspeed(50);
 
+#ifdef GT_PLUGIN
+  gtplugin_checkquit();
+#endif
   gui_frame(textscreenactive);
 
   prevmouseb = mouseb;

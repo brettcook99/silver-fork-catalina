@@ -3,6 +3,9 @@
 #include "gui_internal.h"
 #include "../imgui/imgui_impl_sdl2.h"
 #include "../imgui/imgui_impl_sdlrenderer2.h"
+#ifdef GT_PLUGIN
+#include "../plugin/gtplugin.h"
+#endif
 
 #include <stdarg.h>
 
@@ -45,6 +48,14 @@ static int numrecent = 0;
 
 static void initconfigdir(void)
 {
+#ifdef GT_PLUGIN
+  // The plugin's config folder. No imgui.ini: the retro interface has no
+  // panels to remember
+  gtplugin_configpath("", configdir, MAX_PATHNAME);
+  inipath[0] = 0;
+  snprintf(recentlistpath, MAX_PATHNAME, "%srecent.txt", configdir);
+  return;
+#endif
 #ifdef __WIN32__
   char *base = SDL_GetBasePath();
   if (base)
@@ -179,6 +190,11 @@ extern "C" int gui_songmodified(void)
   return songhash() != savedhash;
 }
 
+extern "C" unsigned long long gui_songhash(void)
+{
+  return songhash();
+}
+
 /*
  * Status bar message
  */
@@ -198,7 +214,12 @@ extern "C" void gui_message(const char *fmt, ...)
 
 static bool findfile(const char *name, char *out, int outsize)
 {
+#ifdef GT_PLUGIN
+  // The plugin's resource folder (SDL_GetBasePath() would be the host's)
+  char *base = SDL_strdup(gtplugin_resourcedir);
+#else
   char *base = SDL_GetBasePath();
+#endif
   const char *prefixes[] = { "fonts/", "../fonts/", "../../fonts/", "../Resources/fonts/", NULL };
   int c;
 
@@ -255,7 +276,7 @@ static void loadfonts(void)
 
 static void loadicon(void)
 {
-#ifndef __APPLE__
+#if (!defined(__APPLE__)) && (!defined(GT_PLUGIN))
   // On macOS the app bundle's icon is used
   int handle = io_open((char *)"goattrk2.bmp");
   if (handle != -1)
@@ -302,6 +323,20 @@ extern "C" int gui_init(void)
 #ifdef SDL_HINT_RENDER_SCALE_QUALITY
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 #endif
+
+#ifdef GT_PLUGIN
+  // The plugin: a window in memory, the size of the editor in pixels, drawn
+  // by the software renderer
+  {
+    float scale;
+    gtplugin_viewsize(&w, &h, &scale);
+    window = SDL_CreateWindow("GoatTracker Ultimate", 0, 0, w, h, SDL_WINDOW_RESIZABLE);
+    if (!window) return 0;
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    if (!renderer) return 0;
+    fullscreen = 0;
+  }
+#else
 
   // Default window size: fits the desktop
   if (SDL_GetDisplayUsableBounds(0, &usable) != 0)
@@ -356,6 +391,7 @@ extern "C" int gui_init(void)
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (!renderer) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
   if (!renderer) return 0;
+#endif
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -372,6 +408,14 @@ extern "C" int gui_init(void)
 
   ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer2_Init(renderer);
+#ifdef GT_PLUGIN
+  // Text fields copy to the host's clipboard (the window in memory has none)
+  {
+    ImGuiPlatformIO &pio = ImGui::GetPlatformIO();
+    pio.Platform_SetClipboardTextFn = [](ImGuiContext *, const char *text) { gtplugin_setclipboard(text); };
+    pio.Platform_GetClipboardTextFn = [](ImGuiContext *) -> const char * { return gtplugin_getclipboard(); };
+  }
+#endif
 
   // Files dropped on the window (and opened from the Finder on macOS)
   SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
@@ -401,6 +445,10 @@ extern "C" void gui_shutdown(void)
 
 extern "C" void gui_togglefullscreen(void)
 {
+#ifdef GT_PLUGIN
+  // The host's window
+  return;
+#endif
   if (!window) return;
   fullscreen ^= 1;
   win_fullscreen = fullscreen;
@@ -512,6 +560,53 @@ static void retrozoom(int dir)
   int newh = 0;
   int w, h, c;
 
+#ifdef GT_PLUGIN
+  // The plugin asks the host for the editor's next size (logical pixels)
+  {
+    float scale;
+    int pw, ph;
+
+    gtplugin_viewsize(&pw, &ph, &scale);
+    if (scale <= 0.0f) scale = 1.0f;
+    winw = (int)(pw / scale);
+    winh = (int)(ph / scale);
+    retrofitcell(winw, winh, &cellw, &cellh);
+    if (!dir)
+      zoomsize(150, &neww, &newh);
+    else if (dir > 0)
+    {
+      for (c = 0; c < NUM_ZOOMSTEPS; c++)
+      {
+        zoomsize(zoomsteps[c], &w, &h);
+        if (h / MAX_ROWS > cellh)
+        {
+          neww = w;
+          newh = h;
+          break;
+        }
+      }
+    }
+    else
+    {
+      for (c = NUM_ZOOMSTEPS - 1; c >= 0; c--)
+      {
+        zoomsize(zoomsteps[c], &w, &h);
+        if (h / MAX_ROWS < cellh)
+        {
+          neww = w;
+          newh = h;
+          break;
+        }
+      }
+    }
+    if (!neww) return;
+    if (neww < RETRO_MINXSIZE) neww = RETRO_MINXSIZE;
+    if (newh < RETRO_MINYSIZE) newh = RETRO_MINYSIZE;
+    gtplugin_requestresize(neww, newh);
+    return;
+  }
+#endif
+
   if ((!window) || (fullscreen)) return;
   if (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) SDL_RestoreWindow(window);
   SDL_GetWindowSize(window, &winw, &winh);
@@ -569,6 +664,11 @@ extern "C" void gui_setretro(int on)
 {
   macmenu_setretro(on);
   if (!window) return;
+#ifdef GT_PLUGIN
+  // The host sets the editor's size limits
+  SDL_SetWindowMinimumSize(window, 1, 1);
+  return;
+#endif
   if (on)
     SDL_SetWindowMinimumSize(window, RETRO_MINXSIZE, RETRO_MINYSIZE);
   else
@@ -739,12 +839,14 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     return;
   }
 
+#ifndef GT_PLUGIN
   // ALT/OPTION+ENTER: fullscreen
   if (((sym == SDLK_RETURN) || (sym == SDLK_KP_ENTER)) && (mod & KMOD_ALT))
   {
     if (!k.repeat) gui_togglefullscreen();
     return;
   }
+#endif
 
   // CTRL/CMD + = - 0: text size
   if ((mod & (KMOD_CTRL | KMOD_GUI)) && (!(mod & KMOD_ALT)))
@@ -851,6 +953,10 @@ static void pollevents(int textscreen)
   if ((retromode) && (retroatmainscreen)) textscreen = 0;
 
   tsmousewheel = 0;
+#ifdef GT_PLUGIN
+  // Keys, mouse and dropped files from the plugin's editor
+  gtplugin_feedevents(window);
+#endif
   while (SDL_PollEvent(&e))
   {
     // The instrument wheel doesn't scroll or zoom the panels too
@@ -867,6 +973,10 @@ static void pollevents(int textscreen)
 
       case SDL_WINDOWEVENT:
       if (e.window.windowID != SDL_GetWindowID(window)) break;
+#ifdef GT_PLUGIN
+      // The host's window: its size and position are not remembered here
+      break;
+#endif
       if (e.window.event == SDL_WINDOWEVENT_CLOSE) win_quitted = 1;
       if ((e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) && (!fullscreen))
       {
@@ -1080,6 +1190,9 @@ static void testscreenshot(void)
   int w, h;
   SDL_Surface *surface;
 
+#ifdef GT_PLUGIN
+  path = NULL;
+#endif
   if ((!path) || (!path[0])) return;
   frames++;
   if (frames == 2)
@@ -1132,6 +1245,21 @@ static void beginframe(int textscreen)
 
   ImGui_ImplSDLRenderer2_NewFrame();
   ImGui_ImplSDL2_NewFrame();
+#ifdef GT_PLUGIN
+  // The window in memory has the editor's physical pixels; ImGui works in
+  // the editor's logical pixels, as on a Retina display
+  {
+    ImGuiIO &io = ImGui::GetIO();
+    int pw, ph;
+    float scale;
+
+    gtplugin_viewsize(&pw, &ph, &scale);
+    SDL_GetWindowSize(window, &pw, &ph);
+    if (scale <= 0.0f) scale = 1.0f;
+    io.DisplaySize = ImVec2(pw / scale, ph / scale);
+    io.DisplayFramebufferScale = ImVec2(scale, scale);
+  }
+#endif
   ImGui::NewFrame();
 }
 
@@ -1153,11 +1281,33 @@ static void endframe(ImU32 bg)
   sy = drawdata->FramebufferScale.y > 0.0f ? drawdata->FramebufferScale.y : 1.0f;
   SDL_RenderSetScale(renderer, sx, sy);
 
+#ifdef GT_PLUGIN
+  gtplugin_setcursor(ImGui::GetMouseCursor());
+  // Nothing is drawn while the editor is closed. The program goes on (MIDI
+  // recording, the host's project state), at about 30 frames per second
+  if (!gtplugin_editorvisible())
+  {
+    now = SDL_GetTicks();
+    if ((lastframeticks) && (now - lastframeticks < 33))
+      SDL_Delay(33 - (now - lastframeticks));
+    lastframeticks = SDL_GetTicks();
+    return;
+  }
+#endif
   SDL_SetRenderDrawColor(renderer, bg & 0xff, (bg >> 8) & 0xff, (bg >> 16) & 0xff, 255);
   SDL_RenderClear(renderer);
   ImGui_ImplSDLRenderer2_RenderDrawData(drawdata, renderer);
   testscreenshot();
   SDL_RenderPresent(renderer);
+#ifdef GT_PLUGIN
+  gtplugin_publishframe(window);
+  // About 60 frames per second (the CPU draws)
+  now = SDL_GetTicks();
+  if ((lastframeticks) && (now - lastframeticks < 16))
+    SDL_Delay(16 - (now - lastframeticks));
+  lastframeticks = SDL_GetTicks();
+  return;
+#endif
 
   // Without vsync (or when minimized) don't run faster than about 100 fps
   now = SDL_GetTicks();
@@ -1170,6 +1320,9 @@ static void endframe(ImU32 bg)
 
 extern "C" void gui_frame(int textscreen)
 {
+#ifdef GT_PLUGIN
+  gtplugin_checkquit();
+#endif
   if (!initted) return;
   ImGuiIO &io = ImGui::GetIO();
 
@@ -1178,6 +1331,10 @@ extern "C" void gui_frame(int textscreen)
   drawall(textscreen);
   // The classic screen has black margins around it
   endframe(retromode ? IM_COL32(0, 0, 0, 255) : theme.bgdeep);
+#ifdef GT_PLUGIN
+  // The host's project state, recorded notes
+  gtplugin_service();
+#endif
 }
 
 extern "C" int gui_chooseinterface(int current)

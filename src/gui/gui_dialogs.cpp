@@ -1,6 +1,9 @@
 // GoatTracker GUI: dialogs and the classic text screen overlay
 
 #include "gui_internal.h"
+#ifdef GT_PLUGIN
+#include "../plugin/gtplugin.h"
+#endif
 
 using namespace gui;
 
@@ -28,6 +31,11 @@ extern "C" void gui_alert(const char *title, const char *text)
 
 extern "C" void gui_askquit(void)
 {
+#ifdef GT_PLUGIN
+  // The plugin doesn't quit: the host closes it
+  cmd_post(GTCMD_QUIT);
+  return;
+#endif
   if (gui_songmodified())
     cmd_post(GTCMD_QUIT);       // Asks to save the changes
   else
@@ -995,8 +1003,76 @@ static void metercolorsdialog(void)
   }
 }
 
+#ifdef GT_PLUGIN
+/*
+ * DAW SYNC (plugin): following the host's tempo and position, MIDI channels
+ * 1-3 to voices 1-3
+ */
+
+static bool wantdawsync = false;
+
+extern "C" void gui_opendawsync(void)
+{
+  wantdawsync = true;
+}
+
+// The song's own tempo (BPM) at the PAL / NTSC frame rate, as the title bar
+// shows it without the host
+extern "C" double retro_songbpm(void);
+
+static void dawsyncdialog(void)
+{
+  if (wantdawsync)
+  {
+    ImGui::OpenPopup("##dawsync");
+    wantdawsync = false;
+  }
+  if (beginmodal("##dawsync", ImGui::GetFontSize() * 30.0f))
+  {
+    const char *labels[] = { "Close" };
+    bool sync = gtsync_enabled != 0;
+    bool route = gtsync_route != 0;
+    bool recordoff = gtsync_recordoff != 0;
+    int startbar = gtsync_startbar;
+    double hostbpm = gtsync_hostbpm();
+    char text[256];
+
+    title("DAW Sync");
+    if (ImGui::Checkbox("Follow the DAW's tempo and position", &sync)) gtsync_enabled = sync ? 1 : 0;
+    snprintf(text, sizeof text, "While the DAW plays, the song plays from the DAW's position at its tempo: one pattern "
+      "row = 1/%d beat (the highlight step). The DAW's start, stop and loop control the playback.", stepsize > 0 ? stepsize : 4);
+    body(text);
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+    if (ImGui::InputInt("The song starts at bar", &startbar))
+    {
+      if (startbar < 1) startbar = 1;
+      if (startbar > 9999) startbar = 9999;
+      gtsync_startbar = startbar;
+    }
+    ImGui::Spacing();
+    if (ImGui::Checkbox("MIDI channels 1, 2, 3 play voices 1, 2, 3", &route)) gtsync_route = route ? 1 : 0;
+    body("In edit mode the notes are recorded into the patterns while the song plays (stopped: entered at the "
+      "cursor). Other MIDI channels work as a MIDI keyboard does.");
+    if (ImGui::Checkbox("Record note-offs (as ---)", &recordoff)) gtsync_recordoff = recordoff ? 1 : 0;
+    ImGui::Spacing();
+    if (hostbpm > 0.0)
+      snprintf(text, sizeof text, "DAW: %.2f BPM, %s. The song's own tempo: %.1f BPM (the DAW at this tempo plays it "
+        "exactly as GoatTracker does).", hostbpm, gtsync_hostplaying() ? "playing" : "stopped", retro_songbpm());
+    else
+      snprintf(text, sizeof text, "The DAW gives no tempo. The song's own tempo: %.1f BPM.", retro_songbpm());
+    body(text);
+    if (buttons(labels, 1, 0) >= 0) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+}
+#endif
+
 void gui::drawdialogs(void)
 {
+#ifdef GT_PLUGIN
+  dawsyncdialog();
+#endif
   viewmenu();
   aboutdialog();
   metercolorsdialog();

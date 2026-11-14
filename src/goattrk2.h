@@ -68,6 +68,7 @@ extern int midichordchn;
 extern int midichordrow;
 extern int midichordfirst;
 extern int midichordmask;
+extern int midinoterouted;
 extern int editstep;
 extern int followplay;
 extern int followmode;

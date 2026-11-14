@@ -6,7 +6,7 @@
 // as normal key presses and are handled by the GUI, so they work the same
 // with and without the menu bar.
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GT_PLUGIN)
 #ifdef __cplusplus
 extern "C" {
 #endif

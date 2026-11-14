@@ -140,6 +140,92 @@ unsigned char sid_getorder(unsigned char index, unsigned int adparam)
     return sidorder[index];
 }
 
+// Plugin builds render with these instead of sid_fillbuffer(): the player
+// writes the registers once per frame (sid_newframe() after playroutine()),
+// 14 cycles apart as the player on a C64 does, and sid_render() then makes
+// exactly the samples asked for, however the host splits its blocks. A
+// block may end in the middle of the register writes: they go on in the
+// next call
+static int writeindex = NUMSIDREGS;
+static int gapcycles = 0;
+static int badlineindex = -1;
+static int fillbadline = 0;
+
+void sid_newframe(void)
+{
+  writeindex = 0;
+  badlineindex = residdelay ? (rand() % NUMSIDREGS) : -1;
+  fillbadline = 0;
+}
+
+void sid_resetchip(void)
+{
+  int c;
+
+  if (sid) sid->reset();
+  if (sidfp) sidfp->reset();
+  for (c = 0; c < NUMSIDREGS; c++) sidreg[c] = 0x00;
+  writeindex = NUMSIDREGS;
+  gapcycles = 0;
+}
+
+int sid_render(short *ptr, int samples, unsigned int adparam)
+{
+  int total = 0;
+
+  if ((!sid) && (!sidfp)) return 0;
+  while (samples > 0)
+  {
+    cycle_count d;
+    int result = 0;
+
+    if (gapcycles > 0)
+    {
+      // The cycles after a register write
+      d = gapcycles;
+      if (sid) result = sid->clock(d, ptr, samples);
+      else result = sidfp->clock(d, ptr, samples);
+      total += result;
+      ptr += result;
+      samples -= result;
+      // Cycles left only when the buffer is full: the rest next time
+      gapcycles = d;
+      if (gapcycles > 0) break;
+      continue;
+    }
+
+    if (writeindex < NUMSIDREGS)
+    {
+      unsigned char o;
+
+      // Possible random badline delay once per frame
+      if ((writeindex == badlineindex) && (!fillbadline))
+      {
+        fillbadline = 1;
+        gapcycles = residdelay;
+        continue;
+      }
+      o = sid_getorder(writeindex, adparam);
+      if (sid) sid->write(o, sidreg[o]);
+      else sidfp->write(o, sidreg[o]);
+      writeindex++;
+      gapcycles = SIDWRITEDELAY;
+      continue;
+    }
+
+    // Enough cycles for the samples: the emulation stops when the buffer is
+    // full and keeps its exact position between samples
+    d = (cycle_count)(((long long)clockrate * samples) / samplerate) + 64;
+    if (sid) result = sid->clock(d, ptr, samples);
+    else result = sidfp->clock(d, ptr, samples);
+    total += result;
+    ptr += result;
+    samples -= result;
+    if (!result) break;
+  }
+  return total;
+}
+
 int sid_fillbuffer(short *ptr, int samples, unsigned int adparam)
 {
   int tdelta;
@@ -150,7 +236,7 @@ int sid_fillbuffer(short *ptr, int samples, unsigned int adparam)
 
   int badline = rand() % NUMSIDREGS;
 
-  tdelta = clockrate * samples / samplerate;
+  tdelta = (int)(((long long)clockrate * samples) / samplerate);
   if (tdelta <= 0) return total;
 
   for (c = 0; c < NUMSIDREGS; c++)
@@ -192,7 +278,7 @@ int sid_fillbuffer(short *ptr, int samples, unsigned int adparam)
   // Loop extra cycles until all samples produced
   while (samples)
   {
-    tdelta = clockrate * samples / samplerate;
+    tdelta = (int)(((long long)clockrate * samples) / samplerate);
     if (tdelta <= 0) return total;
 
     if (sid) result = sid->clock(tdelta, ptr, samples);

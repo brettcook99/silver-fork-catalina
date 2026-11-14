@@ -63,6 +63,9 @@ void gui_designermidi(int noteon, int noteoff);
 // (74), resonance (71), filter type (4) and filter voice (7), values 0-127
 void gui_designermidicc(int cc, int value);
 
+// A hash of the song data (to see whether it changed)
+unsigned long long gui_songhash(void);
+
 // Shows a message in the status bar for a few seconds
 void gui_message(const char *fmt, ...);
 

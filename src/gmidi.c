@@ -30,13 +30,15 @@ static volatile int midiqueue[MIDI_QUEUESIZE];
 static volatile unsigned midiqueuetime[MIDI_QUEUESIZE];
 static unsigned midilasttime = 0;
 static int midilastvalue = 0;
+static int midilastchannel = 0;
 static volatile unsigned midiqueuewrite = 0;
 static volatile unsigned midiqueueread = 0;
 static volatile int midiqueuelock = 0;
 static int mididevices = 0;
 
-// Called from the MIDI thread(s). Events are dropped if the queue is full
-static void midi_pushevent(int type, int data1, int data2)
+// Called from the MIDI thread(s) (in the plugin from the host's audio
+// thread). Events are dropped if the queue is full
+void midi_pushevent_ch(int type, int channel, int data1, int data2)
 {
   unsigned next;
 
@@ -45,7 +47,7 @@ static void midi_pushevent(int type, int data1, int data2)
   next = (midiqueuewrite + 1) % MIDI_QUEUESIZE;
   if (next != midiqueueread)
   {
-    midiqueue[midiqueuewrite] = (type << 16) | ((data1 & 0x7f) << 8) | (data2 & 0x7f);
+    midiqueue[midiqueuewrite] = (type << 20) | ((channel & 0xf) << 16) | ((data1 & 0x7f) << 8) | (data2 & 0x7f);
     midiqueuetime[midiqueuewrite] = SDL_GetTicks();
     __sync_synchronize();
     midiqueuewrite = next;
@@ -55,19 +57,21 @@ static void midi_pushevent(int type, int data1, int data2)
 
 static void midi_handlemessage(int status, int data1, int data2)
 {
+  int channel = status & 0x0f;
+
   switch (status & 0xf0)
   {
     case 0x90:
     // Note on with velocity 0 is a note off
-    midi_pushevent(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, data1, data2);
+    midi_pushevent_ch(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, channel, data1, data2);
     break;
 
     case 0x80:
-    midi_pushevent(MIDI_NOTEOFF, data1, 0);
+    midi_pushevent_ch(MIDI_NOTEOFF, channel, data1, 0);
     break;
 
     case 0xb0:
-    midi_pushevent(MIDI_CONTROL, data1, data2);
+    midi_pushevent_ch(MIDI_CONTROL, channel, data1, data2);
     break;
   }
 }
@@ -85,7 +89,13 @@ int midi_getevent(int *note)
 
   *note = (event >> 8) & 0x7f;
   midilastvalue = event & 0x7f;
-  return event >> 16;
+  midilastchannel = (event >> 16) & 0xf;
+  return event >> 20;
+}
+
+int midi_eventchannel(void)
+{
+  return midilastchannel;
 }
 
 unsigned midi_eventtime(void)
@@ -315,6 +325,19 @@ void midi_uninit(void)
 int midi_getevent(int *note)
 {
   (void)note;
+  return 0;
+}
+
+void midi_pushevent_ch(int type, int channel, int data1, int data2)
+{
+  (void)type;
+  (void)channel;
+  (void)data1;
+  (void)data2;
+}
+
+int midi_eventchannel(void)
+{
   return 0;
 }
 

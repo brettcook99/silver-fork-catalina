@@ -418,6 +418,19 @@ static double starttempo(void)
   return frames;
 }
 
+static double currentbpm(void);
+
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+// The song's own tempo, without the host (DAW SYNC dialog)
+double retro_songbpm(void)
+{
+  return currentbpm();
+}
+// The title bar's SYNC: where it is (set when printed)
+static int tbsyncx = -1;
+#endif
+
 // The tempo now: while playing the cursor channel's (funktempo: the average
 // of the two), stopped the one the song starts with
 static double currentbpm(void)
@@ -467,8 +480,14 @@ void retro_printtitlebar(void)
   {
     double bpm = currentbpm();
     char text[16];
-    int whole = (int)(bpm + 0.5);
+    int whole;
     int x;
+
+#ifdef GT_PLUGIN
+    // DAW SYNC: the song plays at the host's tempo
+    if ((gtsync_enabled) && (gtsync_hostbpm() > 0.0)) bpm = gtsync_hostbpm();
+#endif
+    whole = (int)(bpm + 0.5);
 
     if ((bpm >= 1000.0) || ((bpm - whole < 0.05) && (whole - bpm < 0.05)))
       snprintf(text, sizeof text, "%d BPM", whole);
@@ -476,6 +495,13 @@ void retro_printtitlebar(void)
       snprintf(text, sizeof text, "%.1f BPM", bpm);
     x = TB_BPM + TB_BPMWIDTH - (int)strlen(text);
     printtext(x, 0, 15+16, text);
+#ifdef GT_PLUGIN
+    // SYNC before it: green while following the host's transport, white
+    // when on, grey when off. A click opens the DAW SYNC settings
+    x -= 5;
+    tbsyncx = x;
+    printtext(x, 0, (gtsync_following() ? 13 : gtsync_enabled ? fg_active : fg_inactive) + 16, "SYNC");
+#endif
 
     if (!strlen(loadedsongfilename))
       sprintf(textbuffer, "%s", programname);
@@ -542,6 +568,13 @@ void retro_printtitlebar(void)
 // between the tracker and the SID designer
 void retro_titlebarclick(int x)
 {
+#ifdef GT_PLUGIN
+  if ((tbsyncx >= 0) && (x >= tbsyncx) && (x <= tbsyncx + 3))
+  {
+    gui_opendawsync();
+    return;
+  }
+#endif
   if ((x >= TB_FV) && (x <= TB_FV + 1))
   {
     undoCreateEditorInfoBackup();

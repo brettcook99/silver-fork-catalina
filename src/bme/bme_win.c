@@ -34,9 +34,23 @@ int win_openwindow(char *appname, char *icon)
 
     if (!win_windowinitted)
     {
+#ifdef GT_PLUGIN
+        // Plugin: the window is drawn into memory (SDL's offscreen driver
+        // and software renderer), the host plays the audio. SDL leaves the
+        // host's signal handlers alone, and SDL_Quit() is called when the
+        // plugin closes (not with atexit(): that would run when the host
+        // unloads the library)
+        SDL_SetHint(SDL_HINT_VIDEODRIVER, "offscreen");
+        SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
+        SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+        if (SDL_Init(SDL_INIT_VIDEO) < 0)
+            return BME_ERROR;
+#else
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) < 0)
             return BME_ERROR;
         atexit(SDL_Quit);
+#endif
         win_windowinitted = 1;
     }
     return BME_OK;

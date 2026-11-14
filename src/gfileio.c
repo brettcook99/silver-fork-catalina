@@ -6,6 +6,9 @@
 #define GFILEIO_C
 
 #include "goattrk2.h"
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+#endif
 #include "gui/gui.h"
 #include "gmacfile.h"
 #include "gfermatax.h"
@@ -119,6 +122,11 @@ static void setsongpath(const char *path)
 
 static void tempfilename(const char *name, char *out, int outsize)
 {
+#ifdef GT_PLUGIN
+  // Other plugin instances have files of their own
+  gtplugin_tempname(name, out, outsize);
+  return;
+#endif
   char *tempdir = getenv("TMPDIR");
 
   if ((!tempdir) || (!tempdir[0])) tempdir = getenv("TEMP");
@@ -954,7 +962,7 @@ char *gt_folder(int kind)
   return songpath;
 }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GT_PLUGIN)
 // The folder of a file chosen in a dialog is used next time
 static void rememberfolder(int kind, const char *path)
 {
@@ -967,7 +975,7 @@ static void rememberfolder(int kind, const char *path)
 
 int filedialog_open(int kind, const char *title, const char *exts, char *path, int pathsize)
 {
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GT_PLUGIN)
   char *folder = gt_folder(kind);
 
   if (!macfile_open(title, exts, folder[0] ? folder : NULL, path, pathsize)) return 0;
@@ -997,7 +1005,7 @@ int filedialog_open(int kind, const char *title, const char *exts, char *path, i
 
 int filedialog_folder(const char *title, const char *startdir, char *path, int pathsize)
 {
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GT_PLUGIN)
   return macfile_folder(title, ((startdir) && (startdir[0])) ? startdir : NULL, path, pathsize);
 #else
   // The classic file selector can only pick files: any instrument in the
@@ -1017,7 +1025,7 @@ int filedialog_folder(const char *title, const char *startdir, char *path, int p
 
 int filedialog_save(int kind, const char *title, const char *ext, const char *suggestedname, char *path, int pathsize)
 {
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GT_PLUGIN)
   char *folder = gt_folder(kind);
 
   if (!macfile_save(title, ext, suggestedname, folder[0] ? folder : NULL, path, pathsize)) return 0;

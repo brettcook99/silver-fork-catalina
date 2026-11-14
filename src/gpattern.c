@@ -305,7 +305,7 @@ void patterncommands(void)
     // MIDI INPUT 2-3 PATTERNS the notes go to 2-3 channels (see midichord)
     if (midinoteon)
     {
-      if (midichord <= 1) newnote = midinoteon;
+      if ((midichord <= 1) && (!midinoterouted)) newnote = midinoteon;
       else midipolynote(midinoteon);
     }
     // DEL clears the note (a rest; with SHIFT the command too). It used to

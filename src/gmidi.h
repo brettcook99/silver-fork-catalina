@@ -23,6 +23,13 @@ int midi_getevent(int *note);
 // midi_getevent() returned last
 int midi_eventvalue(void);
 
+// The MIDI channel (0-15) of the event midi_getevent() returned last
+int midi_eventchannel(void);
+
+// Queues an event as if it came from a MIDI device (the plugin's MIDI from
+// the host). Safe from one other thread
+void midi_pushevent_ch(int type, int channel, int data1, int data2);
+
 // When the event midi_getevent() returned last arrived, in milliseconds
 // (SDL_GetTicks())
 unsigned midi_eventtime(void);

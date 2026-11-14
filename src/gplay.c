@@ -92,8 +92,23 @@ void initchannels(void)
   }
 }
 
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+// While the playback follows the host's transport the play commands of the
+// user interface do nothing
+static int uiblocked(void)
+{
+  if (!gtsync_uiblocked()) return 0;
+  gui_message("Following the DAW's transport: start and stop it there");
+  return 1;
+}
+#endif
+
 void initsong(int num, int mode)
 {
+#ifdef GT_PLUGIN
+  if (uiblocked()) return;
+#endif
   sound_suspend();
   songinit = PLAY_STOPPED;
   psnum = num;
@@ -104,6 +119,9 @@ void initsong(int num, int mode)
 
 void initsongpos(int num, int mode, int pattpos)
 {
+#ifdef GT_PLUGIN
+  if (uiblocked()) return;
+#endif
   sound_suspend();
   songinit = PLAY_STOPPED;
   psnum = num;
@@ -114,6 +132,9 @@ void initsongpos(int num, int mode, int pattpos)
 
 void stopsong(void)
 {
+#ifdef GT_PLUGIN
+  if (uiblocked()) return;
+#endif
   if (songinit != PLAY_STOPPED)
   {
     sound_suspend();
@@ -471,6 +492,8 @@ void playroutine(void)
         if (!cptr->jamtime) jam = 1;
       }
 
+      if (cptr->rowframe < 0xff) cptr->rowframe++;
+
       // Decrease tick
       cptr->tick--;
       if (!cptr->tick) goto TICK0;
@@ -487,6 +510,7 @@ void playroutine(void)
           cptr->tick = funktable[cptr->tempo];
           cptr->tempo ^= 1;
         }
+        cptr->rowlen = cptr->tick + 1;
         // Check for illegally high gatetimer and stop the song in this case
         if (chn->gatetimer > cptr->tick)
           stopsong();
@@ -526,6 +550,18 @@ void playroutine(void)
       TICK0:
       // Advance in sequencer
       sequencer(c, cptr);
+
+      // The row read before starts now
+      if (cptr->readvalid)
+      {
+        cptr->playpatt = cptr->readpatt;
+        cptr->playrow = cptr->readrow;
+        cptr->playtrans = cptr->readtrans;
+        cptr->playvalid = 1;
+        cptr->readvalid = 0;
+      }
+      cptr->rowframe = 0;
+      cptr->rowlen = (cptr->tempo >= 2) ? cptr->tempo + 1 : funktable[cptr->tempo & 1] + 1;
 
       // A played note starting on a row goes before the pattern's note
       if (jam)
@@ -1050,6 +1086,16 @@ void playroutine(void)
         int first, last;
 
         newnote = pattern[cptr->pattnum][cptr->pattptr];
+        cptr->readpatt = cptr->pattnum;
+        cptr->readrow = row;
+        cptr->readtrans = cptr->trans;
+        cptr->readvalid = 1;
+        // A recorded note that has been played already
+        if ((cptr->skipvalid) && (cptr->skippatt == cptr->pattnum) && (cptr->skiprow == row))
+        {
+          cptr->skipvalid = 0;
+          if (newnote <= LASTNOTE) newnote = REST;
+        }
         if (pattern[cptr->pattnum][cptr->pattptr+1])
           cptr->instr = pattern[cptr->pattnum][cptr->pattptr+1];
         cptr->newcommand = pattern[cptr->pattnum][cptr->pattptr+2];
@@ -1188,4 +1234,72 @@ void sequencer(int c, CHN *cptr)
       cptr->songptr = editorUndoInfo.editorInfo[c].espos;
   }
   SEQDONE: {}
+}
+
+double playframesperrow(void)
+{
+  if (chn[0].tempo >= 2) return chn[0].tempo + 1;
+  return (funktable[0] + 1 + funktable[1] + 1) / 2.0;
+}
+
+int playstartframes(void)
+{
+  return editorInfo.multiplier ? 6 * editorInfo.multiplier - 1 : 6 - 1;
+}
+
+void playerreset(void)
+{
+  unsigned char mute[MAX_CHN];
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++) mute[c] = chn[c].mute;
+  initchannels();
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    chn[c].mute = mute[c];
+    jumpto[c] = -1;
+  }
+  filterctrl = 0;
+  filtertype = 0;
+  filtercutoff = 0;
+  filtertime = 0;
+  filterptr = 0;
+  masterfader = 0x0f;
+  memset(sidreg, 0, NUMSIDREGS);
+  songinit = PLAY_STOPPED;
+  startpattpos = 0;
+}
+
+void playerstartsong(int num)
+{
+  psnum = num;
+  startpattpos = 0;
+  songinit = PLAY_BEGINNING;
+}
+
+int playnextpattern(int c, int *patt, int *trans)
+{
+  const unsigned char *ol;
+  int sp, tr;
+
+  if ((c < 0) || (c >= MAX_CHN) || (playloop)) return 0;
+  ol = songorder[psnum][c];
+  sp = chn[c].songptr;
+  tr = chn[c].trans;
+  if (sp >= MAX_SONGLEN) return 0;
+  if (ol[sp] == LOOPSONG)
+  {
+    sp = ol[sp + 1];
+    if (sp >= songlen[psnum][c]) return 0;
+  }
+  if ((ol[sp] >= TRANSDOWN) && (ol[sp] < LOOPSONG))
+  {
+    tr = ol[sp] - TRANSUP;
+    sp++;
+  }
+  if ((ol[sp] >= REPEAT) && (ol[sp] < TRANSDOWN)) sp++;
+  if (ol[sp] >= MAX_PATT) return 0;
+  *patt = ol[sp];
+  *trans = tr;
+  return 1;
 }

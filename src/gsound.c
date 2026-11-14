@@ -83,6 +83,40 @@ int catweaselfd = -1;
 
 #endif
 
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+
+// The plugin: the host plays the sound (plugin/gtplugin_audio.c renders
+// it). The SID is made again at the host's mixing rate
+int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsigned model, unsigned ntsc, unsigned multiplier, unsigned catweasel, unsigned interpolate, unsigned customclockrate)
+{
+  (void)b;
+  (void)mr;
+  (void)writer;
+  (void)hardsid;
+  (void)catweasel;
+  if (multiplier) framerate = (ntsc ? NTSCFRAMERATE : PALFRAMERATE) * multiplier;
+  else framerate = (ntsc ? NTSCFRAMERATE : PALFRAMERATE) / 2;
+  initted = gtplugin_soundinit(model, ntsc, multiplier, interpolate, customclockrate);
+  return initted;
+}
+
+void sound_uninit(void)
+{
+  initted = 0;
+  gtplugin_sounduninit();
+}
+
+void sound_suspend(void)
+{
+}
+
+void sound_flush(void)
+{
+}
+
+#else
+
 int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsigned model, unsigned ntsc, unsigned multiplier, unsigned catweasel, unsigned interpolate, unsigned customclockrate)
 {
   int c;
@@ -356,6 +390,8 @@ void sound_flush(void)
   SDL_UnlockMutex(flushmutex);
   #endif
 }
+
+#endif
 
 Uint32 sound_timer(Uint32 interval, void *param)
 {

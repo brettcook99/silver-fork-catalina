@@ -5,6 +5,9 @@
 #define GSONG_C
 
 #include "goattrk2.h"
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+#endif
 
 INSTR instr[MAX_INSTR];
 unsigned char ltable[MAX_TABLES][MAX_TABLELEN];
@@ -174,7 +177,23 @@ int saveinstrument(void)
   return 0;
 }
 
+static void loadsongfile(void);
+
 void loadsong(void)
+{
+#ifdef GT_PLUGIN
+  // The plugin's audio thread doesn't play the song while it changes, and
+  // follows the host's position again after it
+  gtplugin_lockengine();
+  loadsongfile();
+  gtplugin_unlockengine();
+  gtsync_requestresync();
+#else
+  loadsongfile();
+#endif
+}
+
+static void loadsongfile(void)
 {
   int c;
   int ok = 0;

@@ -8,6 +8,23 @@
 #include "membuf.h"
 #include "parse.h"
 
+#ifdef GT_PLUGIN
+#include <setjmp.h>
+// The assembler (asm/) calls exit() on errors. In a plugin that would end
+// the host: the plugin's build makes those calls come here (plugin/gtexit.h),
+// back to the relocator, which shows an error instead
+static jmp_buf asmerrorjump;
+static int asmerrorjumpset = 0;
+
+void gtplugin_exit(int code)
+{
+  if (asmerrorjumpset) longjmp(asmerrorjump, code ? code : 1);
+  // Not from the assembler: stop this thread's work for good rather than
+  // the host
+  for (;;) SDL_Delay(1000);
+}
+#endif
+
 char *playeroptname[] =
 {
   "Buffered SID-writes",
@@ -1420,7 +1437,18 @@ void relocator(void)
   } */
 
   // Assemble; on error fail in a rude way (the parser does so too)
+#ifdef GT_PLUGIN
+  asmerrorjumpset = 1;
+  if ((setjmp(asmerrorjump)) || (assemble(&src, &dest)))
+  {
+    asmerrorjumpset = 0;
+    gui_alert("Export failed", "The player could not be assembled.");
+    goto PRCLEANUP;
+  }
+  asmerrorjumpset = 0;
+#else
   if (assemble(&src, &dest)) exit(1);
+#endif
 
   packeddata = (unsigned char*)membuf_get(&dest);
   packedsize = membuf_memlen(&dest);

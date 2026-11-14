@@ -5,3 +5,4 @@ build-macos/
 GoatTracker2.app/
 GoatTracker Ultimate.app/
 src/tests/sid2sng/build/
+build-plugin/

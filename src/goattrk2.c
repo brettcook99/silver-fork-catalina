@@ -26,6 +26,9 @@
 #include "bme.h"
 #include "gui/gui.h"
 #include "gmacfile.h"
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+#endif
 
 static void mainloopframe(void);
 static void retromainloop(void);
@@ -59,6 +62,9 @@ int midichordchn = 0;
 int midichordrow = 0;
 int midichordfirst = 1;
 int midichordmask = 0;
+// Nonzero while the MIDI note goes to the voice of its MIDI channel
+// (plugin: channels 1-3 to voices 1-3, see DAW SYNC)
+int midinoterouted = 0;
 int followplay = 0;
 int followmode = 1;
 int hexnybble = -1;
@@ -189,7 +195,12 @@ static int isfolder(const char *path)
 	return (st.st_mode & S_IFDIR) != 0;
 }
 
+#ifdef GT_PLUGIN
+// The plugin's GoatTracker thread runs this (plugin/gtplugin.c)
+int gt_main(int argc, char **argv)
+#else
 int main(int argc, char **argv)
+#endif
 {
 	char filename[MAX_PATHNAME];
 	char startfile[MAX_PATHNAME];
@@ -219,7 +230,10 @@ int main(int argc, char **argv)
 	io_openlinkeddatafile(datafile);
 
 	// Load configuration
-#ifdef __WIN32__
+#ifdef GT_PLUGIN
+	// The plugin's own folder (in a host the program file is the host's)
+	gtplugin_configpath("goattrk2.cfg", filename, MAX_PATHNAME);
+#elif defined(__WIN32__)
 	GetModuleFileName(NULL, filename, MAX_PATHNAME);
 	filename[strlen(filename) - 3] = 'c';
 	filename[strlen(filename) - 2] = 'f';
@@ -509,6 +523,13 @@ int main(int argc, char **argv)
 	// not chosen again. -u (or SHIFT / OPTION held at startup) chooses
 	if ((uiarg >= UI_ASK) && (uiarg <= UI_RETRO)) uimode = uiarg;
 	else uimode = UI_RETRO;
+#ifdef GT_PLUGIN
+	// The plugin: always retro, no hardware SID output
+	uimode = UI_RETRO;
+	hardsid = 0;
+	catweasel = 0;
+	writer = 0;
+#endif
 	if (retrogradient) retrogradient = 1;
 
 	// removing 'usefinevib' since it's not actually being used and is
@@ -573,15 +594,21 @@ int main(int argc, char **argv)
 		gui_alert("Sound init failed", "GoatTracker runs without sound. Notice that the song timer won't start.");
 	}
 
-	// Open MIDI input devices
+#ifndef GT_PLUGIN
+	// Open MIDI input devices (the plugin gets its MIDI from the host)
 	if (midiinput)
 		midi_init();
+#endif
 
 	// Open and play the file given on the command line, if any (also a file
 	// double-clicked on Windows). Files opened from the macOS Finder arrive as
 	// drop events instead, and are played too
 	if (startfile[0])
 		runcommand(GTCMD_OPENFILEPLAY, startfile);
+
+#ifdef GT_PLUGIN
+	gtplugin_started();
+#endif
 
 	// Start editor mainloop
 	if (retromode)
@@ -605,7 +632,9 @@ int main(int argc, char **argv)
 	midi_uninit();
 
 	// Save configuration
-#ifndef __WIN32__
+#ifdef GT_PLUGIN
+	gtplugin_configpath("goattrk2.cfg", filename, MAX_PATHNAME);
+#elif !defined(__WIN32__)
 #ifdef __amigaos__
 	strcpy(filename, "PROGDIR:goattrk2.cfg");
 #else
@@ -798,7 +827,9 @@ static void mainloopframe(void)
 // starts
 static int startupmodifierheld(void)
 {
-#ifdef __APPLE__
+#ifdef GT_PLUGIN
+	return 0;
+#elif defined(__APPLE__)
 	return macfile_modifiersheld();
 #elif defined(__WIN32__)
 	return (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
@@ -815,11 +846,16 @@ static int chooseinterface(void)
 {
 	int choice = uimode;
 
+#ifdef GT_PLUGIN
+	// The plugin: always the retro interface
+	choice = UI_RETRO;
+#else
 	if ((choice == UI_ASK) || (startupmodifierheld()))
 	{
 		choice = gui_chooseinterface(choice == UI_MODERN ? UI_MODERN : UI_RETRO);
 		if (choice == UI_ASK) return 0;
 	}
+#endif
 	uimode = choice;
 	retromode = (choice == UI_RETRO);
 	gui_setretro(retromode);
@@ -1070,7 +1106,7 @@ void docommand(void)
 		undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST_LEN, 0, UNDO_AREA_DIRTY_CHECK);
 		// The notes of a MIDI chord go to the other channels' patterns too,
 		// so does a note nudged to the next track (CTRL+LEFT/RIGHT)
-		if (((midinoteon) && (midichord > 1)) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))))
+		if (((midinoteon) && ((midichord > 1) || (midinoterouted))) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))))
 		{
 			for (int i = 0;i < MAX_CHN;i++)
 				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[i].epnum, UNDO_AREA_DIRTY_CHECK);
@@ -1254,7 +1290,40 @@ static void midichordassign(void)
 {
 	int note = midinoteon;
 
+	midinoterouted = 0;
 	if ((note < 0) || (note > LASTNOTE)) return;
+
+#ifdef GT_PLUGIN
+	// MIDI channels 1-3: the voice of the channel, on the cursor's row.
+	// Notes struck together (a chord across the channels) go on one row
+	if ((gtsync_route) && (midinotechannel >= 0) && (midinotechannel < MAX_CHN))
+	{
+		midinoterouted = 1;
+		if ((midiheldcount) && (chordnotes) && (midinotetime - chordtime <= MIDICHORDTIME))
+		{
+			midichordfirst = 0;
+			midichordrow = chordrow;
+			midichordmask = chordmask;
+		}
+		else
+		{
+			midichordfirst = 1;
+			midichordrow = editorInfo.eppos;
+			midichordmask = 0;
+			chordmask = 0;
+			chordnotes = 0;
+			chordrow = editorInfo.eppos;
+			chordtime = midinotetime;
+		}
+		midichordchn = midinotechannel;
+		chordmask |= 1 << midichordchn;
+		chordnotes++;
+		if (!midiheldchn[note]) midiheldcount++;
+		midiheldchn[note] = midichordchn + 1;
+		midichnnote[midichordchn] = note;
+		return;
+	}
+#endif
 
 	if (midichord <= 1)
 	{
@@ -1807,6 +1876,13 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_QUIT:
+#ifdef GT_PLUGIN
+		// The plugin ends when the host closes it (the song is saved with
+		// the host's project)
+		if (gtplugin_quitting()) exitprogram = 1;
+		else gui_message("GoatTracker closes with the DAW project (the song is saved in it)");
+		break;
+#endif
 		if (gui_asksavechanges(cmd, NULL)) break;
 		exitprogram = 1;
 		break;

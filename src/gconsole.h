@@ -99,6 +99,7 @@ extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shif
 extern int midinoteon, midinoteoff;
 // When the MIDI note event arrived (milliseconds, SDL_GetTicks())
 extern unsigned midinotetime;
+extern int midinotechannel;
 extern int menucommand;
 extern int mouseb, prevmouseb;
 extern int mousewheel;
