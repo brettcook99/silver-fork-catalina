@@ -131,14 +131,44 @@ jobs:
           killall -9 AudioComponentRegistrar 2>/dev/null || true
           auval -v aumu Gtk2 Gtul
 
+      # Artifacts don't keep file permissions (the plugin binaries must stay
+      # executable): the bundles go into a zip made with ditto
+      - name: Package
+        run: |
+          set -euo pipefail
+          out=build/shell/GoatTrackerUltimate_artefacts/Release
+          pkg="build/package/GoatTracker Ultimate plugin"
+          mkdir -p "$pkg"
+          for b in "$out"/VST3/*.vst3 "$out"/AU/*.component "$out"/AAX/*.aaxplugin; do
+            [ -e "$b" ] || continue
+            ditto "$b" "$pkg/$(basename "$b")"
+          done
+          cat > "$pkg/INSTALL.txt" <<'EOF'
+          GoatTracker Ultimate plugin for macOS 10.15 or later (Intel and Apple Silicon)
+
+          VST3 (LUNA, Cubase, Reaper, Bitwig ...): copy "GoatTracker Ultimate.vst3" to
+            ~/Library/Audio/Plug-Ins/VST3
+          AU (LUNA, Logic, GarageBand): copy "GoatTracker Ultimate.component" to
+            ~/Library/Audio/Plug-Ins/Components
+          AAX (Pro Tools), when included: copy "GoatTracker Ultimate.aaxplugin" to
+            /Library/Application Support/Avid/Audio/Plug-Ins
+          Then let the DAW rescan its plugins (restart Logic for a new AU).
+
+          The plugins are signed ad hoc (not by an identified developer). If this
+          zip came through a web browser, remove the quarantine flag after copying:
+            xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"GoatTracker Ultimate.vst3"
+            xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"GoatTracker Ultimate.component"
+
+          The plugin shares its settings with the standalone program (~/.goattrk).
+          EOF
+          ditto -c -k --keepParent "$pkg" build/package/GoatTrackerUltimate-plugin-macos.zip
+          unzip -l build/package/GoatTrackerUltimate-plugin-macos.zip | tail -3
+
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
           name: GoatTrackerUltimate-plugin-macos
-          path: |
-            build/shell/GoatTrackerUltimate_artefacts/Release/VST3
-            build/shell/GoatTrackerUltimate_artefacts/Release/AU
-            build/shell/GoatTrackerUltimate_artefacts/Release/AAX
+          path: build/package/GoatTrackerUltimate-plugin-macos.zip
           if-no-files-found: error
 
       - name: Upload the test output
