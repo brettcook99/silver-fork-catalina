@@ -97,6 +97,8 @@ extern int textscreenmousex, textscreenmousey;
 
 extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shiftonlypressed, cursorflashdelay;
 extern int midinoteon, midinoteoff;
+// The sustain pedal (MIDI CC 64) was pressed: a keyoff
+extern int midikeyoff;
 // When the MIDI note event arrived (milliseconds, SDL_GetTicks())
 extern unsigned midinotetime;
 extern int midinotechannel;

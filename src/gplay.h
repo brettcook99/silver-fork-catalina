@@ -84,6 +84,8 @@ extern unsigned char freqtbllo[];
 extern unsigned char freqtblhi[];
 extern int lastsonginit;
 #endif
+// SPACE / numpad 0 started the playback (see playstopreturn())
+extern int playreturnpoint;
 
 void initchannels(void);
 void initsong(int num, int playmode);

@@ -2961,7 +2961,7 @@ void gui::designerkey(const SDL_KeyboardEvent &k, bool down)
   switch (sym)
   {
     case SDLK_ESCAPE: if (!k.repeat) cmd_post(GTCMD_DESIGNER); return;
-    case SDLK_F1: if (!k.repeat) cmd_post(GTCMD_PLAYSONG); return;
+    case SDLK_F1: if (!k.repeat) cmd_post(GTCMD_PLAYPATTSTART); return;
     case SDLK_F2: if (!k.repeat) cmd_post(GTCMD_PLAYPOS); return;
     case SDLK_F3: if (!k.repeat) cmd_post(GTCMD_PLAYPATTERN); return;
     case SDLK_F4: if (!k.repeat) cmd_post(GTCMD_STOP); return;

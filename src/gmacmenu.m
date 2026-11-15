@@ -265,7 +265,9 @@ void macmenu_init(void)
 
     control = newmenu(@"Control");
     additem(control, @"Play / Stop", @" ", 0, GTCMD_PLAYSTOP);
-    addfkeyitem(control, @"Play From Beginning", 1, 0, GTCMD_PLAYSONG);
+    addfkeyitem(control, @"Play From Pattern Start", 1, 0, GTCMD_PLAYPATTSTART);
+    additem(control, @"Play From Beginning", @"", 0, GTCMD_PLAYSONG);
+    additem(control, @"Go to Song Start", @"", 0, GTCMD_SONGSTART);
     addfkeyitem(control, @"Play From Current Position", 2, 0, GTCMD_PLAYPOS);
     addfkeyitem(control, @"Play Pattern", 3, 0, GTCMD_PLAYPATTERN);
     addfkeyitem(control, @"Stop", 4, 0, GTCMD_STOP);

@@ -39,7 +39,9 @@ static void midichordassign(void);
 
 int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
-int recordmode = 1;
+// Edit mode (notes are entered) or jam mode (0: notes are only played). The
+// program starts in jam mode
+int recordmode = 0;
 
 // MIDI input (MIDI INPUT 1-3 PATTERNS). With 2 or 3 the MIDI notes go to
 // that many channels, from the cursor's channel on (after channel 3 comes
@@ -882,7 +884,7 @@ static void retromainloop(void)
 			displayupdate();
 			getkey();
 			macmenu_setstate(recordmode, followmode);
-			if ((rawkey) || (key) || (mouseb) || (mousewheel) || (midinoteon) || (midinoteoff) || (menucommand))
+			if ((rawkey) || (key) || (mouseb) || (mousewheel) || (midinoteon) || (midinoteoff) || (midikeyoff) || (menucommand))
 			{
 				input = 1;
 				break;
@@ -893,7 +895,7 @@ static void retromainloop(void)
 
 		if ((input) && (!exitprogram))
 		{
-			int midi = (midinoteon) || (midinoteoff);
+			int midi = (midinoteon) || (midinoteoff) || (midikeyoff);
 
 			converthex();
 			docommand();
@@ -957,7 +959,7 @@ void waitkeymouse(void)
 		if ((rawkey) || (key)) break;
 		if (win_quitted) break;
 		if (mouseb) break;
-		if ((midinoteon) || (midinoteoff)) break;
+		if ((midinoteon) || (midinoteoff) || (midikeyoff)) break;
 		if (menucommand) break;
 	}
 
@@ -1025,6 +1027,7 @@ void toggle_interpolation_mode() {
 // SPACE starts playing from the cursor / stops, in every editor except where
 // text is typed (the song name, author & copyright and the instrument name).
 // In the orderlist the playback starts at the position under the cursor.
+// Stopping puts the editor back where the playback started (as in a DAW).
 // SHIFT+SPACE plays without following. Returns nonzero if it was SPACE
 static int spacecommand(void)
 {
@@ -1038,12 +1041,8 @@ static int spacecommand(void)
 		if (editorInfo.editmode == EDIT_ORDERLIST) playfromrow(0, 0);
 		else playfromcursor(0);
 	}
-	else if (isplaying())
-		stopsong();
-	else if (editorInfo.editmode == EDIT_ORDERLIST)
-		playfromrow(0, followmode);
 	else
-		playfromcursor(followmode);
+		playstopreturn(followmode, editorInfo.editmode == EDIT_ORDERLIST);
 	followsuspended = 0;
 	key = 0;
 	rawkey = 0;
@@ -1174,8 +1173,9 @@ int menucommands(void)
 // Numpad keys:
 // - CTRL + numpad 1-3 = put the cursor on track (channel) 1-3 in the pattern
 //   editor, from any editor
-// - Numpad 0 = play from the start of the pattern / stop (SHIFT: play the
-//   other follow way, like SHIFT+F1-F3)
+// - Numpad 0 = play from the cursor / stop, like SPACE: stopping puts the
+//   editor back where the playback started (SHIFT: play the other follow
+//   way, like SHIFT+F1-F3)
 // - Numpad 1-8 = go to pattern row 0, 8, 16, 24, 32, 40, 48 or 56 in the
 //   pattern editor
 // - Numpad . = switch between edit mode and jam mode
@@ -1203,7 +1203,8 @@ int numpadcommands(void)
 
 	if (rawkey == KEY_KP0)
 	{
-		playstoppattern(followmode ^ shiftonlypressed);
+		playstopreturn(followmode ^ shiftonlypressed, 0);
+		followsuspended = 0;
 		key = 0;
 		rawkey = 0;
 		return 1;
@@ -1554,9 +1555,9 @@ void generalcommands(void)
 		break;
 
 	case KEY_F1:
-		initsong(editorInfo.esnum, PLAY_BEGINNING);
-		followplay = followmode ^ shiftpressed;
-		followsuspended = 0;
+		// From the start of the current pattern (the patterns shown in the
+		// pattern editor). RETURN goes to the song's start
+		playpatternstart(followmode ^ shiftpressed);
 		break;
 
 	case KEY_F2:
@@ -1575,7 +1576,7 @@ void generalcommands(void)
 		if (shiftpressed)
 			mutechannel(editorInfo.epchn);
 		else
-			stopsong();
+			stopplayback();
 		break;
 
 	case KEY_F5:
@@ -1924,6 +1925,14 @@ void runcommand(int cmd, const char *path)
 		startplay(PLAY_BEGINNING);
 		break;
 
+	case GTCMD_PLAYPATTSTART:
+		playpatternstart(followmode);
+		break;
+
+	case GTCMD_SONGSTART:
+		gotosongstart();
+		break;
+
 	case GTCMD_PLAYPOS:
 		startplay(PLAY_POS);
 		break;
@@ -1938,7 +1947,7 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_STOP:
-		stopsong();
+		stopplayback();
 		break;
 
 	case GTCMD_PLAYSTOP:

@@ -76,7 +76,16 @@ int notekeytonote(int key);
 void playfromcursor(int follow);
 void playstop(void);
 void playfromrow(int row, int follow);
-void playstoppattern(int follow);
+// SPACE / numpad 0: play from the cursor (frompos: from row 0 of the
+// orderlist cursor's position) or stop; the editor goes back to where the
+// playback started when it is stopped
+void playstopreturn(int follow, int frompos);
+// Stops the playback (F4, SPACE...); see playstopreturn()
+void stopplayback(void);
+// F1: play from the start of the current pattern(s)
+void playpatternstart(int follow);
+// RETURN in the pattern editor: back to the song's start, stopped
+void gotosongstart(void);
 void patternjump(int row);
 void patternscroll(int steps);
 // Transposes the marked rows' notes (nothing marked: the cursor channel's

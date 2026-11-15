@@ -58,7 +58,7 @@ void gui::drawcontrolbar(float height)
 
   // Transport
   ImGui::SetCursorScreenPos(ImVec2(x, y));
-  if (iconbutton("##playsong", ICON_REWIND, playing && (lastsonginit == PLAY_BEGINNING), theme.chn[0], ImVec2(bw, bh), "Play from the beginning (F1)"))
+  if (iconbutton("##playsong", ICON_REWIND, playing && (lastsonginit == PLAY_BEGINNING), theme.chn[0], ImVec2(bw, bh), "Play from the beginning (RETURN goes to the start, F1 plays the pattern from its start)"))
     cmd_post(GTCMD_PLAYSONG);
   x += bw + 4.0f;
   ImGui::SetCursorScreenPos(ImVec2(x, y));
@@ -457,7 +457,9 @@ void gui::drawmenubar(void)
   if (ImGui::BeginMenu("Control"))
   {
     if (ImGui::MenuItem("Play / Stop", "SPACE")) cmd_post(GTCMD_PLAYSTOP);
-    if (ImGui::MenuItem("Play From Beginning", "F1")) cmd_post(GTCMD_PLAYSONG);
+    if (ImGui::MenuItem("Play From Pattern Start", "F1")) cmd_post(GTCMD_PLAYPATTSTART);
+    if (ImGui::MenuItem("Play From Beginning")) cmd_post(GTCMD_PLAYSONG);
+    if (ImGui::MenuItem("Go to Song Start", "RETURN")) cmd_post(GTCMD_SONGSTART);
     if (ImGui::MenuItem("Play From Current Position", "F2")) cmd_post(GTCMD_PLAYPOS);
     if (ImGui::MenuItem("Play Pattern", "F3")) cmd_post(GTCMD_PLAYPATTERN);
     if (ImGui::MenuItem("Stop", "F4")) cmd_post(GTCMD_STOP);

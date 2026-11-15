@@ -365,7 +365,8 @@ the instrument and [ ] the pattern.
 2.3.1 General keys
 ------------------
 
-F1        Play from beginning
+F1        Play from the start of the current pattern (RETURN goes to the start
+          of the song)
 F2        Play from current pos.
 F3        Play one pattern from current pos.
 F4        Stop playing & silence all sounds
@@ -377,7 +378,7 @@ F9        Pack, relocate & save PRG,SID etc.
 F10       Load song (Pattern/Song/Songname mode) or instrument (Instrument mode)
 F11       Save song (Pattern/Song/Songname mode) or instrument (Instrument mode)
 F12       Online help screen. Press F12 again to toggle context mode
-SHIFT+F1  Play from beginning /w follow play
+SHIFT+F1  Play from the start of the pattern /w follow play
 SHIFT+F2  Play from current pos. /w follow play
 SHIFT+F3  Play one pattern from current pos. /w follow play
 SHIFT+F4  Mute current channel
@@ -394,11 +395,13 @@ INS       Insert row (Press INS/DEL on endmark to change pattern/song length)
 DEL       Delete row
 SHIFT+ESC Optimize musicdata, or clear musicdata & set default pattern length
 ESC       Exit program
-NUMPAD 0  Play from the start of the pattern / stop
+NUMPAD 0  Play from the cursor / stop, like SPACE
 NUMPAD .  Switch between jam/editmode (also the middle mouse button; CMD+R no
           longer does)
 SPACE     Play from the cursor / stop, in every editor except the songname
-          editor and the instrument name (SHIFT+SPACE: play without following)
+          editor and the instrument name (SHIFT+SPACE: play without following).
+          Stopping (SPACE, NUMPAD 0, F4) puts the cursor back where the
+          playback started, as in a DAW (unless you scrolled away meanwhile)
 CTRL+SHIFT+mouse wheel Select the instrument, with the pointer anywhere
 CTRL+NUMPAD 1,2,3 Put the cursor on track (channel) 1, 2 or 3 in the pattern
           editor
@@ -413,14 +416,15 @@ ALT+NUMPAD 1,2,3 MIDI INPUT 1, 2 or 3 PATTERNS (OPTION on macOS)
 BACKQUOTE   Select channel
 0-9 & A-F   Enter parameters
 SPACE       Play from cursor position / stop
-RETURN      (also CAPSLOCK) Insert keyoff
+RETURN      Go to the start of the song (stops the playback), as in a DAW
+SUSTAIN PEDAL (MIDI CC 64) or CAPSLOCK Insert keyoff
+SHIFT+RET.  Insert keyon (on the note)
             Enter table (when cursor is over a table-utilizing command)
             Enter instrument (when cursor is over a nonzero instrument number)
-SHIFT+RET.  Insert keyon
-            Convert portamento/vibrato/funktempo old style parameter to a
-            speedtable entry (when cursor is over the command)
             Go into an empty table entry (when parameter is zero on a
             table-utilizing command)
+CTRL+SHIFT+RET. Convert portamento/vibrato/funktempo old style parameter to a
+            speedtable entry (when cursor is over the command)
 DEL         Clear: on the note a rest, on the instrument or command that
             (the cursor moves down)
 SHIFT+DEL   Insert rest and clear commands

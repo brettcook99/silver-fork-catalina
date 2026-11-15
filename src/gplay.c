@@ -55,6 +55,9 @@ int songinit = 0;
 // whole gate timer (often 2-3 frames, 40-60 ms) as a pattern note does
 #define JAMHRFRAMES 1
 int lastsonginit = 0;
+// SPACE / numpad 0 started the playback: the editor goes back there when it
+// is stopped (gpattern.c). Every other start of playback clears it
+int playreturnpoint = 0;
 int startpattpos = 0;
 int playloop = 0;
 // Positions channels jump to (playjump()), -1 = none
@@ -114,6 +117,7 @@ void initsong(int num, int mode)
   psnum = num;
   songinit = mode;
   startpattpos = 0;
+  playreturnpoint = 0;
   sound_flush();
 }
 
@@ -127,6 +131,7 @@ void initsongpos(int num, int mode, int pattpos)
   psnum = num;
   songinit = mode;
   startpattpos = pattpos;
+  playreturnpoint = 0;
   sound_flush();
 }
 

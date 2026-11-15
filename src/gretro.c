@@ -1582,7 +1582,7 @@ void retro_mousecommands(void)
       if ((mousex >= 17) && (mousex <= 26))
         retroplay(PLAY_PATTERN);
       if ((mousex >= 28) && (mousex <= 33))
-        stopsong();
+        stopplayback();
       if ((mousex >= 35) && (mousex <= 40))
         load();
       if ((mousex >= 42) && (mousex <= 47))
