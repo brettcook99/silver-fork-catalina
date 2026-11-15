@@ -308,19 +308,32 @@ void patterncommands(void)
       if (midichord <= 1) newnote = midinoteon;
       else midipolynote(midinoteon);
     }
+    // The sustain pedal (MIDI CC 64) pressed: a keyoff, as RETURN entered
+    // before (in any column, like a MIDI note)
+    if (midikeyoff) newnote = KEYOFF;
     // DEL clears the note (a rest; with SHIFT the command too). It used to
     // delete the row, which BACKSPACE does now (see below)
     if ((rawkey == KEY_DEL) && (!editorInfo.epcolumn)) newnote = REST;
     if ((rawkey == 0x14) && (!editorInfo.epcolumn)) newnote = KEYOFF;
+    // RETURN goes back to the start of the song without playing, as in a
+    // DAW. The keyoff it used to enter comes from the sustain pedal now (MIDI
+    // CC 64; CAPSLOCK still enters one too). What RETURN did in the other
+    // columns is SHIFT+RETURN's: go to the instrument / table, or with an
+    // empty table pointer make a new table entry. The vibrato / portamento
+    // parameter conversion (SHIFT+RETURN before) is CTRL+SHIFT+RETURN
+    if ((rawkey == KEY_ENTER) && (!shiftpressed))
+    {
+      gotosongstart();
+      return;
+    }
     if (rawkey == KEY_ENTER)
     {
+      int convert = (ctrlpressed) && (shiftonlypressed);
+
       switch(editorInfo.epcolumn)
       {
         case 0:
-        if (shiftpressed)
-          newnote = KEYON;
-        else
-          newnote = KEYOFF;
+        newnote = KEYON;
         break;
 
         case 1:
@@ -395,7 +408,7 @@ void patterncommands(void)
           case CMD_FUNKTEMPO:
           if (pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3])
           {
-            if (!shiftpressed)
+            if (!convert)
             {
               gototable(STBL, pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3] - 1);
               return;
@@ -426,7 +439,7 @@ void patterncommands(void)
           case CMD_TONEPORTA:
           if (pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3])
           {
-            if (!shiftpressed)
+            if (!convert)
             {
               gototable(STBL, pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3] - 1);
               return;
@@ -455,7 +468,7 @@ void patterncommands(void)
           case CMD_VIBRATO:
           if (pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3])
           {
-            if (!shiftpressed)
+            if (!convert)
             {
               gototable(STBL, pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+3] - 1);
               return;
@@ -1534,23 +1547,130 @@ void playfromrow(int row, int follow)
   followplay = follow;
 }
 
-// Starts playing from the pattern editor cursor, or stops if playing
-void playstop(void)
+// Where SPACE / numpad 0 started the playback: the song position, the
+// patterns shown and the row. When that playback is stopped the editor goes
+// back there, as in a DAW (playreturnpoint, gplay.c, is cleared by every
+// other start of playback)
+static int retesnum, reteseditpos, retesview, reteppos;
+static int retepnum[MAX_CHN];
+
+// Remembers where the playback starts: row of the patterns shown, or with
+// frompos row 0 of the patterns at the orderlist cursor's position
+static void setreturnpoint(int row, int frompos)
 {
-  if (isplaying())
-    stopsong();
-  else
-    playfromcursor(followmode);
+  int c, d;
+
+  retesnum = editorInfo.esnum;
+  reteseditpos = editorInfo.eseditpos;
+  retesview = editorInfo.esview;
+  reteppos = row;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    retepnum[c] = editorUndoInfo.editorInfo[c].epnum;
+    if (!frompos) continue;
+    for (d = editorInfo.eseditpos; d < songlen[editorInfo.esnum][c]; d++)
+    {
+      if (songorder[editorInfo.esnum][c][d] < MAX_PATT)
+      {
+        retepnum[c] = songorder[editorInfo.esnum][c][d];
+        break;
+      }
+    }
+  }
+  playreturnpoint = 1;
 }
 
-// Starts playing from the start of the patterns in the pattern editor, or
-// stops if playing
-void playstoppattern(int follow)
+// Stops the playback (SPACE, numpad 0, F4, the stop buttons). If SPACE or
+// numpad 0 started it and the editor has been following it, the editor goes
+// back to where it started
+void stopplayback(void)
 {
+  int back = (playreturnpoint) && (isplaying()) && (followplay) && (!followsuspended) && (retesnum == editorInfo.esnum);
+  int c;
+
+  playreturnpoint = 0;
+  stopsong();
+  if (!back) return;
+
+  // The view doesn't follow the last frames before the player stops
+  followplay = 0;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if ((retepnum[c] >= 0) && (retepnum[c] < MAX_PATT)) editorUndoInfo.editorInfo[c].epnum = retepnum[c];
+  }
+  editorInfo.eseditpos = reteseditpos;
+  editorInfo.esview = retesview;
+  if (editorInfo.eseditpos > songlen[editorInfo.esnum][editorInfo.eschn]) editorInfo.eseditpos = songlen[editorInfo.esnum][editorInfo.eschn];
+  editorInfo.eppos = reteppos;
+  if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
+    editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+  if (editorInfo.eppos < 0) editorInfo.eppos = 0;
+  editorInfo.epview = editorInfo.eppos-VISIBLEPATTROWS/2;
+}
+
+// SPACE (and numpad 0): starts playing from the pattern editor cursor (with
+// frompos from row 0 of the orderlist cursor's position), or stops if
+// playing. follow = the editor follows the playback. On stop the editor goes
+// back to where the playback started
+void playstopreturn(int follow, int frompos)
+{
+  int row = frompos ? 0 : editorInfo.eppos;
+
   if (isplaying())
+  {
+    stopplayback();
+    return;
+  }
+  if (frompos) playfromrow(0, follow);
+  else playfromcursor(follow);
+  if (isplaying()) setreturnpoint(row, frompos);
+}
+
+// Starts playing from the pattern editor cursor, or stops if playing (and
+// goes back to where it started, see playstopreturn())
+void playstop(void)
+{
+  playstopreturn(followmode, 0);
+}
+
+// F1: starts playing from the start of the patterns in the pattern editor
+// (the current pattern), whether playing or not
+void playpatternstart(int follow)
+{
+  playfromrow(0, follow);
+  followsuspended = 0;
+}
+
+// RETURN: back to the start of the song without playing, as in a DAW. The
+// playback stops; the orderlist and the pattern editor go to the subtune's
+// first position, row 0 (the F2 start positions stay)
+void gotosongstart(void)
+{
+  int c, d;
+
+  playreturnpoint = 0;
+  if (isplaying())
+  {
     stopsong();
-  else
-    playfromrow(0, follow);
+    followplay = 0;
+  }
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    for (d = 0; d < songlen[editorInfo.esnum][c]; d++)
+    {
+      if (songorder[editorInfo.esnum][c][d] < MAX_PATT)
+      {
+        editorUndoInfo.editorInfo[c].epnum = songorder[editorInfo.esnum][c][d];
+        break;
+      }
+    }
+  }
+  editorInfo.eseditpos = 0;
+  editorInfo.esview = 0;
+  editorInfo.eppos = 0;
+  editorInfo.epview = -VISIBLEPATTROWS/2;
+  followsuspended = 0;
+  gui_message("Song start");
 }
 
 // Moves the pattern editor cursor to a row (limited to the pattern length).

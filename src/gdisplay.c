@@ -62,6 +62,7 @@ void followplayback(void)
   if (!isplaying())
   {
     followsuspended = 0;
+    playreturnpoint = 0;
     return;
   }
   if ((!followplay) || (followsuspended)) return;

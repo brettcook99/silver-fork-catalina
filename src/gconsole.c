@@ -36,6 +36,11 @@ int metapressed = 0;
 int cursorflashdelay = 0;
 int midinoteon = 0;
 int midinoteoff = 0;
+// The sustain pedal (MIDI CC 64) was pressed down: a keyoff in the pattern
+// editor
+int midikeyoff = 0;
+// Whether the pedal is down
+static int midipedal = 0;
 unsigned midinotetime = 0;
 int menucommand = 0;
 int mouseb = 0;
@@ -279,6 +284,7 @@ int input_nextmidi(void)
 
   midinoteon = 0;
   midinoteoff = 0;
+  midikeyoff = 0;
 
   // MIDI note 60 (middle C) is C-4
   for (;;)
@@ -290,6 +296,22 @@ int input_nextmidi(void)
     // dropped
     if (event == MIDI_CONTROL)
     {
+      // CC 64 (sustain pedal): pressing it enters a keyoff, as RETURN did
+      // (the tracker only; releasing it does nothing)
+      if (midinote == 64)
+      {
+        int down = midi_eventvalue() >= 64;
+        int pressed = (down) && (!midipedal);
+
+        midipedal = down;
+        if ((pressed) && (!gui_designeractive()))
+        {
+          midikeyoff = 1;
+          midinotetime = midi_eventtime();
+          return 1;
+        }
+        continue;
+      }
       if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
       else if (midinote == 60) instrumentknob(midi_eventvalue());
       continue;
@@ -532,5 +554,6 @@ void getkey(void)
   hadkey = input_nextkey();
   midinoteon = 0;
   midinoteoff = 0;
+  midikeyoff = 0;
   if (!hadkey) input_nextmidi();
 }

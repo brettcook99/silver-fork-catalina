@@ -93,6 +93,8 @@ enum
   GTCMD_ABOUT,            // About GoatTracker Ultimate (Windows / Linux; macOS has its own)
   GTCMD_BROWSEFOLDER,     // Choose the folder of the SID designer's instrument browser
   GTCMD_IMPORTMIDINOW,    // Import the MIDI file given as path (from the import dialog)
+  GTCMD_PLAYPATTSTART,    // Play from the start of the current pattern (F1)
+  GTCMD_SONGSTART,        // Back to the song's start, stopped (RETURN)
 
   GTCMD_COUNT
 };

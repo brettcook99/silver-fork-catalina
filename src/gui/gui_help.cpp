@@ -59,7 +59,7 @@ static const HelpLine designerlines[] = {
 };
 
 static const HelpLine generallines[] = {
-  { "F1", "Play from the beginning" },
+  { "F1", "Play from the start of the current pattern" },
   { "F2", "Play from the current position" },
   { "F3", "Play the current pattern" },
   { "F4", "Stop (SHIFT+F4 mutes the current channel)" },
@@ -75,7 +75,7 @@ static const HelpLine generallines[] = {
   { "SHIFT+F7", "Hard restart ADSR" },
   { "SHIFT+F8", "Switch between 6581 and 8580" },
   { "SHIFT+F9", "Toggle reSID interpolation" },
-  { "NUMPAD 0", "Play from the start of the pattern / stop" },
+  { "NUMPAD 0", "Play from the cursor / stop, like SPACE" },
   { "NUMPAD .", "Edit mode / jam mode (the middle mouse button too)" },
   { "ALT+NUMPAD 1-3", "MIDI input on 1-3 tracks (OPTION on macOS)" },
   { "CTRL+NUMPAD 1-3", "Go to track 1 / 2 / 3 in the pattern editor" },
@@ -93,9 +93,11 @@ static const HelpLine generallines[] = {
 static const HelpLine patternlines[] = {
   { "Note keys", "Enter notes like on a piano (MIDI keyboard too)" },
   { "0-9, A-F", "Instrument number, command and its data" },
-  { "SPACE", "Play from the cursor / stop, in every panel but the song info (SHIFT+SPACE: without follow)" },
+  { "SPACE", "Play from the cursor / stop, in every panel but the song info (SHIFT+SPACE: without follow). Stopping puts the cursor back where the playback started" },
   { "DEL", "Clear the note (a rest; SHIFT: the command too), the instrument or the command" },
-  { "RETURN", "Keyoff (SHIFT+RETURN: keyon)" },
+  { "RETURN", "Go to the start of the song (stops the playback)" },
+  { "SUSTAIN PEDAL", "Keyoff (MIDI CC 64; CAPSLOCK too)" },
+  { "SHIFT+RETURN", "Keyon; on an instrument / table command: go there (CTRL+SHIFT+RETURN converts an old vibrato / portamento parameter)" },
   { "BACKSPACE", "Delete a row (on the end mark: shorten the pattern)" },
   { "CTRL+BACKSPACE / INS", "Insert a row (on the end mark: lengthen the pattern)" },
   { "CTRL+CURSOR", "Nudge the note (or the marked rows) up / down, or to the track left / right (CMD+CURSOR too on macOS)" },
