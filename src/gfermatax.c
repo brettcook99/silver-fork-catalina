@@ -391,3 +391,195 @@ int fermatax_import(const char *path, int slot, char *report, int reportsize)
     snprintf(report, reportsize, "%d instruments (one per oscillator) from %02X.%s", made, slot, notes);
   return made;
 }
+
+/*
+ * Export: an instrument (with the other oscillators of its patch) as a
+ * chipsynth C64 preset
+ */
+
+#include "gfermatax_init.h"
+
+#define MAX_OUTPARAMS 64
+
+typedef struct
+{
+  int id;
+  char value[32];
+} OUTPARAM;
+
+static OUTPARAM outparams[MAX_OUTPARAMS];
+static int numout;
+
+static void setout(int id, const char *value)
+{
+  int c;
+
+  for (c = 0; c < numout; c++)
+  {
+    if (outparams[c].id == id) break;
+  }
+  if (c == numout)
+  {
+    if (numout >= MAX_OUTPARAMS) return;
+    numout++;
+  }
+  outparams[c].id = id;
+  snprintf(outparams[c].value, sizeof outparams[c].value, "%s", value);
+}
+
+static void setouti(int id, int value)
+{
+  char text[16];
+
+  snprintf(text, sizeof text, "%d", value);
+  setout(id, text);
+}
+
+static int cmpout(const void *a, const void *b)
+{
+  return ((const OUTPARAM *)a)->id - ((const OUTPARAM *)b)->id;
+}
+
+// Oscillator n from instrument i: waveform, sync, ring and coarse tune from
+// its main wave row, the pulse width from its first pulse row, ADSR. Returns
+// the voices its filter part routes (bits), -1 if it has none
+static int exportosc(int n, int i, int *filtered)
+{
+  INSTR *p = &instr[i];
+  int base = 768 + 16 * n;
+  int wr = patch_waverow(i);
+  int pr = patch_pulserow(i);
+  int fr = patch_filterrow(i);
+  int waveform = 4;
+  int sync = 0, ring = 0, coarse = 0;
+
+  if (wr >= 0)
+  {
+    int l = ltable[WTBL][wr];
+    int r = rtable[WTBL][wr];
+    waveform = (l >> 4) & 0x0f;
+    sync = (l & 0x02) != 0;
+    ring = (l & 0x04) != 0;
+    if (r < 0x60) coarse = r;
+    else if (r < 0x80) coarse = r - 0x80;
+  }
+  else if ((p->firstwave >= 0x10) && (p->firstwave < 0xe0)) waveform = (p->firstwave >> 4) & 0x0f;
+
+  setouti(512 + 16 * n, 1);
+  setouti(base + 2, waveform);
+  if (sync) setouti(base + 5, 1);
+  if (ring) setouti(base + 6, 1);
+  if (coarse) setouti(512 + 16 * n + 5, coarse);
+  setouti(base + 7, p->ad >> 4);
+  setouti(base + 8, p->ad & 0x0f);
+  setouti(base + 9, p->sr >> 4);
+  setouti(base + 10, p->sr & 0x0f);
+  if (pr >= 0) setouti(base + 0, ((ltable[PTBL][pr] & 0x0f) << 8) | rtable[PTBL][pr]);
+  else if (waveform & 4) setouti(base + 0, DEF_PULSEWIDTH);
+
+  *filtered = 0;
+  if (fr < 0) return -1;
+  *filtered = 1;
+  return rtable[FTBL][fr] & 7;
+}
+
+int fermatax_export(const char *path, int ins, char *report, int reportsize)
+{
+  int osc[NUM_OSC] = { 0, 0, 0 };
+  char base[MAX_INSTRNAMELEN + 1];
+  int filterins = 0, route = 0;
+  int n, c, count = 0;
+  FILE *handle;
+
+  report[0] = 0;
+  if ((ins < 1) || (ins >= MAX_INSTR))
+  {
+    snprintf(report, reportsize, "Select an instrument first");
+    return 0;
+  }
+
+  // A patch of the SID designer ("NAME:1".."NAME:3"): its oscillators;
+  // otherwise the instrument is oscillator 1
+  if (patch_splitname(instr[ins].name, base))
+  {
+    for (n = 0; n < NUM_OSC; n++) osc[n] = patch_findosc(base, n + 1);
+  }
+  if ((!osc[0]) && (!osc[1]) && (!osc[2])) osc[0] = ins;
+
+  numout = 0;
+  for (c = 0; c < (int)(sizeof fermataxinitparams / sizeof fermataxinitparams[0]); c++)
+    setout(fermataxinitparams[c].id, fermataxinitparams[c].value);
+  if (!osc[0]) setouti(512, 0);
+
+  for (n = 0; n < NUM_OSC; n++)
+  {
+    int filtered, r;
+
+    if (!osc[n]) continue;
+    count++;
+    r = exportosc(n, osc[n], &filtered);
+    if ((filtered) && (!filterins))
+    {
+      filterins = osc[n];
+      route = r;
+    }
+  }
+
+  // The filter (one for all oscillators in chipsynth): from the first
+  // instrument with a filter part; the oscillators of the voices it routes
+  // go through it (oscillator n plays on voice n+1)
+  if (filterins)
+  {
+    int fr = patch_filterrow(filterins);
+    int cr = patch_cutoffrow(filterins);
+    int l = ltable[FTBL][fr];
+    int r = rtable[FTBL][fr];
+
+    setouti(866, r >> 4);
+    setouti(867, (l & 0x10) ? 1 : 0);
+    setouti(868, (l & 0x20) ? 1 : 0);
+    setouti(869, (l & 0x40) ? 1 : 0);
+    if (cr >= 0) setouti(865, rtable[FTBL][cr] << 3);
+    for (n = 0; n < NUM_OSC; n++)
+    {
+      if ((osc[n]) && (route & (1 << n))) setouti(768 + 16 * n + 11, 1);
+    }
+  }
+
+  // The SID: 8580 (Init) or 6581, and NTSC (PAL is the default)
+  setouti(1024, editorInfo.sidmodel ? 33 : 29);
+  if (editorInfo.ntsc) setouti(262, 1022727);
+
+  qsort(outparams, numout, sizeof outparams[0], cmpout);
+
+  handle = fopen(path, "wb");
+  if (!handle)
+  {
+    snprintf(report, reportsize, "Can't write %s", gt_basename(path));
+    return 0;
+  }
+  for (c = 0; c < (int)(sizeof fermataxinit / sizeof fermataxinit[0]); c++)
+  {
+    if (fermataxinit[c])
+    {
+      fputs(fermataxinit[c], handle);
+      fputc(10, handle);
+      continue;
+    }
+    for (n = 0; n < numout; n++)
+    {
+      fprintf(handle, "        <Param id=\"%d\" value=\"%s\" />", outparams[n].id, outparams[n].value);
+      fputc(10, handle);
+    }
+  }
+  if (fclose(handle))
+  {
+    snprintf(report, reportsize, "Can't write %s", gt_basename(path));
+    return 0;
+  }
+  if (count > 1)
+    snprintf(report, reportsize, "Exported %s: %d oscillators (the patch %s)", gt_basename(path), count, base);
+  else
+    snprintf(report, reportsize, "Exported %s", gt_basename(path));
+  return 1;
+}

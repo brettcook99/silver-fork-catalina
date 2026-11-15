@@ -86,6 +86,18 @@ int catweaselfd = -1;
 #ifdef GT_PLUGIN
 #include "plugin/gtplugin.h"
 
+// The song is run without sound (MIDI export): the host's audio thread
+// renders silence meanwhile
+void sound_lockplayer(void)
+{
+  gtplugin_lockengine();
+}
+
+void sound_unlockplayer(void)
+{
+  gtplugin_unlockengine();
+}
+
 // The plugin: the host plays the sound (plugin/gtplugin_audio.c renders
 // it). The SID is made again at the host's mixing rate
 int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsigned model, unsigned ntsc, unsigned multiplier, unsigned catweasel, unsigned interpolate, unsigned customclockrate)
@@ -380,6 +392,18 @@ void sound_suspend(void)
   suspendplayroutine = TRUE;
   SDL_UnlockMutex(flushmutex);
   #endif
+}
+
+// The song is run without sound (MIDI export): the sound callback waits
+// meanwhile (playroutine() called from elsewhere does nothing)
+void sound_lockplayer(void)
+{
+  SDL_LockAudio();
+}
+
+void sound_unlockplayer(void)
+{
+  SDL_UnlockAudio();
 }
 
 void sound_flush(void)

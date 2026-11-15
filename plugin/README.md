@@ -12,8 +12,12 @@ position, MIDI from the DAW's tracks, and files dragged onto its window.
 
 ## Using it
 
-- Put it on an instrument track. The song is saved in the DAW's project; the
-  tracker's own Load / Save still work for .sng files.
+- Put it on an instrument track. The song is saved in the DAW's project.
+- **LOAD, SAVE, IMPORT, EXPORT** on the blue title bar open dropdowns: load /
+  save a song or an instrument, import SID, MIDI or chipsynth C64 (.fermatax)
+  files, export SID (the packer / relocator), MIDI or .fermatax. The files are
+  chosen in the system's own file dialogs, and each kind of file starts in the
+  folder used last for it (remembered in goattrk2.cfg).
 - **DAW SYNC** (click `SYNC` in the title bar): while the DAW plays, the song
   plays from the DAW's position at the DAW's tempo. One pattern row is one
   highlight step (1/4 beat by default), so beat 1 of bar 1 is row 0 (the
@@ -22,12 +26,19 @@ position, MIDI from the DAW's tracks, and files dragged onto its window.
   stopped. At the song's own tempo (shown in the dialog) the song sounds
   exactly as in the standalone program; at another tempo the whole C64 frame
   clock follows the DAW's.
-- **MIDI**: channels 1, 2 and 3 play voices 1, 2 and 3. In edit mode, while the
-  song plays, the notes are recorded into the patterns at the rows playing
-  (note-offs as `---`; one recording pass is one undo step), so three MIDI
-  tracks on channels 1-3 record three voices at once. With the song stopped
-  they are entered at the cursor. Other channels and the CC knobs work as a
-  MIDI keyboard does in the standalone program.
+- **MIDI**: channels 1, 2 and 3 play voices 1, 2 and 3. The plugin starts in
+  jam mode. While the DAW records (DAW SYNC on), it switches to edit mode and
+  the notes are recorded into the patterns at the rows playing (note-offs as
+  `---`; one recording pass is one undo step), so three MIDI tracks on
+  channels 1-3 record three voices at once; when the DAW stops recording, or
+  starts playing without recording, it is back in jam mode. (A plugin can't
+  see a track's record button: the DAW sends a track's live MIDI only while
+  it is armed.) With the song stopped in edit mode the notes are entered at
+  the cursor. With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the MIDI
+  channel doesn't matter: the notes are shared out to 2 or 3 voices from the
+  cursor's (the next free one in turn), so one DAW track can play chords.
+  The sustain pedal (CC 64) enters a keyoff. Other channels and the CC knobs
+  work as a MIDI keyboard does in the standalone program.
 - **Drag & drop**: .sng, .ins, .mid, .sid and .fermatax files dropped on the
   window open as in the standalone program.
 - Settings (goattrk2.cfg, recent files) are in `%APPDATA%\GoatTracker Ultimate`

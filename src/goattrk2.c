@@ -26,6 +26,9 @@
 #include "bme.h"
 #include "gui/gui.h"
 #include "gmacfile.h"
+#include "gmidiexport.h"
+#include "gfermatax.h"
+#include "gpatch.h"
 #ifdef GT_PLUGIN
 #include "plugin/gtplugin.h"
 #endif
@@ -125,6 +128,11 @@ char instrpath[MAX_PATHNAME];
 char browserfolder[MAX_PATHNAME];
 char packedpath[MAX_PATHNAME];
 char importpath[MAX_PATHNAME];
+// The folders of the other kinds of imports and exports (gt_folder())
+char importmidipath[MAX_PATHNAME];
+char importpatchpath[MAX_PATHNAME];
+char exportmidipath[MAX_PATHNAME];
+char exportpatchpath[MAX_PATHNAME];
 // The folders read from the config file (see gt_folder())
 static char configfolder[FOLDER_KINDS][MAX_PATHNAME];
 
@@ -297,7 +305,7 @@ int main(int argc, char **argv)
 		getparam(configfile, (unsigned *)&followmode);
 		getparam(configfile, &textsizepercent);
 		getparam(configfile, &uimode);
-		for (c = 0; c < FOLDER_KINDS; c++)
+		for (c = 0; c < FOLDER_OLDKINDS; c++)
 			getpathparam(configfile, configfolder[c]);
 		getparam(configfile, &retrogradient);
 		for (c = 0; c < 3; c++)
@@ -316,6 +324,8 @@ int main(int argc, char **argv)
 			windowedxpos = (int)x;
 			windowedypos = (int)y;
 		}
+		for (c = FOLDER_OLDKINDS; c < FOLDER_KINDS; c++)
+			getpathparam(configfile, configfolder[c]);
 		fclose(configfile);
 
 		// A config file saved with an old default sound buffer gets the
@@ -326,6 +336,19 @@ int main(int argc, char **argv)
 	// Init pathnames. The file dialogs start in the folders used last time
 	initpaths();
 	strcpy(importpath, songpath);
+	for (c = FOLDER_OLDKINDS; c < FOLDER_KINDS; c++)
+		strcpy(gt_folder(c), songpath);
+	// Folders not saved yet: those of the older kinds they were part of
+	if ((strcmp(configfolder[FOLDER_IMPORT], "0")) && (isfolder(configfolder[FOLDER_IMPORT])))
+	{
+		strcpy(importmidipath, configfolder[FOLDER_IMPORT]);
+		strcpy(importpatchpath, configfolder[FOLDER_IMPORT]);
+	}
+	if ((strcmp(configfolder[FOLDER_EXPORT], "0")) && (isfolder(configfolder[FOLDER_EXPORT])))
+	{
+		strcpy(exportmidipath, configfolder[FOLDER_EXPORT]);
+		strcpy(exportpatchpath, configfolder[FOLDER_EXPORT]);
+	}
 	for (c = 0; c < FOLDER_KINDS; c++)
 	{
 		if ((strcmp(configfolder[c], "0")) && (isfolder(configfolder[c])))
@@ -702,8 +725,8 @@ int main(int argc, char **argv)
 			";Interface used last (1 = modern, 2 = retro; the program always starts retro)\n%d\n\n"
 			";Folder of the song file dialogs (0 = none)\n%s\n\n"
 			";Folder of the instrument file dialogs (0 = none)\n%s\n\n"
-			";Folder of the import dialogs: SID, MIDI, chipsynth (0 = none)\n%s\n\n"
-			";Folder of the export dialog (0 = none)\n%s\n\n"
+			";Folder of the SID import dialog (0 = none)\n%s\n\n"
+			";Folder of the SID / PRG / BIN export dialog (0 = none)\n%s\n\n"
 			";Retro screen background (0 = black, 1 = gradient)\n%d\n\n"
 			";Retro level meter colors at the bottom, middle and top ($AARRGGBB, AA = opacity)\n$%08X\n$%08X\n$%08X\n\n",
 			b,
@@ -767,6 +790,9 @@ int main(int argc, char **argv)
 			fprintf(configfile, "$%08X\n", retrometerpresets[c / 3][c % 3]);
 		fprintf(configfile, "\n;Folder of the SID designer's instrument browser (0 = none)\n%s\n\n", browserfolder[0] ? browserfolder : "0");
 		fprintf(configfile, ";Window position in windowed mode: saved (0 = no: centered), left, top\n%d\n%d\n%d\n\n", windowposset, windowedxpos, windowedypos);
+		fprintf(configfile, ";Folders of the MIDI import, chipsynth import, MIDI export and chipsynth export dialogs (0 = none)\n%s\n%s\n%s\n%s\n\n",
+			importmidipath[0] ? importmidipath : "0", importpatchpath[0] ? importpatchpath : "0",
+			exportmidipath[0] ? exportmidipath : "0", exportpatchpath[0] ? exportpatchpath : "0");
 		fclose(configfile);
 	}
 
@@ -1296,8 +1322,10 @@ static void midichordassign(void)
 
 #ifdef GT_PLUGIN
 	// MIDI channels 1-3: the voice of the channel, on the cursor's row.
-	// Notes struck together (a chord across the channels) go on one row
-	if ((gtsync_route) && (midinotechannel >= 0) && (midinotechannel < MAX_CHN))
+	// Notes struck together (a chord across the channels) go on one row.
+	// With MIDI INPUT 2-3 the channel doesn't matter: the notes are shared
+	// out as from a MIDI keyboard (below)
+	if ((gtsync_route) && (midichord <= 1) && (midinotechannel >= 0) && (midinotechannel < MAX_CHN))
 	{
 		midinoterouted = 1;
 		if ((midiheldcount) && (chordnotes) && (midinotetime - chordtime <= MIDICHORDTIME))
@@ -1792,7 +1820,7 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_IMPORTMIDI:
-		if (filedialog_open(FOLDER_IMPORT, "Import a MIDI file", "mid;midi", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_IMPORTMIDI, "Import a MIDI file", "mid;midi", newpath, MAX_PATHNAME))
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
@@ -1810,7 +1838,7 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_IMPORTPATCH:
-		if (filedialog_open(FOLDER_IMPORT, "Import a chipsynth C64 patch into the current instrument", "fermatax", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_IMPORTPATCH, "Import a chipsynth C64 patch into the current instrument", "fermatax", newpath, MAX_PATHNAME))
 			gt_importpatch(newpath);
 		break;
 
@@ -1849,6 +1877,58 @@ void runcommand(int cmd, const char *path)
 	case GTCMD_EXPORT:
 		stopsong();
 		gui_openexport();
+		break;
+
+	case GTCMD_EXPORTSID:
+		// The export dialog with the SID format (PRG / BIN can still be
+		// chosen there)
+		stopsong();
+		fileformat = FORMAT_SID;
+		gui_openexport();
+		break;
+
+	case GTCMD_EXPORTMIDI:
+		{
+			char suggest[MAX_PATHNAME];
+			char report[256];
+			const char *base = "Untitled";
+
+			if (loadedsongfilename[0]) base = gt_basename(loadedsongfilename);
+			else if (suggestedsongname[0]) base = suggestedsongname;
+			gt_replaceext(base, ".mid", suggest, MAX_PATHNAME);
+			if (!filedialog_save(FOLDER_EXPORTMIDI, "Export the song as a MIDI file", "mid", suggest, newpath, MAX_PATHNAME))
+				break;
+			if (midiexport(newpath, report, sizeof report))
+				gui_message("%s", report);
+			else
+				gui_alert("MIDI export failed", report);
+		}
+		break;
+
+	case GTCMD_EXPORTPATCH:
+		if (!editorInfo.einum)
+		{
+			gui_alert("Select an instrument first", "Instrument 00 is the empty instrument and can't be exported.");
+			break;
+		}
+		{
+			char suggest[MAX_PATHNAME];
+			char base[MAX_INSTRNAMELEN + 1];
+			char report[256];
+
+			// A patch is named after its base name ("NAME" of "NAME:1")
+			patch_splitname(instr[editorInfo.einum].name, base);
+			if (base[0])
+				snprintf(suggest, MAX_PATHNAME, "%s.fermatax", base);
+			else
+				snprintf(suggest, MAX_PATHNAME, "Instrument %02X.fermatax", editorInfo.einum);
+			if (!filedialog_save(FOLDER_EXPORTPATCH, "Export the instrument as a chipsynth C64 preset", "fermatax", suggest, newpath, MAX_PATHNAME))
+				break;
+			if (fermatax_export(newpath, editorInfo.einum, report, sizeof report))
+				gui_message("%s", report);
+			else
+				gui_alert("Export failed", report);
+		}
 		break;
 
 	case GTCMD_EXPORTNOW:

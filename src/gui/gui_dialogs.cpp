@@ -1016,6 +1016,75 @@ extern "C" void gui_opendawsync(void)
   wantdawsync = true;
 }
 
+/*
+ * The plugin's file menus on the title bar: LOAD, SAVE, IMPORT, EXPORT. The
+ * files are chosen in the system's file dialogs, each kind of file starting
+ * in the folder used last for it
+ */
+
+static int wantfilemenu = -1;
+static int filemenuwhich = 0;
+static int filemenucolumn = 0;
+
+extern "C" void gui_openfilemenu(int which, int column)
+{
+  wantfilemenu = which;
+  filemenucolumn = column;
+}
+
+static void filemenu(void)
+{
+  if (wantfilemenu >= 0)
+  {
+    filemenuwhich = wantfilemenu;
+    wantfilemenu = -1;
+    ImGui::OpenPopup("##filemenu");
+  }
+  // Under its title (the text screen's second row), the text about as tall
+  // as the screen's characters
+  ImVec2 cell0 = gui::retrocellpos(filemenucolumn - 1, 1);
+  ImVec2 cell1 = gui::retrocellpos(filemenucolumn - 1, 2);
+  float size = (cell1.y - cell0.y) * 0.8f;
+  if (size < ImGui::GetFontSize()) size = ImGui::GetFontSize();
+  ImGui::SetNextWindowPos(cell0, ImGuiCond_Appearing);
+  ImGui::PushFont(NULL, size);
+  bool open = ImGui::BeginPopup("##filemenu");
+  ImGui::PopFont();
+  if (open)
+  {
+    ImGui::PushFont(NULL, size);
+    switch (filemenuwhich)
+    {
+      case 0:
+      if (ImGui::MenuItem("Song...", "F10")) cmd_post(GTCMD_OPEN);
+      if (ImGui::MenuItem("Instrument...")) cmd_post(GTCMD_LOADINSTR);
+      ImGui::Separator();
+      if (ImGui::MenuItem("Merge Song...")) cmd_post(GTCMD_MERGE);
+      break;
+
+      case 1:
+      if (ImGui::MenuItem("Song", "F11")) cmd_post(GTCMD_SAVE);
+      if (ImGui::MenuItem("Song As...")) cmd_post(GTCMD_SAVEAS);
+      if (ImGui::MenuItem("Instrument...")) cmd_post(GTCMD_SAVEINSTR);
+      break;
+
+      case 2:
+      if (ImGui::MenuItem("SID...")) cmd_post(GTCMD_IMPORTSID);
+      if (ImGui::MenuItem("MIDI...")) cmd_post(GTCMD_IMPORTMIDI);
+      if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_IMPORTPATCH);
+      break;
+
+      default:
+      if (ImGui::MenuItem("SID...")) cmd_post(GTCMD_EXPORTSID);
+      if (ImGui::MenuItem("MIDI...")) cmd_post(GTCMD_EXPORTMIDI);
+      if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_EXPORTPATCH);
+      break;
+    }
+    ImGui::PopFont();
+    ImGui::EndPopup();
+  }
+}
+
 // The song's own tempo (BPM) at the PAL / NTSC frame rate, as the title bar
 // shows it without the host
 extern "C" double retro_songbpm(void);
@@ -1052,8 +1121,11 @@ static void dawsyncdialog(void)
     }
     ImGui::Spacing();
     if (ImGui::Checkbox("MIDI channels 1, 2, 3 play voices 1, 2, 3", &route)) gtsync_route = route ? 1 : 0;
-    body("In edit mode the notes are recorded into the patterns while the song plays (stopped: entered at the "
-      "cursor). Other MIDI channels work as a MIDI keyboard does.");
+    body("While the DAW records, the plugin is in edit mode and the notes are recorded into the patterns (when "
+      "the DAW plays without recording: jam mode). Stopped in edit mode they are entered at the cursor. Other "
+      "MIDI channels work as a MIDI keyboard does. With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the "
+      "channel doesn't matter: the notes are shared out to 2 or 3 voices, so one DAW track can play chords. "
+      "The sustain pedal (CC 64) enters a keyoff.");
     if (ImGui::Checkbox("Record note-offs (as ---)", &recordoff)) gtsync_recordoff = recordoff ? 1 : 0;
     ImGui::Spacing();
     if (hostbpm > 0.0)
@@ -1072,6 +1144,7 @@ void gui::drawdialogs(void)
 {
 #ifdef GT_PLUGIN
   dawsyncdialog();
+  filemenu();
 #endif
   viewmenu();
   aboutdialog();

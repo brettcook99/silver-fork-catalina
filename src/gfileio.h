@@ -68,13 +68,20 @@ int gt_openfile_direct(const char *path);
 // elsewhere. exts is a list of extensions without dots, separated by ';'.
 // Return 1 with the chosen full path, 0 if cancelled.
 // The file dialogs start in the folder last used for their kind of file
-// (remembered in the config file): songs, instruments, imports (SID, MIDI,
-// chipsynth patches) and exports
+// (remembered in the config file): songs, instruments, imports of SID, MIDI
+// and chipsynth files, exports of SID/PRG/BIN, MIDI and chipsynth files
 #define FOLDER_SONG 0
 #define FOLDER_INSTR 1
-#define FOLDER_IMPORT 2
-#define FOLDER_EXPORT 3
-#define FOLDER_KINDS 4
+#define FOLDER_IMPORT 2         // SID import
+#define FOLDER_EXPORT 3         // SID / PRG / BIN export
+#define FOLDER_IMPORTMIDI 4
+#define FOLDER_IMPORTPATCH 5    // chipsynth C64 .fermatax
+#define FOLDER_EXPORTMIDI 6
+#define FOLDER_EXPORTPATCH 7
+#define FOLDER_KINDS 8
+// The first four are saved where they always were in the config file, the
+// others at its end
+#define FOLDER_OLDKINDS 4
 int filedialog_open(int kind, const char *title, const char *exts, char *path, int pathsize);
 int filedialog_save(int kind, const char *title, const char *ext, const char *suggestedname, char *path, int pathsize);
 // Chooses a folder (on macOS a folder panel; elsewhere the classic file

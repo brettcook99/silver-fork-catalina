@@ -172,6 +172,7 @@ static float wheelaccumy = 0.0f;
 static volatile int dialogid = 0;
 static volatile int dialogdone = 0;
 static char dialogpath[MAX_PATHNAME];
+static int dialogcounter = 0;
 
 static char *copytext(const char *text)
 {
@@ -849,7 +850,8 @@ static void applystate(const unsigned char *data, int size)
     }
     SETINT("stepsize", stepsize);
     if (stepsize < 1) stepsize = 4;
-    SETINT("recordmode", recordmode);
+    // recordmode isn't taken from the project: the plugin always starts in
+    // jam mode, and the DAW's recording switches to edit mode
     SETINT("followmode", followmode);
     SETINT("midichord", midichord);
     SETINT("editstep", editstep);
@@ -874,7 +876,6 @@ static void applystate(const unsigned char *data, int size)
     if ((midichord < 1) || (midichord > 3)) midichord = 1;
     if ((editstep < 0) || (editstep > MAX_EDITSTEP)) editstep = 0;
     if (gtsync_startbar < 1) gtsync_startbar = 1;
-    recordmode = recordmode ? 1 : 0;
     followmode = followmode ? 1 : 0;
     free(text);
   }
@@ -896,6 +897,16 @@ void gtplugin_service(void)
   GTRECORDNOTE rn;
   static int passtop = -1;
   static int passcount = -1;
+
+  // The host started or stopped recording (gtplugin_audio.c switched the
+  // mode)
+  if (gtsync_modechange)
+  {
+    int change = gtsync_modechange;
+    gtsync_modechange = 0;
+    if (change == 1) gui_message("DAW recording: edit mode, the notes are recorded into the patterns");
+    else gui_message("Jam mode: notes are only played");
+  }
 
   // Notes recorded from the host's MIDI tracks
   while (gtrecord_pop(&rn))
@@ -973,6 +984,39 @@ void gtplugin_service(void)
       if (callbacks.markdirty) callbacks.markdirty(callbacks.user);
     }
   }
+}
+
+/*
+ * File dialogs of the system, shown by the plugin's side
+ * (gtcore_callbacks.filedialog)
+ */
+
+int gtplugin_filedialog(int mode, const char *title, const char *start, const char *filter, char *path, int pathsize)
+{
+  int id;
+
+  if (!callbacks.filedialog) return -1;
+  id = ++dialogcounter;
+  if (id <= 0) id = dialogcounter = 1;
+  dialogdone = 0;
+  dialogpath[0] = 0;
+  dialogid = id;
+  callbacks.filedialog(callbacks.user, id, mode, title ? title : "", start ? start : "", filter ? filter : "");
+
+  // The window goes on being drawn (the playback followed) until the answer
+  // comes; the keys and clicks meanwhile do nothing
+  gui_message("Choose the file in the file dialog");
+  while ((!dialogdone) && (!gtplugin_quitting()))
+  {
+    followplayback();
+    displayupdate();
+    getkey();
+  }
+  dialogid = 0;
+  gui_message("%s", "");
+  if ((!dialogdone) || (!dialogpath[0])) return 0;
+  SDL_strlcpy(path, dialogpath, pathsize);
+  return 1;
 }
 
 /*

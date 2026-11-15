@@ -512,6 +512,20 @@ When all the notes are on one MIDI channel in several tracks of the file (as
 many sequencers save them), the tracks are read as channels 1, 2, 3. A MIDI
 file opened from the Finder or the command line becomes a new song.
 
+File > Export MIDI File writes the current subtune as a MIDI file: the song
+is played (without sound) once through every track's orderlist, so the notes
+come out as they sound, with transposes, repeats and tempo changes. Tracks
+1-3 go to MIDI channels 1-3; one pattern row is 1/stepsize beat (the
+highlighting step), and when the rows get longer or shorter the MIDI tempo
+changes, so the rows stay on the DAW's beat grid. File > Export chipsynth C64
+Patch writes the current instrument (with the other oscillators of its SID
+Designer patch, NAME:1 to NAME:3) as a .fermatax preset: waveform, sync,
+ring, coarse tune, pulse width, ADSR and the filter. Table programs
+(sweeps), vibrato and hard restart can't be part of a preset. The file
+dialogs start in the folder used last for each kind of file (songs,
+instruments, SID / MIDI / chipsynth imports, SID / MIDI / chipsynth
+exports).
+
 Notes played (keys or MIDI) start after one hardrestart frame (20 ms; none
 if the instrument's gate timer is 0), enough for the envelope to start
 again cleanly, not after the instrument's whole gate timer as pattern notes

@@ -50,8 +50,22 @@ static int recordpass = 0;        // the next recorded note starts a pass
 static volatile int resync = 0;   // chase again (a new song)
 static int wasplaying = 0;
 
-// Notes sounding from the routed MIDI channels
+// Notes sounding from the routed MIDI channels (the voice's note, 0 = none)
 static int routednote[MAX_CHN];
+// MIDI INPUT 2-3 (midichord): the next voice in turn, and when each voice's
+// note started (to take the oldest when all are playing)
+static int spreadturn = 0;
+static unsigned spreadage[MAX_CHN];
+static unsigned spreadclock = 0;
+// The sustain pedal (CC 64) is down
+static int pedaldown = 0;
+
+// The host's recording switches between edit and jam mode: the transport
+// as it was in the last block, and the switch for the GoatTracker thread's
+// message (1 = edit mode, 2 = jam mode)
+static int wasrecording = 0;
+static int washostplaying = 0;
+volatile int gtsync_modechange = 0;
 
 #define RENDERCHUNK 1024
 static short renderbuf[RENDERCHUNK];
@@ -380,11 +394,76 @@ static void recordnote(int c, int note, double framefraction)
   recordpush(&rn);
 }
 
+// MIDI INPUT 2-3 PATTERNS: the voice a note-on plays on. The voices are the
+// cursor's channel and the next 1-2; the next one in turn that is free, or
+// if all are playing the one that started longest ago
+static int spreadvoices(int *base)
+{
+  int n = midichord;
+
+  if (n > MAX_CHN) n = MAX_CHN;
+  if (n < 1) n = 1;
+  *base = editorInfo.epchn;
+  if ((*base < 0) || (*base >= MAX_CHN)) *base = 0;
+  return n;
+}
+
+static int spreadvoice(void)
+{
+  int base;
+  int n = spreadvoices(&base);
+  int k, v = -1, slot = 0;
+
+  if (spreadturn >= n) spreadturn = 0;
+  for (k = 0; k < n; k++)
+  {
+    slot = (spreadturn + k) % n;
+    if (!routednote[(base + slot) % MAX_CHN])
+    {
+      v = (base + slot) % MAX_CHN;
+      break;
+    }
+  }
+  if (v < 0)
+  {
+    unsigned oldest = 0xffffffff;
+    for (k = 0; k < n; k++)
+    {
+      int c = (base + k) % MAX_CHN;
+      if (spreadage[c] <= oldest)
+      {
+        oldest = spreadage[c];
+        v = c;
+        slot = k;
+      }
+    }
+  }
+  spreadturn = (slot + 1) % n;
+  spreadage[v] = ++spreadclock;
+  return v;
+}
+
+// The voice playing a note (of the spread voices), -1 if none
+static int spreadfind(int note)
+{
+  int base;
+  int n = spreadvoices(&base);
+  int k;
+
+  for (k = 0; k < n; k++)
+  {
+    int c = (base + k) % MAX_CHN;
+    if (routednote[c] == note) return c;
+  }
+  return -1;
+}
+
 static void handlemidi(const gtcore_midi *m, double framefraction)
 {
   int type = m->status & 0xf0;
   int ch = m->status & 0x0f;
   int ev;
+  int spread;
 
   if (type == 0x90) ev = m->data2 ? MIDI_NOTEON : MIDI_NOTEOFF;
   else if (type == 0x80) ev = MIDI_NOTEOFF;
@@ -392,32 +471,105 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
   else return;
 
   // MIDI channels 1-3 play (and record) voices 1-3 here, in time with the
-  // player. In edit mode without playback they are entered at the cursor
-  // like notes from a MIDI keyboard; so they are in the SID designer
-  if ((gtsync_route) && (ch < MAX_CHN) && (ev != MIDI_CONTROL) && (!gui_designeractive()))
+  // player. With MIDI INPUT 2-3 PATTERNS (midichord) the channel doesn't
+  // matter: the notes of every channel are shared out to 2-3 voices, so that
+  // one DAW track can play chords and overlapping notes. In edit mode
+  // without playback they are entered at the cursor like notes from a MIDI
+  // keyboard; so they are in the SID designer
+  spread = (midichord > 1);
+  if ((!gui_designeractive()) && ((spread) || ((gtsync_route) && (ch < MAX_CHN))))
   {
     int playing = (songinit != PLAY_STOPPED);
     int note = FIRSTNOTE + m->data1 - 12;
 
-    if ((!recordmode) || (playing))
+    // The sustain pedal pressed: a keyoff on the voice (all the voices with
+    // MIDI INPUT 2-3), recorded in edit mode while playing (as RETURN entered
+    // one before). Only its presses and releases count (a pedal may send
+    // many values while it is down); a release, or a press in edit mode
+    // without playback (a keyoff at the cursor), goes on to the GoatTracker
+    // thread, which keeps track of the pedal too
+    if ((ev == MIDI_CONTROL) && (m->data1 == 64))
     {
+      int down = m->data2 >= 64;
+
+      if (down == pedaldown) return;
+      pedaldown = down;
+      if ((down) && ((!recordmode) || (playing)))
+      {
+        int base, n, k;
+
+        if (spread) n = spreadvoices(&base);
+        else
+        {
+          base = ch;
+          n = 1;
+        }
+        for (k = 0; k < n; k++)
+        {
+          int c = (base + k) % MAX_CHN;
+          releasenote(c);
+          routednote[c] = 0;
+          if ((recordmode) && (playing)) recordnote(c, KEYOFF, framefraction);
+        }
+        return;
+      }
+    }
+    else if ((ev != MIDI_CONTROL) && ((!recordmode) || (playing)))
+    {
+      int c;
+
       if ((note < FIRSTNOTE) || (note > LASTNOTE)) return;
       if (ev == MIDI_NOTEON)
       {
-        playtestnote(note, editorInfo.einum, ch);
-        routednote[ch] = note;
-        if ((recordmode) && (playing)) recordnote(ch, note, framefraction);
+        c = spread ? spreadvoice() : ch;
+        playtestnote(note, editorInfo.einum, c);
+        routednote[c] = note;
+        if ((recordmode) && (playing)) recordnote(c, note, framefraction);
       }
-      else if (routednote[ch] == note)
+      else
       {
-        releasenote(ch);
-        routednote[ch] = 0;
-        if ((recordmode) && (playing) && (gtsync_recordoff)) recordnote(ch, KEYOFF, framefraction);
+        c = spread ? spreadfind(note) : ch;
+        if ((c >= 0) && (routednote[c] == note))
+        {
+          releasenote(c);
+          routednote[c] = 0;
+          if ((recordmode) && (playing) && (gtsync_recordoff)) recordnote(c, KEYOFF, framefraction);
+        }
       }
       return;
     }
   }
   midi_pushevent_ch(ev, ch, m->data1, m->data2);
+}
+
+// The host's recording: edit mode while it records (the notes from the DAW
+// are recorded into the patterns), jam mode when it starts playing without
+// recording or stops recording. Only while following the host (DAW SYNC)
+static void followrecording(const gtcore_transport *tp, int sync)
+{
+  int playing = (tp->valid) && (tp->playing);
+  int recording = (playing) && (tp->recording);
+
+  if (sync)
+  {
+    if ((recording) && (!wasrecording))
+    {
+      recordmode = 1;
+      gtsync_modechange = 1;
+    }
+    else if ((!recording) && (wasrecording))
+    {
+      recordmode = 0;
+      gtsync_modechange = 2;
+    }
+    else if ((playing) && (!washostplaying) && (!recording) && (recordmode))
+    {
+      recordmode = 0;
+      gtsync_modechange = 2;
+    }
+  }
+  wasrecording = recording;
+  washostplaying = playing;
 }
 
 /*
@@ -478,6 +630,7 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
   hostbpm = ((tp->valid) && (tp->bpm > 1.0)) ? tp->bpm : 0.0;
   hostplaying = (tp->valid) && (tp->playing);
   sync = (gtsync_enabled) && (hostbpm > 0.0);
+  followrecording(tp, sync);
   if (sync) samplesperbeat = samplerate * 60.0 / hostbpm;
   offset = startoffset(tp);
   ppqbase = tp->ppq;

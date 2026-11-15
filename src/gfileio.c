@@ -958,11 +958,15 @@ char *gt_folder(int kind)
     case FOLDER_INSTR: return instrpath;
     case FOLDER_IMPORT: return importpath;
     case FOLDER_EXPORT: return packedpath;
+    case FOLDER_IMPORTMIDI: return importmidipath;
+    case FOLDER_IMPORTPATCH: return importpatchpath;
+    case FOLDER_EXPORTMIDI: return exportmidipath;
+    case FOLDER_EXPORTPATCH: return exportpatchpath;
   }
   return songpath;
 }
 
-#if defined(__APPLE__) && !defined(GT_PLUGIN)
+#if defined(__APPLE__) || defined(GT_PLUGIN)
 // The folder of a file chosen in a dialog is used next time
 static void rememberfolder(int kind, const char *path)
 {
@@ -987,6 +991,19 @@ int filedialog_open(int kind, const char *title, const char *exts, char *path, i
   char filter[MAX_FILENAME];
   char dir[MAX_PATHNAME];
   int c;
+
+#ifdef GT_PLUGIN
+  // The plugin: the system's file dialog, shown by the host's side (if it
+  // can)
+  {
+    int r = gtplugin_filedialog(GTFILEDIALOG_OPEN, title, gt_folder(kind), exts, path, pathsize);
+    if (r >= 0)
+    {
+      if (r) rememberfolder(kind, path);
+      return r;
+    }
+  }
+#endif
 
   strcpy(filter, "*.");
   for (c = 0; (exts) && (exts[c]) && (exts[c] != ';') && (c < 32); c++)
@@ -1015,6 +1032,13 @@ int filedialog_folder(const char *title, const char *startdir, char *path, int p
   char fulltitle[MAX_PATHNAME];
   char filter[MAX_FILENAME] = "*.ins";       // The selector changes it
 
+#ifdef GT_PLUGIN
+  {
+    int r = gtplugin_filedialog(GTFILEDIALOG_FOLDER, title, ((startdir) && (startdir[0])) ? startdir : gt_folder(FOLDER_INSTR), "", path, pathsize);
+    if (r >= 0) return r;
+  }
+#endif
+
   snprintf(dir, sizeof dir, "%s", ((startdir) && (startdir[0])) ? startdir : gt_folder(FOLDER_INSTR));
   snprintf(fulltitle, sizeof fulltitle, "%s (pick any instrument in it)", title);
   if (!fileselector(name, dir, filter, fulltitle, 0)) return 0;
@@ -1035,6 +1059,33 @@ int filedialog_save(int kind, const char *title, const char *ext, const char *su
   static char name[MAX_FILENAME] = "";
   char filter[MAX_FILENAME];
   char dir[MAX_PATHNAME];
+
+#ifdef GT_PLUGIN
+  // The plugin: the system's file dialog, starting with the suggested name
+  // in the folder used last
+  {
+    char start[MAX_PATHNAME];
+    char *folder = gt_folder(kind);
+    int r;
+
+    if ((suggestedname) && (suggestedname[0]))
+      snprintf(start, sizeof start, "%s%s%s", folder, folder[0] ? "/" : "", gt_basename(suggestedname));
+    else
+      snprintf(start, sizeof start, "%s", folder);
+    r = gtplugin_filedialog(GTFILEDIALOG_SAVE, title, start, ext, path, pathsize);
+    if (r > 0)
+    {
+      // Add the extension if there is none
+      if ((!strrchr(gt_basename(path), '.')) && ((int)(strlen(path) + strlen(ext) + 1) < pathsize))
+      {
+        strcat(path, ".");
+        strcat(path, ext);
+      }
+      rememberfolder(kind, path);
+    }
+    if (r >= 0) return r;
+  }
+#endif
 
   snprintf(filter, MAX_FILENAME, "*.%s", ext);
   if ((suggestedname) && (suggestedname[0]))

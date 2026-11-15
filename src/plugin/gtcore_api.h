@@ -39,10 +39,13 @@ typedef struct
   void (*markdirty)(void *user);
   // Text copied in a text field, for the system clipboard (may be NULL)
   void (*setclipboard)(void *user, const char *utf8);
-  // A native file dialog (macOS; may be NULL: the built-in file selector is
-  // used then). The answer comes back as a GTIN_FILEDIALOG input with the
-  // same id. filter: extensions separated by ';', e.g. "sng" or "mid;midi"
-  void (*filedialog)(void *user, int id, int save, const char *title, const char *folder, const char *filter);
+  // A file dialog of the system (may be NULL: the built-in file selector is
+  // used then). mode: 0 = open a file, 1 = save (folder is then the
+  // suggested file in the folder), 2 = choose a folder. The answer comes
+  // back as a GTIN_FILEDIALOG input with the same id. filter: extensions
+  // separated by ';', e.g. "sng" or "mid;midi". Called on the GoatTracker
+  // thread
+  void (*filedialog)(void *user, int id, int mode, const char *title, const char *folder, const char *filter);
 } gtcore_callbacks;
 
 typedef struct

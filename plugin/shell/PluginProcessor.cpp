@@ -62,6 +62,62 @@ void GoatTrackerProcessor::callbackClipboard(void *, const char *text)
   juce::MessageManager::callAsync([copy] { juce::SystemClipboard::copyTextToClipboard(copy); });
 }
 
+void GoatTrackerProcessor::callbackFileDialog(void *user, int id, int mode, const char *title, const char *start, const char *filter)
+{
+  auto weak = std::weak_ptr<Shared>(*static_cast<std::shared_ptr<Shared> *>(user));
+  const auto t = juce::String::fromUTF8(title ? title : "");
+  const auto s = juce::String::fromUTF8(start ? start : "");
+  // "sng;mid" -> "*.sng;*.mid"
+  juce::StringArray exts;
+  exts.addTokens(juce::String::fromUTF8(filter ? filter : ""), ";", "");
+  exts.removeEmptyStrings();
+  for (auto &e : exts) e = "*." + e;
+  const auto patterns = exts.joinIntoString(";");
+
+  juce::MessageManager::callAsync([weak, id, mode, t, s, patterns]
+  {
+    if (auto sh = weak.lock())
+      if (auto *p = sh->owner.load())
+      {
+        p->openFileDialog(id, mode, t, s, patterns);
+        return;
+      }
+  });
+}
+
+// On the message thread: the system's file dialog (NSOpenPanel / NSSavePanel
+// on macOS), whose answer goes back to GoatTracker as GTIN_FILEDIALOG
+void GoatTrackerProcessor::openFileDialog(int id, int mode, const juce::String &title, const juce::String &start, const juce::String &patterns)
+{
+  juce::File initial;
+  if (juce::File::isAbsolutePath(start)) initial = juce::File(start);
+
+  int flags = 0;
+  if (mode == 2)
+    flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories;
+  else if (mode == 1)
+    flags = juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting;
+  else
+    flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+
+  fileChooser = std::make_unique<juce::FileChooser>(title, initial, patterns, true, false, getActiveEditor());
+  auto weak = std::weak_ptr<Shared>(shared);
+  fileChooser->launchAsync(flags, [weak, id](const juce::FileChooser &chooser)
+  {
+    auto sh = weak.lock();
+    if (!sh) return;
+    auto *p = sh->owner.load();
+    if (!p) return;
+    const auto result = chooser.getResult();
+    const std::string path = result.getFullPathName().toStdString();
+    gtcore_inputevent in {};
+    in.type = GTIN_FILEDIALOG;
+    in.id = id;
+    in.text = (result == juce::File()) ? nullptr : path.c_str();
+    if (p->getCore().isLoaded()) p->getCore().input(&in);
+  });
+}
+
 bool GoatTrackerProcessor::startCore(int w, int h, float scale)
 {
   const juce::ScopedLock sl(coreLock);
@@ -77,7 +133,7 @@ bool GoatTrackerProcessor::startCore(int w, int h, float scale)
   cb.requestresize = callbackResize;
   cb.markdirty = callbackDirty;
   cb.setclipboard = callbackClipboard;
-  cb.filedialog = nullptr;
+  cb.filedialog = callbackFileDialog;
 
   if (!core.load(cb, w, h, scale))
   {

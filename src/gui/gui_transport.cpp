@@ -431,6 +431,8 @@ void gui::drawmenubar(void)
     if (ImGui::MenuItem("Save Instrument...")) cmd_post(GTCMD_SAVEINSTR);
     ImGui::Separator();
     if (ImGui::MenuItem("Export SID / PRG / BIN...", "F9")) cmd_post(GTCMD_EXPORT);
+    if (ImGui::MenuItem("Export MIDI File...")) cmd_post(GTCMD_EXPORTMIDI);
+    if (ImGui::MenuItem("Export chipsynth C64 Patch (.fermatax)...")) cmd_post(GTCMD_EXPORTPATCH);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "ESC")) cmd_post(GTCMD_QUIT);
     ImGui::EndMenu();

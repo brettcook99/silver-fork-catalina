@@ -33,6 +33,16 @@ extern "C" {
 // short description of the result or the error
 int fermatax_import(const char *path, int slot, char *report, int reportsize);
 
+// Writes instrument ins as a chipsynth C64 preset: with the other
+// oscillators of its SID designer patch ("NAME:1".."NAME:3", oscillator n
+// from "NAME:n"), else the instrument as oscillator 1. Each oscillator gets
+// the waveform, sync, ring and coarse tune of its main wave row, the pulse
+// width of its first pulse row and the ADSR; the first filter part found
+// gives the filter (type, resonance, cutoff, the oscillators it routes).
+// Table programs (wave, pulse and filter sweeps), vibrato and hard restart
+// can't be expressed in a preset and are left out. Returns 1 if written
+int fermatax_export(const char *path, int ins, char *report, int reportsize);
+
 #ifdef __cplusplus
 }
 #endif

@@ -6,6 +6,9 @@
 
 #include "goattrk2.h"
 #include "gui/gui.h"
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+#endif
 
 EDITOR_INFO editorInfo;
 
@@ -1588,6 +1591,14 @@ void stopplayback(void)
   int back = (playreturnpoint) && (isplaying()) && (followplay) && (!followsuspended) && (retesnum == editorInfo.esnum);
   int c;
 
+#ifdef GT_PLUGIN
+  // Following the DAW: stopsong() tells to stop the DAW instead
+  if (gtsync_uiblocked())
+  {
+    stopsong();
+    return;
+  }
+#endif
   playreturnpoint = 0;
   stopsong();
   if (!back) return;
@@ -1648,6 +1659,13 @@ void gotosongstart(void)
 {
   int c, d;
 
+#ifdef GT_PLUGIN
+  if (gtsync_uiblocked())
+  {
+    stopsong();
+    return;
+  }
+#endif
   playreturnpoint = 0;
   if (isplaying())
   {

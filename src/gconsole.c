@@ -313,6 +313,7 @@ int input_nextmidi(void)
         {
           midikeyoff = 1;
           midinotetime = midi_eventtime();
+          midinotechannel = midi_eventchannel();
           return 1;
         }
         continue;

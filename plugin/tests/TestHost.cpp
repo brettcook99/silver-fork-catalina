@@ -12,7 +12,9 @@
 //   --keys=a,b,...   key presses posted to the plugin's window after 1.5 s
 //                    (Windows: letters, digits, f1-f12, space, return, esc,
 //                    tab, up, down, left, right, home, end, del, kpdot)
-//   --click=x,y      a left click at the plugin window's pixel x, y
+//   --click=x,y      a left click at the plugin window's pixel x, y (after
+//                    1.8 s); several separated by ';' come 0.7 s apart,
+//                    or at x,y,t: t milliseconds after the start
 //   --state=f        saves the plugin's state to f before quitting
 //   --load=f         loads a state saved with --state first
 // Keys: the window's F12 toggles the simulated transport (play / stop).
@@ -269,12 +271,19 @@ private:
 #endif
 
 #if JUCE_WINDOWS
-    auto click = option(args, "click");
-    if ((click.isNotEmpty()) && (!clicked) && (elapsed > 1800))
+    auto clicks = juce::StringArray::fromTokens(option(args, "click"), ";", "");
+    clicks.removeEmptyStrings();
+    if (clicked < clicks.size())
     {
-      clicked = true;
-      if (auto h = plugineditorwindow((HWND)getWindowHandle()))
-        sendclick(h, click.upToFirstOccurrenceOf(",", false, false).getIntValue(), click.fromFirstOccurrenceOf(",", false, false).getIntValue());
+      // x,y or x,y,t (t = milliseconds after the start)
+      auto parts = juce::StringArray::fromTokens(clicks[clicked], ",", "");
+      int at = (parts.size() > 2) ? parts[2].getIntValue() : 1800 + clicked * 700;
+      if (elapsed > at)
+      {
+        clicked++;
+        if (auto h = plugineditorwindow((HWND)getWindowHandle()))
+          sendclick(h, parts[0].getIntValue(), parts[1].getIntValue());
+      }
     }
 #endif
 
@@ -313,7 +322,7 @@ private:
   juce::AudioProcessorEditor *editor = nullptr;
   juce::uint32 started = 0;
   bool keysSent = false;
-  bool clicked = false;
+  int clicked = 0;
 };
 
 class TestHostApp : public juce::JUCEApplication

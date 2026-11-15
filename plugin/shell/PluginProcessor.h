@@ -70,6 +70,11 @@ private:
   static void callbackResize(void *user, int w, int h);
   static void callbackDirty(void *user);
   static void callbackClipboard(void *user, const char *text);
+  static void callbackFileDialog(void *user, int id, int mode, const char *title, const char *start, const char *filter);
+
+  // The system's file dialog shown for GoatTracker (one at a time)
+  void openFileDialog(int id, int mode, const juce::String &title, const juce::String &start, const juce::String &patterns);
+  std::unique_ptr<juce::FileChooser> fileChooser;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(GoatTrackerProcessor)
 };

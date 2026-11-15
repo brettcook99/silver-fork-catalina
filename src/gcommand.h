@@ -95,6 +95,9 @@ enum
   GTCMD_IMPORTMIDINOW,    // Import the MIDI file given as path (from the import dialog)
   GTCMD_PLAYPATTSTART,    // Play from the start of the current pattern (F1)
   GTCMD_SONGSTART,        // Back to the song's start, stopped (RETURN)
+  GTCMD_EXPORTMIDI,       // Save the song as a MIDI file
+  GTCMD_EXPORTPATCH,      // Save the current instrument (its patch) as a chipsynth C64 preset
+  GTCMD_EXPORTSID,        // The export dialog with the SID format chosen
 
   GTCMD_COUNT
 };

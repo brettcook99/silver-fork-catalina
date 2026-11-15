@@ -57,6 +57,9 @@ int gui_designershown(void);
 // Opens the retro menu bar's VIEW menu (SID designer, background, meter
 // colors, About) at the mouse pointer
 void gui_openviewmenu(void);
+// The plugin's file menu (0 = LOAD, 1 = SAVE, 2 = IMPORT, 3 = EXPORT) under
+// its title on the retro title bar, which starts at text column column
+void gui_openfilemenu(int which, int column);
 void gui_designermidi(int noteon, int noteoff);
 // A MIDI control change (knob) while the SID designer is shown: attack
 // (CC 73), decay (75), sustain (70, 76 or 20), release (72), filter cutoff

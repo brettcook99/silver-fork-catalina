@@ -139,6 +139,9 @@ namespace gui
   // The retro screen gets no mouse buttons until they all have been
   // released (a click that closed the SID designer doesn't click there too)
   void retroblockmouse(void);
+  // The top left corner of a character cell of the retro text screen, as
+  // drawn last (ImGui points)
+  ImVec2 retrocellpos(int x, int y);
 
   // The instrument designer (gui_designer.cpp), a full-window mode that looks
   // like a C64 screen. designerwanted() tells whether it is to be drawn this

@@ -101,6 +101,20 @@ int playstarting(void);
 int playfilterptr(void);
 void playroutine(void);
 
+// Runs subtune num from its start without sound (MIDI export), until every
+// channel has come to the end of its orderlist, the song stops or maxframes
+// frames have run. hook is called for each note started (note 0-95 from
+// C-0, transposed, as the player plays it; tone portamento too) and each
+// keyoff read (note -1), with the frame number. loopframe (3 values) gets
+// the frame at which each channel reached its end (-1 = not reached).
+// After each frame hook is called with c = -1 and note = 1 if a row of
+// channel 1 started in that frame (its tick 0), else 0. The playback and
+// the player's state are as before afterwards. Returns the frames run
+unsigned playoffline(int num, unsigned maxframes, void (*hook)(int c, int note, unsigned frame, void *user), void *user, int *loopframe);
+// While playoffline() runs: the frame at which channel c came to the end of
+// its orderlist, -1 if it hasn't
+int playofflineloop(int c);
+
 // LOOP on the retro screen: while the song plays, each channel plays its
 // next playloop patterns again and again, from the one playing when the
 // loop was set (or the first one, set before playing). 0 = no loop.

@@ -16,7 +16,11 @@
  *   -start=N     host position at the start, in beats (default 0)
  *   -jump=B:P    at beat B jump the host to beat P (a loop / locate)
  *   -stop=B      stop the host transport at beat B
- *   -midi=B:C:N  a MIDI note (channel C 1-16, note N) at beat B, one beat long
+ *   -midi=B:C:N[:L]  a MIDI note (channel C 1-16, note N) at beat B, L beats
+ *                long (default 1); can be given several times
+ *   -cc=B:C:N:V  a MIDI control change (controller N, value V) at beat B
+ *   -record=B:E  the host records from beat B to beat E
+ *   -loadstate=file  load a plugin state (as saved with -state) after the song
  *   -instances=N load N copies and render each (isolation test)
  *   -frame=out.bmp  save the editor's picture after loading
  */
@@ -171,11 +175,16 @@ int main(int argc, char **argv)
   double startbeat = 0.0;
   double jumpat = -1.0, jumpto = 0.0;
   double stopat = -1.0;
-  double midibeat = -1.0;
-  int midich = 1, midinote = 60;
+  // MIDI events to send: beat, status, data
+#define MAXEVENTS 64
+  double evbeat[MAXEVENTS];
+  unsigned char evstatus[MAXEVENTS], evdata1[MAXEVENTS], evdata2[MAXEVENTS];
+  int numev = 0;
+  double recordfrom = -1.0, recordto = -1.0;
   int instances = 1;
   const char *framepath = NULL;
   const char *statepath = NULL;
+  const char *loadstatepath = NULL;
   const char *song2 = NULL;
   int resizew = 0, resizeh = 0;
   float resizes = 1.0f;
@@ -201,10 +210,35 @@ int main(int argc, char **argv)
     else if (!strncmp(argv[i], "-start=", 7)) startbeat = atof(argv[i] + 7);
     else if (!strncmp(argv[i], "-jump=", 6)) sscanf(argv[i] + 6, "%lf:%lf", &jumpat, &jumpto);
     else if (!strncmp(argv[i], "-stop=", 6)) stopat = atof(argv[i] + 6);
-    else if (!strncmp(argv[i], "-midi=", 6)) sscanf(argv[i] + 6, "%lf:%d:%d", &midibeat, &midich, &midinote);
+    else if ((!strncmp(argv[i], "-midi=", 6)) && (numev + 2 <= MAXEVENTS))
+    {
+      double b = 0.0, len = 1.0;
+      int ch = 1, note = 60;
+      sscanf(argv[i] + 6, "%lf:%d:%d:%lf", &b, &ch, &note, &len);
+      evbeat[numev] = b;
+      evstatus[numev] = (unsigned char)(0x90 | ((ch - 1) & 15));
+      evdata1[numev] = (unsigned char)note;
+      evdata2[numev++] = 100;
+      evbeat[numev] = b + len;
+      evstatus[numev] = (unsigned char)(0x80 | ((ch - 1) & 15));
+      evdata1[numev] = (unsigned char)note;
+      evdata2[numev++] = 0;
+    }
+    else if ((!strncmp(argv[i], "-cc=", 4)) && (numev < MAXEVENTS))
+    {
+      double b = 0.0;
+      int ch = 1, cc = 64, v = 127;
+      sscanf(argv[i] + 4, "%lf:%d:%d:%d", &b, &ch, &cc, &v);
+      evbeat[numev] = b;
+      evstatus[numev] = (unsigned char)(0xb0 | ((ch - 1) & 15));
+      evdata1[numev] = (unsigned char)cc;
+      evdata2[numev++] = (unsigned char)v;
+    }
+    else if (!strncmp(argv[i], "-record=", 8)) sscanf(argv[i] + 8, "%lf:%lf", &recordfrom, &recordto);
     else if (!strncmp(argv[i], "-instances=", 11)) instances = atoi(argv[i] + 11);
     else if (!strncmp(argv[i], "-frame=", 7)) framepath = argv[i] + 7;
     else if (!strncmp(argv[i], "-state=", 7)) statepath = argv[i] + 7;
+    else if (!strncmp(argv[i], "-loadstate=", 11)) loadstatepath = argv[i] + 11;
     else if (!strncmp(argv[i], "-song2=", 7)) song2 = argv[i] + 7;
     else if (!strncmp(argv[i], "-resize=", 8)) sscanf(argv[i] + 8, "%d:%d:%f", &resizew, &resizeh, &resizes);
   }
@@ -240,6 +274,19 @@ int main(int argc, char **argv)
     // -song2: the other instances get another song (isolation test)
     in.text = ((inst > 0) && (song2)) ? song2 : song;
     cores[inst].input(&in);
+    if (loadstatepath)
+    {
+      FILE *f = fopen(loadstatepath, "rb");
+      if (f)
+      {
+        static unsigned char buf[4 * 1024 * 1024];
+        int size = (int)fread(buf, 1, sizeof buf, f);
+        fclose(f);
+        sleepms(500);
+        if (!cores[inst].setstate(buf, size)) fprintf(stderr, "setstate failed\n");
+      }
+      else fprintf(stderr, "Can't read %s\n", loadstatepath);
+    }
     if (resizew > 0)
     {
       memset(&in, 0, sizeof in);
@@ -279,7 +326,7 @@ int main(int argc, char **argv)
     while (done < total)
     {
       gtcore_transport tp;
-      gtcore_midi midi[2];
+      gtcore_midi midi[MAXEVENTS];
       int nmidi = 0;
       int n = block;
       double blockbeats;
@@ -306,23 +353,26 @@ int main(int argc, char **argv)
       tp.timesignum = 4;
       tp.timesigden = 4;
 
-      if ((midibeat >= 0.0) && (bpm > 0.0))
+      tp.recording = (playing) && (recordfrom >= 0.0) && (beat >= recordfrom) && (beat < recordto);
+
+      // The block's MIDI events, in time order
+      if (bpm > 0.0)
       {
-        if ((midibeat >= beat) && (midibeat < beat + blockbeats))
+        int e, k;
+        for (e = 0; e < numev; e++)
         {
-          midi[nmidi].offset = (int)((midibeat - beat) * 60.0 / bpm * rate);
-          midi[nmidi].status = 0x90 | ((midich - 1) & 15);
-          midi[nmidi].data1 = midinote;
-          midi[nmidi].data2 = 100;
-          nmidi++;
-        }
-        if ((midibeat + 1.0 >= beat) && (midibeat + 1.0 < beat + blockbeats))
-        {
-          midi[nmidi].offset = (int)((midibeat + 1.0 - beat) * 60.0 / bpm * rate);
-          midi[nmidi].status = 0x80 | ((midich - 1) & 15);
-          midi[nmidi].data1 = midinote;
-          midi[nmidi].data2 = 0;
-          nmidi++;
+          if ((evbeat[e] >= beat) && (evbeat[e] < beat + blockbeats))
+          {
+            gtcore_midi m;
+            m.offset = (int)((evbeat[e] - beat) * 60.0 / bpm * rate);
+            if (m.offset >= n) m.offset = n - 1;
+            m.status = evstatus[e];
+            m.data1 = evdata1[e];
+            m.data2 = evdata2[e];
+            for (k = nmidi; (k > 0) && (midi[k - 1].offset > m.offset); k--) midi[k] = midi[k - 1];
+            midi[k] = m;
+            nmidi++;
+          }
         }
       }
 

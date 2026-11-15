@@ -245,6 +245,8 @@ void macmenu_init(void)
     additem(file, @"Save Instrument…", @"", 0, GTCMD_SAVEINSTR);
     [file addItem:[NSMenuItem separatorItem]];
     additem(file, @"Export SID / PRG / BIN…", @"e", MOD_CMD, GTCMD_EXPORT);
+    additem(file, @"Export MIDI File…", @"", 0, GTCMD_EXPORTMIDI);
+    additem(file, @"Export chipsynth C64 Patch (.fermatax)…", @"", 0, GTCMD_EXPORTPATCH);
 
     edit = newmenu(@"Edit");
     additem(edit, @"Undo", @"z", MOD_CMD, GTCMD_UNDO);

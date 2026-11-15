@@ -429,6 +429,11 @@ double retro_songbpm(void)
 }
 // The title bar's SYNC: where it is (set when printed)
 static int tbsyncx = -1;
+// The plugin's file menus on the title bar (no menu bar of the system in a
+// plugin): LOAD, SAVE, IMPORT, EXPORT, each a dropdown
+#define TB_MENUS 4
+static const char *tbmenuname[TB_MENUS] = { "LOAD", "SAVE", "IMPORT", "EXPORT" };
+static int tbmenux[TB_MENUS];
 #endif
 
 // The tempo now: while playing the cursor channel's (funktempo: the average
@@ -503,6 +508,25 @@ void retro_printtitlebar(void)
     printtext(x, 0, (gtsync_following() ? 13 : gtsync_enabled ? fg_active : fg_inactive) + 16, "SYNC");
 #endif
 
+#ifdef GT_PLUGIN
+    // The file menus, then the song's file name if there is room
+    {
+      int mx = 1, m;
+
+      for (m = 0; m < TB_MENUS; m++)
+      {
+        tbmenux[m] = mx;
+        printtext(mx, 0, fg_active + 16, tbmenuname[m]);
+        mx += (int)strlen(tbmenuname[m]) + 2;
+      }
+      if ((loadedsongfilename[0]) && (x - 1 - mx >= 6))
+      {
+        snprintf(textbuffer, MAX_COLUMNS, "%s", gt_basename(loadedsongfilename));
+        textbuffer[x - 1 - mx] = 0;
+        printtext(mx, 0, 15+16, textbuffer);
+      }
+    }
+#else
     if (!strlen(loadedsongfilename))
       sprintf(textbuffer, "%s", programname);
     else
@@ -517,6 +541,7 @@ void retro_printtitlebar(void)
     }
     textbuffer[x - 1] = 0;
     printtext(0, 0, 15+16, textbuffer);
+#endif
   }
 
   printtext(TB_FV, 0, fg_inactive+16, "FV PO RO");
@@ -569,10 +594,20 @@ void retro_printtitlebar(void)
 void retro_titlebarclick(int x)
 {
 #ifdef GT_PLUGIN
+  int m;
+
   if ((tbsyncx >= 0) && (x >= tbsyncx) && (x <= tbsyncx + 3))
   {
     gui_opendawsync();
     return;
+  }
+  for (m = 0; m < TB_MENUS; m++)
+  {
+    if ((x >= tbmenux[m]) && (x < tbmenux[m] + (int)strlen(tbmenuname[m])))
+    {
+      gui_openfilemenu(m, tbmenux[m]);
+      return;
+    }
   }
 #endif
   if ((x >= TB_FV) && (x <= TB_FV + 1))

@@ -50,6 +50,17 @@ void gtplugin_requestresize(int w, int h);
 // requests, notes recorded from the host's MIDI, project dirty tracking
 void gtplugin_service(void);
 
+// A file dialog of the system (the host's side shows it): GTFILEDIALOG_OPEN,
+// _SAVE or _FOLDER; start = the folder, or for a save dialog the suggested
+// file in it; filter = extensions separated by ';'. Waits for the answer
+// with the user interface running. Returns 1 with the chosen path, 0 if
+// cancelled, -1 if the host shows no file dialogs (the classic file
+// selector is used then)
+#define GTFILEDIALOG_OPEN 0
+#define GTFILEDIALOG_SAVE 1
+#define GTFILEDIALOG_FOLDER 2
+int gtplugin_filedialog(int mode, const char *title, const char *start, const char *filter, char *path, int pathsize);
+
 // Song loads and SID re-inits exclude the audio thread with this
 void gtplugin_lockengine(void);
 void gtplugin_unlockengine(void);
@@ -67,6 +78,8 @@ extern int gtsync_enabled;        // follow the host's tempo & position
 extern int gtsync_startbar;       // the song starts at this bar (1 = first)
 extern int gtsync_route;          // MIDI channels 1-3 play / record voices 1-3
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
+// The host's recording switched the mode: 1 = edit, 2 = jam (for the message)
+extern volatile int gtsync_modechange;
 // The host's tempo (0 if not known) and whether its transport runs
 double gtsync_hostbpm(void);
 int gtsync_hostplaying(void);
