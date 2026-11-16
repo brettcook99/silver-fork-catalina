@@ -82,7 +82,10 @@ void sid_init(int speed, unsigned m, unsigned ntsc, unsigned interpolate, unsign
 
     default:
     if (sid) sid->set_sampling_parameters(clockrate, SAMPLE_INTERPOLATE, speed);
-    if (sidfp) sidfp->set_sampling_parameters(clockrate, SAMPLE_RESAMPLE_INTERPOLATE, speed);
+    // reSID-fp can't resample when its filter wouldn't fit (a custom clock
+    // rate far above the C64's at a low output rate): interpolation then
+    if ((sidfp) && (!sidfp->set_sampling_parameters(clockrate, SAMPLE_RESAMPLE_INTERPOLATE, speed)))
+      sidfp->set_sampling_parameters(clockrate, SAMPLE_INTERPOLATE, speed);
     break;
   }
 
