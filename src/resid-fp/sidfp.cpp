@@ -20,7 +20,11 @@
 #include "sidfp.h"
 #include <math.h>
 
-#define RINGSIZE 2048
+// The resampler's input ring buffer (samples at half the clock rate). The
+// FIR filter must fit in it, and it gets longer as the output rate falls:
+// 715 at 44100 Hz, 2771 at 22050 Hz and 7637 at 8000 Hz with the PAL clock
+// (7927 with NTSC). 2048 was enough only from about 30 kHz up
+#define RINGSIZE 8192
 
 #ifdef __SSE__
 #include <xmmintrin.h>
@@ -404,12 +408,17 @@ bool SIDFP::set_sampling_parameters(double clock_freq, sampling_method method,
 
     // The filter length is equal to the filter order + 1.
     // The filter length must be an odd number (sinc is symmetric about x = 0).
-    fir_N = static_cast<int>(N*f_cycles_per_sample) + 1;
-    fir_N |= 1;
+    int new_N = static_cast<int>(N*f_cycles_per_sample) + 1;
+    new_N |= 1;
 
-    // Check whether the sample ring buffer would overfill.
-    if (fir_N > RINGSIZE - 1)
+    // Check whether the sample ring buffer would overfill. fir_N and fir_RES
+    // stay as they were then: they describe the FIR tables there are (if
+    // any). They were set before this check, and clocking afterwards read
+    // far past the tables (a crash now and then, for example when a plugin
+    // host changed the rate to 22050 Hz)
+    if (new_N > RINGSIZE - 1)
       return false;
+    fir_N = new_N;
 
     /* Error is bound by 1.234 / L^2, so for 16-bit: sqrt(1.234 * (1 << 16)) */
     fir_RES = static_cast<int>(sqrt(1.234 * (1 << 16)) / f_cycles_per_sample + 0.5);
