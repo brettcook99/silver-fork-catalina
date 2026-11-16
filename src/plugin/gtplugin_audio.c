@@ -67,6 +67,33 @@ static int wasrecording = 0;
 static int washostplaying = 0;
 volatile int gtsync_modechange = 0;
 
+// The host may tell late that it records: Pro Tools tells a plugin on its
+// main thread, after the playback has started (and a plugin hosting this
+// one passes it on later still), so the first note of a recording was only
+// played. For the first STARTWINDOW seconds of a playback that doesn't
+// record (yet) the notes that would be recorded are kept; if the recording
+// starts meanwhile they go into the patterns as if it had been known from
+// the start. When the time is up without recording, it is jam mode
+#define STARTWINDOW 2.0
+#define MAXPENDING 256
+static GTRECORDNOTE pending[MAXPENDING];
+static int npending = 0;
+static double startwindow = 0.0;  // samples of the window left, 0 = none
+
+// Program changes: the instrument each MIDI channel's notes play and are
+// recorded with (0 = the instrument chosen in the editor). Saved with the
+// project. For the GoatTracker thread's message: the channels that got one
+// (bits), and a program past the last instrument (its number + 1)
+volatile int gtsync_programinstr[16];
+SDL_atomic_t gtsync_programchanged;
+volatile int gtsync_programbad = 0;
+
+// DC blocker on the output: reSID's integer high-pass leaves the output at
+// a constant level after a sound (up to a few %), which a DAW's meters
+// show. A first-order high-pass at DCBLOCKHZ takes it off
+#define DCBLOCKHZ 5.0
+static double dcin = 0.0, dcout = 0.0, dcpole = 0.9993;
+
 #define RENDERCHUNK 1024
 static short renderbuf[RENDERCHUNK];
 static short scratchbuf[RENDERCHUNK];
@@ -144,6 +171,8 @@ static void initsid(void)
   sid_resetchip();
   sidready = 1;
   framecount = 0.0;
+  dcin = dcout = 0.0;
+  dcpole = exp(-6.283185307179586 * DCBLOCKHZ / samplerate);
 }
 
 int gtplugin_soundinit(unsigned model, unsigned ntsc, unsigned multiplier, unsigned interpolate, unsigned customclockrate)
@@ -362,11 +391,32 @@ static int recordrow(int c, double framefraction, int *patt, int *row, int *tran
   return 1;
 }
 
-static void recordnote(int c, int note, double framefraction)
+// What a note (or keyoff) played now on a voice does while the song plays:
+// RECORD_NOW = recorded, RECORD_KEEP = kept in case the host's recording
+// flag comes late (see STARTWINDOW), 0 = only played
+#define RECORD_NOW 1
+#define RECORD_KEEP 2
+static int recordstate(int playing)
+{
+  if (!playing) return 0;
+  if (startwindow > 0.0) return RECORD_KEEP;
+  return recordmode ? RECORD_NOW : 0;
+}
+
+// The instrument a note from MIDI channel ch plays with: the one the
+// channel's program change chose, else the editor's
+static int programinstr(int ch)
+{
+  int ins = gtsync_programinstr[ch & 15];
+  return ((ins > 0) && (ins < MAX_INSTR)) ? ins : editorInfo.einum;
+}
+
+static void recordnote(int c, int note, int instr, double framefraction, int state)
 {
   GTRECORDNOTE rn;
   int patt, row, trans, skip;
 
+  if (!state) return;
   if (!recordrow(c, framefraction, &patt, &row, &trans, &skip)) return;
   memset(&rn, 0, sizeof rn);
   rn.voice = c;
@@ -380,10 +430,8 @@ static void recordnote(int c, int note, double framefraction)
     if (n < FIRSTNOTE) n = FIRSTNOTE;
     if (n > LASTNOTE) n = LASTNOTE;
     rn.note = n;
-    rn.instr = editorInfo.einum;
+    rn.instr = instr;
   }
-  rn.newpass = recordpass;
-  recordpass = 0;
   // The note sounds already: the player doesn't play it again
   if ((skip) && (note != KEYOFF))
   {
@@ -391,7 +439,30 @@ static void recordnote(int c, int note, double framefraction)
     chn[c].skiprow = (unsigned char)row;
     chn[c].skipvalid = 1;
   }
+  if (state == RECORD_KEEP)
+  {
+    // Its pass starts when it is recorded (commitpending())
+    if (npending < MAXPENDING) pending[npending++] = rn;
+    return;
+  }
+  rn.newpass = recordpass;
+  recordpass = 0;
   recordpush(&rn);
+}
+
+// The host's recording flag came within the start window: the notes kept
+// since the playback started are recorded
+static void commitpending(void)
+{
+  int k;
+
+  for (k = 0; k < npending; k++)
+  {
+    pending[k].newpass = recordpass;
+    recordpass = 0;
+    recordpush(&pending[k]);
+  }
+  npending = 0;
 }
 
 // MIDI INPUT 2-3 PATTERNS: the voice a note-on plays on. The voices are the
@@ -465,6 +536,29 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
   int ev;
   int spread;
 
+  // A program change (the DAW track's patch): the channel's notes play and
+  // are recorded with that instrument from now on. Program 0 (the DAW's
+  // patch 1) = instrument 01
+  if (type == 0xc0)
+  {
+    int ins = m->data1 + 1;
+    int bit, old;
+
+    if (ins < MAX_INSTR)
+    {
+      gtsync_programinstr[ch] = ins;
+      bit = 1 << ch;
+    }
+    else
+    {
+      gtsync_programbad = ins;
+      bit = GTSYNC_PROGRAMBAD;
+    }
+    do old = SDL_AtomicGet(&gtsync_programchanged);
+    while (!SDL_AtomicCAS(&gtsync_programchanged, old, old | bit));
+    return;
+  }
+
   if (type == 0x90) ev = m->data2 ? MIDI_NOTEON : MIDI_NOTEOFF;
   else if (type == 0x80) ev = MIDI_NOTEOFF;
   else if (type == 0xb0) ev = MIDI_CONTROL;
@@ -509,7 +603,7 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
           int c = (base + k) % MAX_CHN;
           releasenote(c);
           routednote[c] = 0;
-          if ((recordmode) && (playing)) recordnote(c, KEYOFF, framefraction);
+          recordnote(c, KEYOFF, 0, framefraction, recordstate(playing));
         }
         return;
       }
@@ -521,10 +615,12 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
       if ((note < FIRSTNOTE) || (note > LASTNOTE)) return;
       if (ev == MIDI_NOTEON)
       {
+        int ins = programinstr(ch);
+
         c = spread ? spreadvoice() : ch;
-        playtestnote(note, editorInfo.einum, c);
+        playtestnote(note, ins, c);
         routednote[c] = note;
-        if ((recordmode) && (playing)) recordnote(c, note, framefraction);
+        recordnote(c, note, ins, framefraction, recordstate(playing));
       }
       else
       {
@@ -533,7 +629,7 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
         {
           releasenote(c);
           routednote[c] = 0;
-          if ((recordmode) && (playing) && (gtsync_recordoff)) recordnote(c, KEYOFF, framefraction);
+          if (gtsync_recordoff) recordnote(c, KEYOFF, 0, framefraction, recordstate(playing));
         }
       }
       return;
@@ -544,7 +640,8 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
 
 // The host's recording: edit mode while it records (the notes from the DAW
 // are recorded into the patterns), jam mode when it starts playing without
-// recording or stops recording. Only while following the host (DAW SYNC)
+// recording (STARTWINDOW seconds later: the recording flag may come late)
+// or stops recording. Only while following the host (DAW SYNC)
 static void followrecording(const gtcore_transport *tp, int sync)
 {
   int playing = (tp->valid) && (tp->playing);
@@ -556,20 +653,43 @@ static void followrecording(const gtcore_transport *tp, int sync)
     {
       recordmode = 1;
       gtsync_modechange = 1;
+      // The notes since the playback started, if it started just now
+      if (startwindow > 0.0) commitpending();
+      startwindow = 0.0;
     }
     else if ((!recording) && (wasrecording))
     {
       recordmode = 0;
       gtsync_modechange = 2;
     }
-    else if ((playing) && (!washostplaying) && (!recording) && (recordmode))
+    else if ((playing) && (!washostplaying) && (!recording))
     {
-      recordmode = 0;
-      gtsync_modechange = 2;
+      startwindow = samplerate * STARTWINDOW;
+      npending = 0;
     }
+  }
+  if ((!sync) || (!playing))
+  {
+    startwindow = 0.0;
+    npending = 0;
   }
   wasrecording = recording;
   washostplaying = playing;
+}
+
+// The start window ends after samples more: no recording, so jam mode
+static void endstartwindow(int samples)
+{
+  if (startwindow <= 0.0) return;
+  startwindow -= samples;
+  if (startwindow > 0.0) return;
+  startwindow = 0.0;
+  npending = 0;
+  if (recordmode)
+  {
+    recordmode = 0;
+    gtsync_modechange = 2;
+  }
 }
 
 /*
@@ -587,9 +707,14 @@ static void render(float *left, float *right, int samples)
     sid_render(renderbuf, n, editorInfo.adparam);
     for (c = 0; c < n; c++)
     {
-      float v = renderbuf[c] * (1.0f / 32768.0f);
-      left[c] = v;
-      right[c] = v;
+      double x = renderbuf[c] * (1.0 / 32768.0);
+      double y = x - dcin + dcpole * dcout;
+      // (no denormals while it fades out in silence)
+      if ((y < 1e-20) && (y > -1e-20)) y = 0.0;
+      dcin = x;
+      dcout = y;
+      left[c] = (float)y;
+      right[c] = (float)y;
     }
     left += n;
     right += n;
@@ -754,5 +879,6 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
   }
 
   if (following) expectedppq = ppqbase + samples / samplesperbeat;
+  endstartwindow(samples);
   SDL_UnlockMutex(gtplugin_enginemutex);
 }

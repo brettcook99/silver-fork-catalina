@@ -102,6 +102,9 @@ extern int midikeyoff;
 // When the MIDI note event arrived (milliseconds, SDL_GetTicks())
 extern unsigned midinotetime;
 extern int midinotechannel;
+// The instrument the MIDI note is entered and played with: in the plugin
+// the one its MIDI channel chose with a program change, else the editor's
+int midinoteinstr(void);
 extern int menucommand;
 extern int mouseb, prevmouseb;
 extern int mousewheel;

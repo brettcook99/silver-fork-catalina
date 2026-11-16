@@ -209,14 +209,16 @@ void GoatTrackerProcessor::processBlock(juce::AudioBuffer<float> &buffer, juce::
     }
   }
 
-  // The block's MIDI (no allocation: the vector has room reserved)
+  // The block's MIDI (no allocation: the vector has room reserved): notes,
+  // control changes and program changes (a track's patch chooses the
+  // instrument)
   midiEvents.clear();
   for (const auto meta : midi)
   {
     const auto msg = meta.getMessage();
     if (msg.getRawDataSize() < 2) continue;
     const auto *raw = msg.getRawData();
-    if ((raw[0] & 0xf0) < 0x80 || (raw[0] & 0xf0) > 0xb0) continue;
+    if ((raw[0] & 0xf0) < 0x80 || (raw[0] & 0xf0) > 0xc0) continue;
     if (midiEvents.size() >= midiEvents.capacity()) break;
     gtcore_midi e;
     e.offset = juce::jlimit(0, samples - 1, meta.samplePosition);

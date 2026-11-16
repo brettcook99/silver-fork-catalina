@@ -80,6 +80,15 @@ extern int gtsync_route;          // MIDI channels 1-3 play / record voices 1-3
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
 // The host's recording switched the mode: 1 = edit, 2 = jam (for the message)
 extern volatile int gtsync_modechange;
+// MIDI program changes: the instrument of each MIDI channel's notes (0 = the
+// editor's instrument; saved with the project), the channels that got one
+// since the GoatTracker thread looked (bits 0-15, for its message; bit
+// GTSYNC_PROGRAMBAD: a program past the last instrument came, its number + 1
+// in gtsync_programbad)
+#define GTSYNC_PROGRAMBAD 0x10000
+extern volatile int gtsync_programinstr[16];
+extern SDL_atomic_t gtsync_programchanged;
+extern volatile int gtsync_programbad;
 // The host's tempo (0 if not known) and whether its transport runs
 double gtsync_hostbpm(void);
 int gtsync_hostplaying(void);

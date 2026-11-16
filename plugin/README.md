@@ -6,9 +6,14 @@ position, MIDI from the DAW's tracks, and files dragged onto its window.
 
 | Format | Hosts | Built |
 |---|---|---|
-| VST3 | UA LUNA (Windows, macOS), Cakewalk Sonar, Cubase, Reaper, Bitwig... | Windows, macOS |
+| VST3 (the "VST" version) | UA LUNA (Windows, macOS), Cakewalk Sonar, Cubase, Studio One, Reaper, Bitwig, Ableton Live 11+, FL Studio... | Windows, macOS |
 | AU | LUNA on macOS (its default), Logic, GarageBand | macOS |
 | AAX | Pro Tools (it loads nothing else) | when the AAX SDK is given |
+
+The old VST 2 format is not built: Steinberg stopped licensing its SDK in
+2018, so only developers who signed its licence before then may release VST
+2 plugins. Hosts that load only VST 2 (Ableton Live 10 and older, for
+example) can't use the plugin.
 
 ## Using it
 
@@ -33,12 +38,22 @@ position, MIDI from the DAW's tracks, and files dragged onto its window.
   channels 1-3 record three voices at once; when the DAW stops recording, or
   starts playing without recording, it is back in jam mode. (A plugin can't
   see a track's record button: the DAW sends a track's live MIDI only while
-  it is armed.) With the song stopped in edit mode the notes are entered at
-  the cursor. With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the MIDI
-  channel doesn't matter: the notes are shared out to 2 or 3 voices from the
-  cursor's (the next free one in turn), so one DAW track can play chords.
-  The sustain pedal (CC 64) enters a keyoff. Other channels and the CC knobs
-  work as a MIDI keyboard does in the standalone program.
+  it is armed. Pro Tools reports its recording a moment after the playback
+  starts, so the notes of the first two seconds are kept and recorded once
+  the recording is known.) With the song stopped in edit mode the notes are
+  entered at the cursor. With MIDI INPUT 2 or 3 PATTERNS (bottom of the
+  screen) the MIDI channel doesn't matter: the notes are shared out to 2 or
+  3 voices from the cursor's (the next free one in turn), so one DAW track
+  can play chords. The sustain pedal (CC 64) enters a keyoff. Other
+  channels and the CC knobs work as a MIDI keyboard does in the standalone
+  program (CC 60 chooses the instrument, CC 90 sets the value of the effect
+  picked in the middle panel).
+- **Patches**: a program change (the patch chosen on a DAW's MIDI track)
+  makes that MIDI channel's notes play and record with that instrument:
+  patch 1 = instrument 01, patch 3 = instrument 03 ... up to 63 = 3F. So MIDI
+  channel 2 with patch 3 plays voice 2 with instrument 03. Channels without
+  a program change use the instrument chosen in the editor. The choices are
+  saved with the project.
 - **Drag & drop**: .sng, .ins, .mid, .sid and .fermatax files dropped on the
   window open as in the standalone program.
 - Settings (goattrk2.cfg, recent files) are in `%APPDATA%\GoatTracker Ultimate`

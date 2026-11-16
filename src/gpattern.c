@@ -117,13 +117,13 @@ static void midipolynote(int note)
     if (shared < 0)
     {
       pattern[p][midichordrow*4] = note;
-      pattern[p][midichordrow*4+1] = editorInfo.einum;
+      pattern[p][midichordrow*4+1] = midinoteinstr();
     }
     else
       gui_message("Chord note not entered: channels %d and %d show the same pattern", shared + 1, c + 1);
   }
   if ((recordmode) && (midichordfirst) && (autoadvance < 2)) noteadvance();
-  playtestnote(note, editorInfo.einum, c);
+  playtestnote(note, midinoteinstr(), c);
 }
 
 // INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
@@ -253,6 +253,7 @@ void patterncommands(void)
   }
   {
     int newnote = -1;
+    int newinstr = editorInfo.einum;
     if (key)
     {
       switch (keypreset)
@@ -308,7 +309,11 @@ void patterncommands(void)
     // MIDI INPUT 2-3 PATTERNS the notes go to 2-3 channels (see midichord)
     if (midinoteon)
     {
-      if ((midichord <= 1) && (!midinoterouted)) newnote = midinoteon;
+      if ((midichord <= 1) && (!midinoterouted))
+      {
+        newnote = midinoteon;
+        newinstr = midinoteinstr();
+      }
       else midipolynote(midinoteon);
     }
     // The sustain pedal (MIDI CC 64) pressed: a keyoff, as RETURN entered
@@ -516,7 +521,7 @@ void patterncommands(void)
         pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4] = newnote;
         if (newnote < REST)
         {
-          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+1] = editorInfo.einum;
+          pattern[editorUndoInfo.editorInfo[editorInfo.epchn].epnum][editorInfo.eppos*4+1] = newinstr;
         }
         else
         {
@@ -532,7 +537,7 @@ void patterncommands(void)
       {
         if (autoadvance < 2) noteadvance();
       }
-      playtestnote(newnote, editorInfo.einum, editorInfo.epchn);
+      playtestnote(newnote, newinstr, editorInfo.epchn);
     }
   }
   switch(rawkey)

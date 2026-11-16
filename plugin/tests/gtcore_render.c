@@ -19,10 +19,16 @@
  *   -midi=B:C:N[:L]  a MIDI note (channel C 1-16, note N) at beat B, L beats
  *                long (default 1); can be given several times
  *   -cc=B:C:N:V  a MIDI control change (controller N, value V) at beat B
+ *   -pc=B:C:P    a MIDI program change (program P 0-127) at beat B
  *   -record=B:E  the host records from beat B to beat E
  *   -loadstate=file  load a plugin state (as saved with -state) after the song
  *   -instances=N load N copies and render each (isolation test)
  *   -frame=out.bmp  save the editor's picture after loading
+ *   -frameend=out.bmp  save the editor's picture after rendering
+ *   -keys=K,K... SDL keycodes pressed after loading (e.g. 1073741923 = the
+ *                numpad's period: edit / jam mode)
+ *   -stopped     the host's transport stays stopped (MIDI still comes at
+ *                its beats, as played live)
  */
 
 #include <stdio.h>
@@ -183,6 +189,9 @@ int main(int argc, char **argv)
   double recordfrom = -1.0, recordto = -1.0;
   int instances = 1;
   const char *framepath = NULL;
+  const char *frameendpath = NULL;
+  const char *keys = NULL;
+  int stopped = 0;
   const char *statepath = NULL;
   const char *loadstatepath = NULL;
   const char *song2 = NULL;
@@ -234,9 +243,22 @@ int main(int argc, char **argv)
       evdata1[numev] = (unsigned char)cc;
       evdata2[numev++] = (unsigned char)v;
     }
+    else if ((!strncmp(argv[i], "-pc=", 4)) && (numev < MAXEVENTS))
+    {
+      double b = 0.0;
+      int ch = 1, prog = 0;
+      sscanf(argv[i] + 4, "%lf:%d:%d", &b, &ch, &prog);
+      evbeat[numev] = b;
+      evstatus[numev] = (unsigned char)(0xc0 | ((ch - 1) & 15));
+      evdata1[numev] = (unsigned char)prog;
+      evdata2[numev++] = 0;
+    }
     else if (!strncmp(argv[i], "-record=", 8)) sscanf(argv[i] + 8, "%lf:%lf", &recordfrom, &recordto);
     else if (!strncmp(argv[i], "-instances=", 11)) instances = atoi(argv[i] + 11);
     else if (!strncmp(argv[i], "-frame=", 7)) framepath = argv[i] + 7;
+    else if (!strncmp(argv[i], "-frameend=", 10)) frameendpath = argv[i] + 10;
+    else if (!strncmp(argv[i], "-keys=", 6)) keys = argv[i] + 6;
+    else if (!strcmp(argv[i], "-stopped")) stopped = 1;
     else if (!strncmp(argv[i], "-state=", 7)) statepath = argv[i] + 7;
     else if (!strncmp(argv[i], "-loadstate=", 11)) loadstatepath = argv[i] + 11;
     else if (!strncmp(argv[i], "-song2=", 7)) song2 = argv[i] + 7;
@@ -268,7 +290,7 @@ int main(int argc, char **argv)
       return 1;
     }
     cores[inst].prepare(rate, block > 0 ? block : 4096);
-    cores[inst].editorvisible(framepath != NULL);
+    cores[inst].editorvisible((framepath != NULL) || (frameendpath != NULL));
     memset(&in, 0, sizeof in);
     in.type = GTIN_DROPFILE;
     // -song2: the other instances get another song (isolation test)
@@ -299,6 +321,25 @@ int main(int argc, char **argv)
   }
   // Time for the songs to load (on the GoatTracker threads)
   sleepms(1500);
+
+  if (keys)
+  {
+    const char *k = keys;
+    while (*k)
+    {
+      gtcore_inputevent in;
+      memset(&in, 0, sizeof in);
+      in.type = GTIN_KEYDOWN;
+      in.sym = atoi(k);
+      for (inst = 0; inst < instances; inst++) cores[inst].input(&in);
+      sleepms(100);
+      in.type = GTIN_KEYUP;
+      for (inst = 0; inst < instances; inst++) cores[inst].input(&in);
+      sleepms(100);
+      while ((*k) && (*k != ',')) k++;
+      if (*k == ',') k++;
+    }
+  }
 
   if (framepath)
   {
@@ -347,7 +388,7 @@ int main(int argc, char **argv)
       }
       memset(&tp, 0, sizeof tp);
       tp.valid = (bpm > 0.0);
-      tp.playing = playing;
+      tp.playing = (playing) && (!stopped);
       tp.bpm = bpm;
       tp.ppq = beat;
       tp.timesignum = 4;
@@ -404,6 +445,15 @@ int main(int argc, char **argv)
     int size;
     // Time for recorded notes to reach the patterns
     sleepms(300);
+    if ((frameendpath) && (!inst))
+    {
+      static unsigned pixels[4096 * 2400];
+      int w = 0, h = 0;
+      cores[0].getframe(0, NULL, 0, 0, 0, &w, &h);
+      if ((w > 0) && (w <= 4096) && (h <= 2400) && (cores[0].getframe(0, pixels, w * 4, w, h, &w, &h)))
+        savebmp(frameendpath, pixels, w, h);
+      else fprintf(stderr, "No frame\n");
+    }
     if (cores[inst].getstate(&state, &size))
     {
       printf("instance %d: state %d bytes\n", inst, size);

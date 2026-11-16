@@ -595,6 +595,9 @@ static int settingstext(char *out, int outsize)
   ADD("startbar=%d\n", gtsync_startbar);
   ADD("route=%d\n", gtsync_route);
   ADD("recordoff=%d\n", gtsync_recordoff);
+  // The instruments chosen by MIDI program changes, channels 1-16
+  ADD("programs=");
+  for (c = 0; c < 16; c++) ADD("%d%s", gtsync_programinstr[c], (c < 15) ? "," : "\n");
   ADD("songfile=%s\n", loadedsongfilename);
 #undef ADD
   if (len >= outsize) len = outsize - 1;
@@ -862,6 +865,21 @@ static void applystate(const unsigned char *data, int size)
     SETINT("startbar", gtsync_startbar);
     SETINT("route", gtsync_route);
     SETINT("recordoff", gtsync_recordoff);
+    {
+      char programs[128];
+      if (settingstring(text, "programs", programs, sizeof programs))
+      {
+        const char *p = programs;
+        for (c = 0; c < 16; c++)
+        {
+          int ins = atoi(p);
+          gtsync_programinstr[c] = ((ins > 0) && (ins < MAX_INSTR)) ? ins : 0;
+          p = strchr(p, ',');
+          if (!p) break;
+          p++;
+        }
+      }
+    }
     settingstring(text, "songfile", loadedsongfilename, MAX_FILENAME);
 
     // Validate
@@ -892,6 +910,40 @@ static void applystate(const unsigned char *data, int size)
   makestate();
 }
 
+// The message for MIDI program changes on the channels in changed (bits):
+// which voice / channel plays which instrument now
+static void programmessage(int changed)
+{
+  char text[256];
+  int len = 0;
+  int ch, count = 0, last = -1;
+  int bad = (changed & GTSYNC_PROGRAMBAD) ? gtsync_programbad : 0;
+
+  for (ch = 0; ch < 16; ch++)
+  {
+    int ins = gtsync_programinstr[ch];
+    if ((!(changed & (1 << ch))) || (!ins) || (len >= (int)sizeof text - 32)) continue;
+    // Channels 1-3 play voices 1-3 (not with MIDI INPUT 2-3: then the
+    // channel's notes are shared out)
+    len += snprintf(text + len, sizeof text - len, "%s%s %d = %02X", len ? ", " : "",
+      ((gtsync_route) && (midichord <= 1) && (ch < MAX_CHN)) ? "voice" : "channel", ch + 1, ins);
+    count++;
+    last = ch;
+  }
+  if (count == 1)
+  {
+    int ins = gtsync_programinstr[last];
+    if ((gtsync_route) && (midichord <= 1) && (last < MAX_CHN))
+      gui_message("Voice %d plays instrument %02X (MIDI program change)", last + 1, ins);
+    else
+      gui_message("MIDI channel %d plays instrument %02X (program change)", last + 1, ins);
+  }
+  else if (count)
+    gui_message("MIDI program changes: %s", text);
+  else if (bad)
+    gui_message("MIDI program %d: no such instrument (programs 1-%d = instruments 01-%02X)", bad, MAX_INSTR - 1, MAX_INSTR - 1);
+}
+
 void gtplugin_service(void)
 {
   GTRECORDNOTE rn;
@@ -906,6 +958,12 @@ void gtplugin_service(void)
     gtsync_modechange = 0;
     if (change == 1) gui_message("DAW recording: edit mode, the notes are recorded into the patterns");
     else gui_message("Jam mode: notes are only played");
+  }
+
+  // MIDI program changes (the DAW tracks' patches) chose instruments
+  {
+    int changed = SDL_AtomicSet(&gtsync_programchanged, 0);
+    if (changed) programmessage(changed);
   }
 
   // Notes recorded from the host's MIDI tracks

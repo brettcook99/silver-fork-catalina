@@ -146,7 +146,8 @@ jobs:
           cat > "$pkg/INSTALL.txt" <<'EOF'
           GoatTracker Ultimate plugin for macOS 10.15 or later (Intel and Apple Silicon)
 
-          VST3 (LUNA, Cubase, Reaper, Bitwig ...): copy "GoatTracker Ultimate.vst3" to
+          VST3, the VST version (LUNA, Cubase, Studio One, Reaper, Bitwig, Ableton
+          Live 11+, FL Studio ...): copy "GoatTracker Ultimate.vst3" to
             ~/Library/Audio/Plug-Ins/VST3
           AU (LUNA, Logic, GarageBand): copy "GoatTracker Ultimate.component" to
             ~/Library/Audio/Plug-Ins/Components

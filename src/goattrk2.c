@@ -1417,7 +1417,7 @@ void midicommands(void)
 		// Elsewhere (except the songname editor) the note is just played,
 		// the notes of a chord on their channels
 		if ((editorInfo.editmode != EDIT_PATTERN) && (editorInfo.editmode != EDIT_NAMES))
-			playtestnote(midinoteon, editorInfo.einum, midichordchn);
+			playtestnote(midinoteon, midinoteinstr(), midichordchn);
 	}
 
 	// Where the cursor is after the note: the next channel in turn is used

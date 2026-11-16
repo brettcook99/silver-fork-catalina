@@ -281,6 +281,15 @@ static void instrumentknob(int value)
   gui_message("Instrument %02X (MIDI CC 60)", editorInfo.einum);
 }
 
+int midinoteinstr(void)
+{
+#ifdef GT_PLUGIN
+  int ins = gtsync_programinstr[midinotechannel & 15];
+  if ((ins > 0) && (ins < MAX_INSTR)) return ins;
+#endif
+  return editorInfo.einum;
+}
+
 int input_nextmidi(void)
 {
   int midinote;
