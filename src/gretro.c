@@ -475,11 +475,86 @@ double retro_songbpm(void)
 }
 // The title bar's SYNC: where it is (set when printed)
 static int tbsyncx = -1;
-// The plugin's file menus on the title bar (no menu bar of the system in a
-// plugin): LOAD, SAVE, IMPORT, EXPORT, each a dropdown
-#define TB_MENUS 4
-static const char *tbmenuname[TB_MENUS] = { "LOAD", "SAVE", "IMPORT", "EXPORT" };
+// The plugin's menu bar (no menu bar of the system in a plugin): a right
+// click on the title bar shows LOAD, SAVE, IMPORT, EXPORT and CLEAR there
+// instead, each a dropdown. It stays until an item is chosen (a left click,
+// or the right button let go over it) or a click elsewhere. A host's editor
+// window may not report a left click while the right button is down, so
+// the standalone program's way (hold the right button, click with the left)
+// isn't needed
+#define TB_MENUS 5
+static const char *tbmenuname[TB_MENUS] = { "LOAD", "SAVE", "IMPORT", "EXPORT", "CLEAR" };
 static int tbmenux[TB_MENUS];
+static int tbmenuopen = 0;        // the menu bar is shown
+static int tbmenuheld = 0;        // the right button that showed it is still down
+static int tbmenupressx = 0;      // where it was pressed
+
+// The menu at column x of the menu bar, -1 if none
+static int tbmenuat(int x)
+{
+  int m;
+
+  for (m = 0; m < TB_MENUS; m++)
+  {
+    if ((x >= tbmenux[m] - 1) && (x <= tbmenux[m] + (int)strlen(tbmenuname[m]))) return m;
+  }
+  return -1;
+}
+
+static void tbmenuchoose(int m)
+{
+  tbmenuopen = 0;
+  tbmenuheld = 0;
+  gui_openfilemenu(m, tbmenux[m]);
+}
+
+// Once per frame (the mouse as getkey() read it last): shows, opens or
+// hides the menu bar
+static void tbmenuupdate(void)
+{
+  int pressed = mouseb & ~prevmouseb;
+
+  if (eamode)
+  {
+    tbmenuopen = 0;
+    return;
+  }
+  if (!tbmenuopen)
+  {
+    if ((pressed & MOUSEB_RIGHT) && (mousey == 0))
+    {
+      int m, mx = 1;
+
+      for (m = 0; m < TB_MENUS; m++)
+      {
+        tbmenux[m] = mx;
+        mx += (int)strlen(tbmenuname[m]) + 3;
+      }
+      tbmenuopen = 1;
+      tbmenuheld = 1;
+      tbmenupressx = mousex;
+    }
+    return;
+  }
+  // A left click on an item opens it, also while the right button is down
+  if ((pressed & MOUSEB_LEFT) && (mousey == 0) && (tbmenuat(mousex) >= 0))
+  {
+    tbmenuchoose(tbmenuat(mousex));
+    return;
+  }
+  if (tbmenuheld)
+  {
+    if (mouseb & MOUSEB_RIGHT) return;
+    // The right button let go over an item opens it, if the mouse was
+    // moved there (a right click without moving only shows the menu bar);
+    // otherwise the menu bar stays
+    tbmenuheld = 0;
+    if ((mousey == 0) && (mousex != tbmenupressx) && (tbmenuat(mousex) >= 0)) tbmenuchoose(tbmenuat(mousex));
+    return;
+  }
+  // Any other click hides it
+  if (pressed) tbmenuopen = 0;
+}
 #endif
 
 // The tempo now: while playing the cursor channel's (funktempo: the average
@@ -554,25 +629,6 @@ void retro_printtitlebar(void)
     printtext(x, 0, (gtsync_following() ? 13 : gtsync_enabled ? fg_active : fg_inactive) + 16, "SYNC");
 #endif
 
-#ifdef GT_PLUGIN
-    // The file menus, then the song's file name if there is room
-    {
-      int mx = 1, m;
-
-      for (m = 0; m < TB_MENUS; m++)
-      {
-        tbmenux[m] = mx;
-        printtext(mx, 0, fg_active + 16, tbmenuname[m]);
-        mx += (int)strlen(tbmenuname[m]) + 2;
-      }
-      if ((loadedsongfilename[0]) && (x - 1 - mx >= 6))
-      {
-        snprintf(textbuffer, MAX_COLUMNS, "%s", gt_basename(loadedsongfilename));
-        textbuffer[x - 1 - mx] = 0;
-        printtext(mx, 0, 15+16, textbuffer);
-      }
-    }
-#else
     if (!strlen(loadedsongfilename))
       sprintf(textbuffer, "%s", programname);
     else
@@ -587,7 +643,6 @@ void retro_printtitlebar(void)
     }
     textbuffer[x - 1] = 0;
     printtext(0, 0, 15+16, textbuffer);
-#endif
   }
 
   printtext(TB_FV, 0, fg_inactive+16, "FV PO RO");
@@ -640,20 +695,10 @@ void retro_printtitlebar(void)
 void retro_titlebarclick(int x)
 {
 #ifdef GT_PLUGIN
-  int m;
-
   if ((tbsyncx >= 0) && (x >= tbsyncx) && (x <= tbsyncx + 3))
   {
     gui_opendawsync();
     return;
-  }
-  for (m = 0; m < TB_MENUS; m++)
-  {
-    if ((x >= tbmenux[m]) && (x < tbmenux[m] + (int)strlen(tbmenuname[m])))
-    {
-      gui_openfilemenu(m, tbmenux[m]);
-      return;
-    }
   }
 #endif
   if ((x >= TB_FV) && (x <= TB_FV + 1))
@@ -724,6 +769,20 @@ void retro_printstatus(void)
   int cc = cursorcolortable[cursorflash];
   menu = 0;
 
+#ifdef GT_PLUGIN
+  tbmenuupdate();
+  menu = tbmenuopen;
+  if (!menu)
+    retro_printtitlebar();
+  else
+  {
+    int m;
+
+    printblankc(0, 0, 15+16, MAX_COLUMNS);
+    for (m = 0; m < TB_MENUS; m++)
+      printtext(tbmenux[m], 0, 15+16, tbmenuname[m]);
+  }
+#else
   if ((mouseb > MOUSEB_LEFT) && (mousey <= 1) && (!eamode)) menu = 1;
 
   if (!menu)
@@ -734,6 +793,7 @@ void retro_printstatus(void)
     printblankc(0, 0, 15+16, MAX_COLUMNS);
     printtext(0, 0, 15+16, " PLAY | PLAYPOS | PLAYPATT | STOP | LOAD | SAVE | PACK/RL | HELP | CLEAR | QUIT | A-A+ | FULL | VIEW");
   }
+#endif
 
   // Following the playback is done by followplayback() in the main loop
 
@@ -1698,6 +1758,10 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_RIGHT) seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
   }
   // Titlebar actions
+#ifdef GT_PLUGIN
+  // (the menu bar: tbmenuupdate())
+  if ((!tbmenuopen) && (mousey == 0) && (!prevmouseb) && (mouseb == MOUSEB_LEFT)) retro_titlebarclick(mousex);
+#else
   if (!menu)
   {
     if ((mousey == 0) && (!prevmouseb) && (mouseb == MOUSEB_LEFT)) retro_titlebarclick(mousex);
@@ -1738,4 +1802,5 @@ void retro_mousecommands(void)
         gui_openviewmenu();
     }
   }
+#endif
 }

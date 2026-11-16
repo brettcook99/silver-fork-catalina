@@ -293,6 +293,26 @@ void GoatTrackerEditor::mouseMove(const juce::MouseEvent &e)
 
 void GoatTrackerEditor::mouseDrag(const juce::MouseEvent &e)
 {
+  // JUCE reports a mouseDown only for the first button: one pressed (or let
+  // go) while another is held comes as a drag with other buttons down. The
+  // tracker needs those presses (e.g. the right button held, a left click)
+  int now = (e.mods.isLeftButtonDown() ? 1 << 1 : 0) | (e.mods.isMiddleButtonDown() ? 1 << 2 : 0) |
+            (e.mods.isRightButtonDown() ? 1 << 3 : 0);
+  // CTRL+click is the right button on a Mac (see mouseDown)
+  if ((leftIsRight) && (now & (1 << 1))) now = (now & ~(1 << 1)) | (1 << 3);
+  for (int b = 1; b <= 3; b++)
+  {
+    if ((now & (1 << b)) && (!(buttonsDown & (1 << b))))
+    {
+      buttonsDown |= 1 << b;
+      mouseEvent(GTIN_MOUSEDOWN, e, b);
+    }
+    else if ((now) && (!(now & (1 << b))) && (buttonsDown & (1 << b)))
+    {
+      buttonsDown &= ~(1 << b);
+      mouseEvent(GTIN_MOUSEUP, e, b);
+    }
+  }
   mouseEvent(GTIN_MOUSEMOVE, e, 0);
 }
 
@@ -302,7 +322,12 @@ void GoatTrackerEditor::mouseDown(const juce::MouseEvent &e)
   int button = e.mods.isLeftButtonDown() ? 1 : e.mods.isMiddleButtonDown() ? 2 : e.mods.isRightButtonDown() ? 3 : 0;
 #if JUCE_MAC
   // CTRL+click is the right button on a Mac (as in the standalone program)
-  if ((button == 1) && (e.mods.isCtrlDown())) button = 3;
+  leftIsRight = false;
+  if ((button == 1) && (e.mods.isCtrlDown()))
+  {
+    button = 3;
+    leftIsRight = true;
+  }
 #endif
   if (!button) return;
   grabKeyboardFocus();
@@ -317,9 +342,10 @@ void GoatTrackerEditor::mouseUp(const juce::MouseEvent &e)
   {
     if (buttonsDown & (1 << b))
     {
-      bool stillDown = (b == 1) ? juce::ModifierKeys::getCurrentModifiersRealtime().isLeftButtonDown()
-                     : (b == 2) ? juce::ModifierKeys::getCurrentModifiersRealtime().isMiddleButtonDown()
-                                : juce::ModifierKeys::getCurrentModifiersRealtime().isRightButtonDown();
+      auto mods = juce::ModifierKeys::getCurrentModifiersRealtime();
+      bool stillDown = (b == 1) ? mods.isLeftButtonDown()
+                     : (b == 2) ? mods.isMiddleButtonDown()
+                                : (mods.isRightButtonDown() || ((leftIsRight) && (mods.isLeftButtonDown())));
       if (!stillDown)
       {
         buttonsDown &= ~(1 << b);

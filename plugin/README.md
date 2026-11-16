@@ -1,4 +1,4 @@
-# GoatTracker Ultimate plugin (VST3 / AAX / AU)
+# GoatTracker Ultimate plugin (VST3 / VST / AAX / AU)
 
 The plugin is the standalone tracker running inside a DAW: the same retro
 screen, keys, mouse, dialogs and SID Designer, with the DAW's tempo and
@@ -6,23 +6,29 @@ position, MIDI from the DAW's tracks, and files dragged onto its window.
 
 | Format | Hosts | Built |
 |---|---|---|
-| VST3 (the "VST" version) | UA LUNA (Windows, macOS), Cakewalk Sonar, Cubase, Studio One, Reaper, Bitwig, Ableton Live 11+, FL Studio... | Windows, macOS |
+| VST3 | UA LUNA (Windows, macOS), Cakewalk Sonar, Cubase, Studio One, Reaper, Bitwig, Ableton Live 11+, FL Studio... | Windows, macOS |
+| VST (VST 2) | hosts without VST3: Ableton Live 10 and older, Blue Cat PatchWork, older DAWs... | Windows, macOS |
 | AU | LUNA on macOS (its default), Logic, GarageBand | macOS |
 | AAX | Pro Tools (it loads nothing else) | when the AAX SDK is given |
 
-The old VST 2 format is not built: Steinberg stopped licensing its SDK in
-2018, so only developers who signed its licence before then may release VST
-2 plugins. Hosts that load only VST 2 (Ableton Live 10 and older, for
-example) can't use the plugin.
+The VST 2 version is built with the headers of FST (`plugin/vst2`), a
+reverse-engineered VST 2 interface under the GPL 3, because Steinberg no
+longer hands out its VST 2 SDK. FST's authors note that Steinberg's licence
+terms cover the "VST" name; the plugin is free software and isn't sold.
 
 ## Using it
 
 - Put it on an instrument track. The song is saved in the DAW's project.
-- **LOAD, SAVE, IMPORT, EXPORT** on the blue title bar open dropdowns: load /
-  save a song or an instrument, import SID, MIDI or chipsynth C64 (.fermatax)
-  files, export SID (the packer / relocator), MIDI or .fermatax. The files are
-  chosen in the system's own file dialogs, and each kind of file starts in the
-  folder used last for it (remembered in goattrk2.cfg).
+- **The blue title bar** shows the song's name. A **right click** on it shows
+  **LOAD, SAVE, IMPORT, EXPORT, CLEAR** there instead (it stays until an item
+  is chosen or you click elsewhere); a left click on one, or letting go of the
+  right button over it, opens its dropdown: load / save a song or an
+  instrument, import SID, MIDI or chipsynth C64 (.fermatax) files, export SID
+  (the packer / relocator), MIDI or .fermatax, clear the track (the cursor
+  channel's pattern), the pattern (all three channels' patterns) or all (the
+  clear dialog, everything ticked). The files are chosen in the system's own
+  file dialogs, and each kind of file starts in the folder used last for it
+  (remembered in goattrk2.cfg).
 - **DAW SYNC** (click `SYNC` in the title bar): while the DAW plays, the song
   plays from the DAW's position at the DAW's tempo. One pattern row is one
   highlight step (1/4 beat by default), so beat 1 of bar 1 is row 0 (the
@@ -32,19 +38,18 @@ example) can't use the plugin.
   exactly as in the standalone program; at another tempo the whole C64 frame
   clock follows the DAW's.
 - **MIDI**: channels 1, 2 and 3 play voices 1, 2 and 3. The plugin starts in
-  jam mode. While the DAW records (DAW SYNC on), it switches to edit mode and
-  the notes are recorded into the patterns at the rows playing (note-offs as
-  `---`; one recording pass is one undo step), so three MIDI tracks on
-  channels 1-3 record three voices at once; when the DAW stops recording, or
-  starts playing without recording, it is back in jam mode. (A plugin can't
-  see a track's record button: the DAW sends a track's live MIDI only while
-  it is armed. Pro Tools reports its recording a moment after the playback
-  starts, so the notes of the first two seconds are kept and recorded once
-  the recording is known.) With the song stopped in edit mode the notes are
-  entered at the cursor. With MIDI INPUT 2 or 3 PATTERNS (bottom of the
-  screen) the MIDI channel doesn't matter: the notes are shared out to 2 or
-  3 voices from the cursor's (the next free one in turn), so one DAW track
-  can play chords. The sustain pedal (CC 64) enters a keyoff. Other
+  jam mode. The **sustain pedal / footswitch (CC 64)** switches: pressed =
+  edit mode, released = jam mode (the middle mouse button and NUMPAD . switch
+  too, and the mode stays until one of them switches again; the DAW's own
+  record button doesn't change it). In edit mode the notes are recorded into
+  the patterns at the rows playing while the DAW plays (note-offs as `---`;
+  one playback pass is one undo step), so three MIDI tracks on channels 1-3
+  record three voices at once; with the song stopped they are entered at the
+  cursor. (The DAW sends a track's live MIDI only while the track is armed or
+  selected.) With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the MIDI
+  channel doesn't matter: the notes are shared out to 2 or 3 voices from the
+  cursor's (the next free one in turn), so one DAW track can play chords.
+  CTRL+SHIFT+RETURN (CMD+SHIFT+RETURN on macOS) enters a keyoff. Other
   channels and the CC knobs work as a MIDI keyboard does in the standalone
   program (CC 60 chooses the instrument, CC 90 sets the value of the effect
   picked in the middle panel).
@@ -96,13 +101,18 @@ plugin/build_win.sh LLVM_MINGW=<llvm-mingw> SDL2_SRC=<SDL2-2.32.10> JUCE_DIR=<JU
 ```
 
 Then copy `build-plugin/shell/GoatTrackerUltimate_artefacts/Release/VST3/GoatTracker Ultimate.vst3`
-to `C:\Program Files\Common Files\VST3`.
+to `C:\Program Files\Common Files\VST3`. The VST 2 version is
+`.../Release/VST/GoatTracker Ultimate.dll` with the folder
+`GoatTracker Ultimate Data` next to it (the core library as `gtcore.bin`, so
+that a DAW scanning for plugins leaves it alone, and the fonts): copy both to
+the DAW's VST plugin folder.
 
 ### macOS
 
 `.github/workflows/build-plugin-macos.yml` builds universal (Intel + Apple
-Silicon, macOS 10.15+) VST3 and AU plugins, ad-hoc signed. Copy them to
-`~/Library/Audio/Plug-Ins/VST3` and `~/Library/Audio/Plug-Ins/Components`.
+Silicon, macOS 10.15+) VST3, VST and AU plugins, ad-hoc signed. Copy them to
+`~/Library/Audio/Plug-Ins/VST3`, `~/Library/Audio/Plug-Ins/VST` and
+`~/Library/Audio/Plug-Ins/Components`.
 Downloaded plugins need their quarantine flag removed
 (`xattr -dr com.apple.quarantine <plugin>`) unless they are signed with a
 Developer ID and notarized.
@@ -120,6 +130,6 @@ Developer ID and notarized.
 ## Licences
 
 The tracker is GPL v2 or later; JUCE 8 is used under its AGPLv3 licence (or
-its commercial / Starter licence), so the plugin is distributed with its
-source. The exporter's assembler (`src/asm/`) is for non-commercial use only,
+its commercial / Starter licence), and the VST 2 headers (FST) are GPL 3 or
+later, so the plugin is distributed with its source. The exporter's assembler (`src/asm/`) is for non-commercial use only,
 as in the standalone program.

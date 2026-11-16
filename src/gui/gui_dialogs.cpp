@@ -1279,10 +1279,17 @@ static void filemenu(void)
       if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_IMPORTPATCH);
       break;
 
-      default:
+      case 3:
       if (ImGui::MenuItem("SID...")) cmd_post(GTCMD_EXPORTSID);
       if (ImGui::MenuItem("MIDI...")) cmd_post(GTCMD_EXPORTMIDI);
       if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_EXPORTPATCH);
+      break;
+
+      default:
+      if (ImGui::MenuItem("Clear Track")) cmd_post(GTCMD_CLEARTRACK);
+      if (ImGui::MenuItem("Clear Pattern")) cmd_post(GTCMD_CLEARPATTERNS);
+      ImGui::Separator();
+      if (ImGui::MenuItem("Clear All...")) cmd_post(GTCMD_CLEARALL);
       break;
     }
     ImGui::PopFont();
@@ -1326,11 +1333,11 @@ static void dawsyncdialog(void)
     }
     ImGui::Spacing();
     if (ImGui::Checkbox("MIDI channels 1, 2, 3 play voices 1, 2, 3", &route)) gtsync_route = route ? 1 : 0;
-    body("While the DAW records, the plugin is in edit mode and the notes are recorded into the patterns (when "
-      "the DAW plays without recording: jam mode). Stopped in edit mode they are entered at the cursor. Other "
-      "MIDI channels work as a MIDI keyboard does. With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the "
-      "channel doesn't matter: the notes are shared out to 2 or 3 voices, so one DAW track can play chords. "
-      "The sustain pedal (CC 64) enters a keyoff.");
+    body("In edit mode the notes are recorded into the patterns while the DAW plays; stopped they are entered at "
+      "the cursor. In jam mode they are only played. The sustain pedal / footswitch (CC 64) switches: down = edit "
+      "mode, up = jam mode (the middle mouse button and NUMPAD . switch too). Other MIDI channels work as a MIDI "
+      "keyboard does. With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the channel doesn't matter: the notes "
+      "are shared out to 2 or 3 voices, so one DAW track can play chords.");
     if (ImGui::Checkbox("Record note-offs (as ---)", &recordoff)) gtsync_recordoff = recordoff ? 1 : 0;
     ImGui::Spacing();
     if (hostbpm > 0.0)

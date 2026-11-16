@@ -25,16 +25,29 @@ juce::File CoreLoader::pluginBinary()
 }
 
 // Windows: <name>.vst3/Contents/x86_64-win/<binary>, resources in
-// Contents/Resources. macOS: <name>.vst3/Contents/MacOS/<binary>, the library
-// in Contents/Frameworks, resources in Contents/Resources
+// Contents/Resources; the VST2 plugin <name>.dll, its library and resources
+// in the folder "GoatTracker Ultimate Data" next to it (gtcore.bin = the
+// library). macOS: <name>.vst3 (.vst, .component)/Contents/MacOS/<binary>,
+// the library in Contents/Frameworks, resources in Contents/Resources
+#if JUCE_WINDOWS
+static bool isVst2Dll(const juce::File &binary)
+{
+  return binary.hasFileExtension("dll");
+}
+#endif
+
 juce::File CoreLoader::resourceFolder()
 {
+#if JUCE_WINDOWS
+  if (isVst2Dll(pluginBinary())) return pluginBinary().getSiblingFile("GoatTracker Ultimate Data");
+#endif
   return pluginBinary().getParentDirectory().getSiblingFile("Resources");
 }
 
 juce::File CoreLoader::coreLibrary()
 {
 #if JUCE_WINDOWS
+  if (isVst2Dll(pluginBinary())) return pluginBinary().getSiblingFile("GoatTracker Ultimate Data").getChildFile("gtcore.bin");
   return pluginBinary().getSiblingFile("gtcore.dll");
 #else
   return pluginBinary().getParentDirectory().getSiblingFile("Frameworks").getChildFile("gtcore.dylib");
@@ -85,7 +98,12 @@ bool CoreLoader::load(const gtcore_callbacks &callbacks, int w, int h, float sca
   folder.createDirectory();
   removeStaleCopies(folder);
   copy = folder.getChildFile("gtcore-" + juce::String(juce::Time::currentTimeMillis()) + "-" + juce::String(counter++) + "-" +
-    juce::String::toHexString(juce::Random::getSystemRandom().nextInt()) + source.getFileExtension());
+    juce::String::toHexString(juce::Random::getSystemRandom().nextInt()) +
+#if JUCE_WINDOWS
+    ".dll");
+#else
+    source.getFileExtension());
+#endif
   if (!source.copyFileTo(copy))
   {
     error = "Can't copy the core library to " + copy.getFullPathName();

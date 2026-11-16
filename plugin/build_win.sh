@@ -3,7 +3,7 @@
 # Builds the GoatTracker Ultimate plugin on Windows (Git Bash):
 #   1. SDL2, static, for the plugin (plugin/cmake/sdl2-plugin.cmake)
 #   2. the core library gtcore.dll with llvm-mingw (plugin/core)
-#   3. the VST3 (and AAX with AAX_SDK_PATH) with Visual Studio (plugin/)
+#   3. the VST3 and VST (and AAX with AAX_SDK_PATH) with Visual Studio (plugin/)
 #
 # Needs (set these, or pass them on the command line as NAME=value):
 #   LLVM_MINGW   llvm-mingw UCRT x86_64 folder (github.com/mstorsjo/llvm-mingw)
@@ -15,8 +15,10 @@
 #   VS_GENERATOR CMake generator for the plugin (default "Visual Studio 17 2022")
 #   TESTHOST=1   also builds the test host gttesthost
 #
-# The plugin ends up in $BUILD_DIR/shell/GoatTrackerUltimate_artefacts/Release/VST3.
-# Copy "GoatTracker Ultimate.vst3" to C:\Program Files\Common Files\VST3.
+# The plugins end up in $BUILD_DIR/shell/GoatTrackerUltimate_artefacts/Release:
+# copy VST3/"GoatTracker Ultimate.vst3" to C:\Program Files\Common Files\VST3,
+# or VST/"GoatTracker Ultimate.dll" together with the folder "GoatTracker
+# Ultimate Data" next to it to the DAW's VST (VST2) plugin folder.
 
 set -e
 for arg in "$@"; do export "$arg"; done
@@ -47,7 +49,7 @@ cmake --build "$BUILD_DIR/core" --parallel 8
 echo "== Plugin"
 EXTRA=()
 if [ -n "$AAX_SDK_PATH" ]; then EXTRA+=(-DAAX_SDK_PATH="$(cygpath -m "$AAX_SDK_PATH")"); fi
-TARGETS=(GoatTrackerUltimate_VST3)
+TARGETS=(GoatTrackerUltimate_VST3 GoatTrackerUltimate_VST)
 if [ -n "$AAX_SDK_PATH" ]; then TARGETS+=(GoatTrackerUltimate_AAX); fi
 if [ -n "$TESTHOST" ]; then EXTRA+=(-DGT_BUILD_TESTHOST=ON); TARGETS+=(gttesthost); fi
 cmake -G "$VS_GENERATOR" -A x64 -S "$HERE" -B "$BUILD_DIR/shell" -DJUCE_DIR="$(cygpath -m "$JUCE_DIR")" \

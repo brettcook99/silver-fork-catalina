@@ -49,6 +49,8 @@ private:
   float paintScale = 0.0f;
   int lastCursor = -1;
   int buttonsDown = 0;
+  // macOS: the left button down is the right one (CTRL+click)
+  bool leftIsRight = false;
 
   struct HeldKey
   {

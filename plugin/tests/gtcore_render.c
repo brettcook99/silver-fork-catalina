@@ -25,6 +25,9 @@
  *   -instances=N load N copies and render each (isolation test)
  *   -frame=out.bmp  save the editor's picture after loading
  *   -frameend=out.bmp  save the editor's picture after rendering
+ *   -mouse=E,E... mouse events after the keys, 150 ms apart: dB.X.Y = button
+ *                B (1 left, 2 middle, 3 right) down at window pixel X,Y,
+ *                uB.X.Y = up, mX.Y = move
  *   -keys=K,K... SDL keycodes pressed after loading (e.g. 1073741923 = the
  *                numpad's period: edit / jam mode)
  *   -stopped     the host's transport stays stopped (MIDI still comes at
@@ -195,6 +198,7 @@ int main(int argc, char **argv)
   const char *framepath = NULL;
   const char *frameendpath = NULL;
   const char *keys = NULL;
+  const char *mouse = NULL;
   int stopped = 0;
   const char *statepath = NULL;
   const char *loadstatepath = NULL;
@@ -262,6 +266,7 @@ int main(int argc, char **argv)
     else if (!strncmp(argv[i], "-frame=", 7)) framepath = argv[i] + 7;
     else if (!strncmp(argv[i], "-frameend=", 10)) frameendpath = argv[i] + 10;
     else if (!strncmp(argv[i], "-keys=", 6)) keys = argv[i] + 6;
+    else if (!strncmp(argv[i], "-mouse=", 7)) mouse = argv[i] + 7;
     else if (!strcmp(argv[i], "-stopped")) stopped = 1;
     else if (!strncmp(argv[i], "-prerate=", 9)) prerate = atoi(argv[i] + 9);
     else if (!strncmp(argv[i], "-state=", 7)) statepath = argv[i] + 7;
@@ -344,6 +349,46 @@ int main(int argc, char **argv)
       while ((*k) && (*k != ',')) k++;
       if (*k == ',') k++;
     }
+  }
+
+  if (mouse)
+  {
+    const char *k = mouse;
+    while (*k)
+    {
+      gtcore_inputevent in;
+      char kind = *k++;
+      memset(&in, 0, sizeof in);
+      if ((kind == 'd') || (kind == 'u'))
+      {
+        in.type = (kind == 'd') ? GTIN_MOUSEDOWN : GTIN_MOUSEUP;
+        in.button = atoi(k);
+        while ((*k) && (*k != '.')) k++;
+        if (*k) k++;
+        in.clicks = 1;
+      }
+      else in.type = GTIN_MOUSEMOVE;
+      in.x = atoi(k);
+      while ((*k) && (*k != '.')) k++;
+      if (*k) k++;
+      in.y = atoi(k);
+      if (in.type != GTIN_MOUSEMOVE)
+      {
+        // The pointer goes there first
+        gtcore_inputevent mv;
+        memset(&mv, 0, sizeof mv);
+        mv.type = GTIN_MOUSEMOVE;
+        mv.x = in.x;
+        mv.y = in.y;
+        for (inst = 0; inst < instances; inst++) cores[inst].input(&mv);
+        sleepms(50);
+      }
+      for (inst = 0; inst < instances; inst++) cores[inst].input(&in);
+      sleepms(150);
+      while ((*k) && (*k != ',')) k++;
+      if (*k == ',') k++;
+    }
+    sleepms(300);
   }
 
   if (framepath)

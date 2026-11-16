@@ -1,6 +1,6 @@
 name: macOS plugin build
 
-# Builds the GoatTracker Ultimate plugin for macOS (VST3 and AU, plus AAX when
+# Builds the GoatTracker Ultimate plugin for macOS (VST3, VST and AU, plus AAX when
 # the AAX SDK is given), universal (Intel + Apple Silicon), macOS 10.15 or
 # later: SDL2 (static, plugin settings), the core library gtcore.dylib, then
 # the JUCE plugin. Checks the core library (no Objective-C classes, renders a
@@ -52,7 +52,7 @@ jobs:
             sdk="$(dirname "$(find deps/aax -name 'AAX.h' -path '*Interfaces*' | head -1)")/.."
             echo "AAX_SDK_PATH=$(cd "$sdk" && pwd)" >> "$GITHUB_ENV"
           else
-            echo "No AAX SDK: VST3 and AU only"
+            echo "No AAX SDK: VST3, VST and AU only"
           fi
 
       - name: SDL2 (static, for the plugin)
@@ -104,7 +104,7 @@ jobs:
           cmp "$t/dojo.wav" "$t/both.wav.1.wav"
           if cmp -s "$t/consultant.wav" "$t/dojo.wav"; then echo "::error::the two songs render the same"; exit 1; fi
 
-      - name: Plugin (VST3, AU, AAX)
+      - name: Plugin (VST3, VST, AU, AAX)
         run: |
           set -euo pipefail
           extra=()
@@ -118,7 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           out=build/shell/GoatTrackerUltimate_artefacts/Release
-          for b in "$out"/VST3/*.vst3 "$out"/AU/*.component "$out"/AAX/*.aaxplugin; do
+          for b in "$out"/VST3/*.vst3 "$out"/VST/*.vst "$out"/AU/*.component "$out"/AAX/*.aaxplugin; do
             [ -e "$b" ] || continue
             codesign --force -s - "$b/Contents/Frameworks/gtcore.dylib"
             codesign --force --deep -s - "$b"
@@ -139,16 +139,19 @@ jobs:
           out=build/shell/GoatTrackerUltimate_artefacts/Release
           pkg="build/package/GoatTracker Ultimate plugin"
           mkdir -p "$pkg"
-          for b in "$out"/VST3/*.vst3 "$out"/AU/*.component "$out"/AAX/*.aaxplugin; do
+          for b in "$out"/VST3/*.vst3 "$out"/VST/*.vst "$out"/AU/*.component "$out"/AAX/*.aaxplugin; do
             [ -e "$b" ] || continue
             ditto "$b" "$pkg/$(basename "$b")"
           done
           cat > "$pkg/INSTALL.txt" <<'EOF'
           GoatTracker Ultimate plugin for macOS 10.15 or later (Intel and Apple Silicon)
 
-          VST3, the VST version (LUNA, Cubase, Studio One, Reaper, Bitwig, Ableton
-          Live 11+, FL Studio ...): copy "GoatTracker Ultimate.vst3" to
+          VST3 (LUNA, Cubase, Studio One, Reaper, Bitwig, Ableton Live 11+, FL
+          Studio ...): copy "GoatTracker Ultimate.vst3" to
             ~/Library/Audio/Plug-Ins/VST3
+          VST (VST2, for hosts without VST3: Blue Cat PatchWork, older DAWs ...):
+          copy "GoatTracker Ultimate.vst" to
+            ~/Library/Audio/Plug-Ins/VST
           AU (LUNA, Logic, GarageBand): copy "GoatTracker Ultimate.component" to
             ~/Library/Audio/Plug-Ins/Components
           AAX (Pro Tools), when included: copy "GoatTracker Ultimate.aaxplugin" to
@@ -158,6 +161,7 @@ jobs:
           The plugins are signed ad hoc (not by an identified developer). If this
           zip came through a web browser, remove the quarantine flag after copying:
             xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"GoatTracker Ultimate.vst3"
+            xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST/"GoatTracker Ultimate.vst"
             xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"GoatTracker Ultimate.component"
 
           The plugin shares its settings with the standalone program (~/.goattrk).

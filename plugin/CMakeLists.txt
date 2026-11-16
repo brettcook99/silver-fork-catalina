@@ -1,4 +1,4 @@
-# GoatTracker Ultimate plugin (VST3, AAX, AU) - the JUCE shell
+# GoatTracker Ultimate plugin (VST3, VST, AAX, AU) - the JUCE shell
 #
 # The tracker itself is the core library gtcore (plugin/core), built first
 # (on Windows with llvm-mingw, like the standalone program). This project
@@ -20,6 +20,7 @@ endif()
 set(JUCE_DIR "" CACHE PATH "JUCE 8 source folder")
 set(GTCORE_LIBRARY "" CACHE FILEPATH "The built core library (gtcore.dll / gtcore.dylib)")
 set(AAX_SDK_PATH "" CACHE PATH "AAX SDK folder (optional: builds the AAX plugin for Pro Tools)")
+option(GT_VST2 "Also build the VST2 plugin (\"VST\"), with the FST headers in plugin/vst2" ON)
 
 if(NOT JUCE_DIR)
   message(FATAL_ERROR "Set JUCE_DIR to the JUCE 8 source folder")
@@ -31,6 +32,12 @@ endif()
 add_subdirectory(${JUCE_DIR} JUCE)
 
 set(GT_FORMATS VST3)
+if(GT_VST2)
+  # Steinberg's VST2 SDK is gone: FST, a VST2-compatible interface (GPL 3),
+  # has the headers JUCE includes (pluginterfaces/vst2.x/aeffect(x).h)
+  juce_set_vst2_sdk_path(${CMAKE_CURRENT_SOURCE_DIR}/vst2)
+  list(APPEND GT_FORMATS VST)
+endif()
 if(APPLE)
   list(APPEND GT_FORMATS AU)
 endif()
@@ -100,10 +107,19 @@ endif()
 # The core library and the fonts go into each plugin bundle:
 #   Windows  <bundle>/Contents/x86_64-win/gtcore.dll, <bundle>/Contents/Resources/fonts
 #   macOS    <bundle>/Contents/Frameworks/gtcore.dylib, <bundle>/Contents/Resources/fonts
+# The Windows VST2 plugin is a single DLL: next to it the folder "GoatTracker
+# Ultimate Data" holds gtcore.bin (gtcore.dll renamed, so that a DAW looking
+# for plugins doesn't try to load it) and the fonts
 set(GT_FONTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../fonts)
 foreach(fmt ${GT_FORMATS})
   set(tgt GoatTrackerUltimate_${fmt})
-  if(WIN32)
+  if(WIN32 AND fmt STREQUAL "VST")
+    add_custom_command(TARGET ${tgt} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${tgt}>/GoatTracker Ultimate Data/fonts"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${GTCORE_LIBRARY}" "$<TARGET_FILE_DIR:${tgt}>/GoatTracker Ultimate Data/gtcore.bin"
+      COMMAND ${CMAKE_COMMAND} -E copy_directory "${GT_FONTS_DIR}" "$<TARGET_FILE_DIR:${tgt}>/GoatTracker Ultimate Data/fonts"
+      VERBATIM)
+  elseif(WIN32)
     add_custom_command(TARGET ${tgt} POST_BUILD
       COMMAND ${CMAKE_COMMAND} -E copy_if_different "${GTCORE_LIBRARY}" "$<TARGET_FILE_DIR:${tgt}>/gtcore.dll"
       COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${tgt}>/../Resources/fonts"

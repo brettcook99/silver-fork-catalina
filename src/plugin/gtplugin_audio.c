@@ -57,28 +57,13 @@ static int routednote[MAX_CHN];
 static int spreadturn = 0;
 static unsigned spreadage[MAX_CHN];
 static unsigned spreadclock = 0;
-// The sustain pedal (CC 64) is down
+// The sustain pedal / footswitch (CC 64) is down: down = edit mode (the
+// notes from the DAW are recorded into the patterns while it plays), up =
+// jam mode. The host's own recording doesn't switch the mode (a host may
+// not tell it, or tell it late). The switch for the GoatTracker thread's
+// message: 1 = edit mode, 2 = jam mode
 static int pedaldown = 0;
-
-// The host's recording switches between edit and jam mode: the transport
-// as it was in the last block, and the switch for the GoatTracker thread's
-// message (1 = edit mode, 2 = jam mode)
-static int wasrecording = 0;
-static int washostplaying = 0;
 volatile int gtsync_modechange = 0;
-
-// The host may tell late that it records: Pro Tools tells a plugin on its
-// main thread, after the playback has started (and a plugin hosting this
-// one passes it on later still), so the first note of a recording was only
-// played. For the first STARTWINDOW seconds of a playback that doesn't
-// record (yet) the notes that would be recorded are kept; if the recording
-// starts meanwhile they go into the patterns as if it had been known from
-// the start. When the time is up without recording, it is jam mode
-#define STARTWINDOW 2.0
-#define MAXPENDING 256
-static GTRECORDNOTE pending[MAXPENDING];
-static int npending = 0;
-static double startwindow = 0.0;  // samples of the window left, 0 = none
 
 // Program changes: the instrument each MIDI channel's notes play and are
 // recorded with (0 = the instrument chosen in the editor). Saved with the
@@ -391,16 +376,11 @@ static int recordrow(int c, double framefraction, int *patt, int *row, int *tran
   return 1;
 }
 
-// What a note (or keyoff) played now on a voice does while the song plays:
-// RECORD_NOW = recorded, RECORD_KEEP = kept in case the host's recording
-// flag comes late (see STARTWINDOW), 0 = only played
-#define RECORD_NOW 1
-#define RECORD_KEEP 2
+// Whether a note (or keyoff) played now on a voice is recorded: in edit
+// mode while the song plays
 static int recordstate(int playing)
 {
-  if (!playing) return 0;
-  if (startwindow > 0.0) return RECORD_KEEP;
-  return recordmode ? RECORD_NOW : 0;
+  return (playing) && (recordmode);
 }
 
 // The instrument a note from MIDI channel ch plays with: the one the
@@ -439,30 +419,9 @@ static void recordnote(int c, int note, int instr, double framefraction, int sta
     chn[c].skiprow = (unsigned char)row;
     chn[c].skipvalid = 1;
   }
-  if (state == RECORD_KEEP)
-  {
-    // Its pass starts when it is recorded (commitpending())
-    if (npending < MAXPENDING) pending[npending++] = rn;
-    return;
-  }
   rn.newpass = recordpass;
   recordpass = 0;
   recordpush(&rn);
-}
-
-// The host's recording flag came within the start window: the notes kept
-// since the playback started are recorded
-static void commitpending(void)
-{
-  int k;
-
-  for (k = 0; k < npending; k++)
-  {
-    pending[k].newpass = recordpass;
-    recordpass = 0;
-    recordpush(&pending[k]);
-  }
-  npending = 0;
 }
 
 // MIDI INPUT 2-3 PATTERNS: the voice a note-on plays on. The voices are the
@@ -536,6 +495,25 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
   int ev;
   int spread;
 
+  // The sustain pedal / footswitch (CC 64, any MIDI channel): pressed =
+  // edit mode, released = jam mode, at once (so that the notes after it in
+  // this block are recorded or not). Only a change counts: a pedal may send
+  // many values while it is down, and a DAW sends 0 when it stops, so the
+  // mode chosen with the middle mouse button (or NUMPAD .) stays until the
+  // pedal is pressed or released again
+  if ((type == 0xb0) && (m->data1 == 64))
+  {
+    int down = m->data2 >= 64;
+
+    if (down != pedaldown)
+    {
+      pedaldown = down;
+      recordmode = down;
+      gtsync_modechange = down ? 1 : 2;
+    }
+    return;
+  }
+
   // A program change (the DAW track's patch): the channel's notes play and
   // are recorded with that instrument from now on. Program 0 (the DAW's
   // patch 1) = instrument 01
@@ -576,39 +554,7 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
     int playing = (songinit != PLAY_STOPPED);
     int note = FIRSTNOTE + m->data1 - 12;
 
-    // The sustain pedal pressed: a keyoff on the voice (all the voices with
-    // MIDI INPUT 2-3), recorded in edit mode while playing (as RETURN entered
-    // one before). Only its presses and releases count (a pedal may send
-    // many values while it is down); a release, or a press in edit mode
-    // without playback (a keyoff at the cursor), goes on to the GoatTracker
-    // thread, which keeps track of the pedal too
-    if ((ev == MIDI_CONTROL) && (m->data1 == 64))
-    {
-      int down = m->data2 >= 64;
-
-      if (down == pedaldown) return;
-      pedaldown = down;
-      if ((down) && ((!recordmode) || (playing)))
-      {
-        int base, n, k;
-
-        if (spread) n = spreadvoices(&base);
-        else
-        {
-          base = ch;
-          n = 1;
-        }
-        for (k = 0; k < n; k++)
-        {
-          int c = (base + k) % MAX_CHN;
-          releasenote(c);
-          routednote[c] = 0;
-          recordnote(c, KEYOFF, 0, framefraction, recordstate(playing));
-        }
-        return;
-      }
-    }
-    else if ((ev != MIDI_CONTROL) && ((!recordmode) || (playing)))
+    if ((ev != MIDI_CONTROL) && ((!recordmode) || (playing)))
     {
       int c;
 
@@ -636,60 +582,6 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
     }
   }
   midi_pushevent_ch(ev, ch, m->data1, m->data2);
-}
-
-// The host's recording: edit mode while it records (the notes from the DAW
-// are recorded into the patterns), jam mode when it starts playing without
-// recording (STARTWINDOW seconds later: the recording flag may come late)
-// or stops recording. Only while following the host (DAW SYNC)
-static void followrecording(const gtcore_transport *tp, int sync)
-{
-  int playing = (tp->valid) && (tp->playing);
-  int recording = (playing) && (tp->recording);
-
-  if (sync)
-  {
-    if ((recording) && (!wasrecording))
-    {
-      recordmode = 1;
-      gtsync_modechange = 1;
-      // The notes since the playback started, if it started just now
-      if (startwindow > 0.0) commitpending();
-      startwindow = 0.0;
-    }
-    else if ((!recording) && (wasrecording))
-    {
-      recordmode = 0;
-      gtsync_modechange = 2;
-    }
-    else if ((playing) && (!washostplaying) && (!recording))
-    {
-      startwindow = samplerate * STARTWINDOW;
-      npending = 0;
-    }
-  }
-  if ((!sync) || (!playing))
-  {
-    startwindow = 0.0;
-    npending = 0;
-  }
-  wasrecording = recording;
-  washostplaying = playing;
-}
-
-// The start window ends after samples more: no recording, so jam mode
-static void endstartwindow(int samples)
-{
-  if (startwindow <= 0.0) return;
-  startwindow -= samples;
-  if (startwindow > 0.0) return;
-  startwindow = 0.0;
-  npending = 0;
-  if (recordmode)
-  {
-    recordmode = 0;
-    gtsync_modechange = 2;
-  }
 }
 
 /*
@@ -755,7 +647,6 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
   hostbpm = ((tp->valid) && (tp->bpm > 1.0)) ? tp->bpm : 0.0;
   hostplaying = (tp->valid) && (tp->playing);
   sync = (gtsync_enabled) && (hostbpm > 0.0);
-  followrecording(tp, sync);
   if (sync) samplesperbeat = samplerate * 60.0 / hostbpm;
   offset = startoffset(tp);
   ppqbase = tp->ppq;
@@ -879,6 +770,5 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
   }
 
   if (following) expectedppq = ppqbase + samples / samplesperbeat;
-  endstartwindow(samples);
   SDL_UnlockMutex(gtplugin_enginemutex);
 }

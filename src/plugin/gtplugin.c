@@ -854,7 +854,8 @@ static void applystate(const unsigned char *data, int size)
     SETINT("stepsize", stepsize);
     if (stepsize < 1) stepsize = 4;
     // recordmode isn't taken from the project: the plugin always starts in
-    // jam mode, and the DAW's recording switches to edit mode
+    // jam mode (the sustain pedal, the middle mouse button or NUMPAD .
+    // switch to edit mode)
     SETINT("followmode", followmode);
     SETINT("midichord", midichord);
     SETINT("editstep", editstep);
@@ -950,14 +951,13 @@ void gtplugin_service(void)
   static int passtop = -1;
   static int passcount = -1;
 
-  // The host started or stopped recording (gtplugin_audio.c switched the
-  // mode)
+  // The sustain pedal (CC 64) switched the mode (gtplugin_audio.c)
   if (gtsync_modechange)
   {
     int change = gtsync_modechange;
     gtsync_modechange = 0;
-    if (change == 1) gui_message("DAW recording: edit mode, the notes are recorded into the patterns");
-    else gui_message("Jam mode: notes are only played");
+    if (change == 1) gui_message("Edit mode (sustain pedal down): the notes are recorded into the patterns");
+    else gui_message("Jam mode (sustain pedal up): notes are only played");
   }
 
   // MIDI program changes (the DAW tracks' patches) chose instruments

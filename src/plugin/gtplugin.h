@@ -78,7 +78,8 @@ extern int gtsync_enabled;        // follow the host's tempo & position
 extern int gtsync_startbar;       // the song starts at this bar (1 = first)
 extern int gtsync_route;          // MIDI channels 1-3 play / record voices 1-3
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
-// The host's recording switched the mode: 1 = edit, 2 = jam (for the message)
+// The sustain pedal (CC 64) switched the mode: 1 = edit, 2 = jam (for the
+// message)
 extern volatile int gtsync_modechange;
 // MIDI program changes: the instrument of each MIDI channel's notes (0 = the
 // editor's instrument; saved with the project), the channels that got one
