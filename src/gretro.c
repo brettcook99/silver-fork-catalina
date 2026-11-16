@@ -22,7 +22,8 @@ static char timechar[] = {':', ' '};
 // - the 16 pattern commands, one on each pattern row, named after what they
 //   do. A left click picks one: it turns white (the others stay darker grey)
 //   and its value shows in green above the list; the mouse wheel over the
-//   panel sets the value. The command is written into the pattern of the
+//   panel sets the value, and so does a MIDI knob sending CC 90 (see
+//   retro_fxknob()). The command is written into the pattern of the
 //   cursor's channel: while the song plays on the row the playback reads
 //   next (the playing row, so that it is heard at once), with the song
 //   stopped on the cursor row. Another click on it, or jam mode, lets it go
@@ -304,14 +305,31 @@ static void chnwheel(int c, int d)
     editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[c].epnum];
 }
 
+// Sets the value of the command picked (the wheel or MIDI CC 90): it is
+// written with the command on its row (see fxrow()). Turned without a pause
+// it is one undo step
+static void fxset(int v)
+{
+  GTUNDO_OBJECT *ed;
+  int top, patt, row;
+
+  top = currentUndoPosition;
+  ed = undoCreateEditorInfo();
+  fxvalue[fxsel] = (unsigned char)v;
+  if (fxrow(&patt, &row))
+  {
+    pattern[patt][row * 4 + 2] = (unsigned char)fxsel;
+    pattern[patt][row * 4 + 3] = (unsigned char)v;
+    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, patt, UNDO_AREA_DIRTY_CHECK);
+  }
+  wheelundo(ed, top, fxsel);
+}
+
 // The mouse wheel over the effects panel (up = bigger): the value of the
 // command picked, OCTAVE, LOOP or a channel. Returns nonzero if the
 // wheel was over the panel
 static int fxwheel(int d)
 {
-  GTUNDO_OBJECT *ed;
-  int top, v, patt, row;
-
   if ((mousex < FXFIRSTCOLUMN) || (mousex > RX - 2) || (mousey < 2) || (mousey > PATTROWY + VISIBLEPATTROWS)) return 0;
 
   if ((mousey >= OCTAVEY) && (mousey <= OCTAVEY + 2))
@@ -340,18 +358,46 @@ static int fxwheel(int d)
   }
   if (fxsel < 0) return 1;
 
-  v = clampvalue(fxcurrent() + d, 0, 0xff);
-  top = currentUndoPosition;
-  ed = undoCreateEditorInfo();
-  fxvalue[fxsel] = (unsigned char)v;
-  if (fxrow(&patt, &row))
-  {
-    pattern[patt][row * 4 + 2] = (unsigned char)fxsel;
-    pattern[patt][row * 4 + 3] = (unsigned char)v;
-    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, patt, UNDO_AREA_DIRTY_CHECK);
-  }
-  wheelundo(ed, top, fxsel);
+  fxset(clampvalue(fxcurrent() + d, 0, 0xff));
   return 1;
+}
+
+// MIDI CC 90: a knob for the value of the command picked, as the wheel sets
+// it. The knob's turn (0-127) spans the values that command uses: $00-$FF
+// for the bytes (CLEAR, DECAY = AD, SUSTAIN = SR, REGISTER = waveform,
+// CONTROL, CUTOFF), $0-$F for VOLUME, and 1:1 $00-$7F for the table and
+// speed table indexes (UP, DOWN, TONE, VIBE, WAVE, PULSE, FILTER, FUNK) and
+// TEMPO. The wheel still sets every value one by one
+void retro_fxknob(int value)
+{
+  int v;
+
+  if (fxsel < 0)
+  {
+    gui_message("MIDI CC 90: click an effect in the middle panel first (edit mode)");
+    return;
+  }
+  value = clampvalue(value, 0, 127);
+  switch (fxsel)
+  {
+    case CMD_DONOTHING:
+    case CMD_SETAD:
+    case CMD_SETSR:
+    case CMD_SETWAVE:
+    case CMD_SETFILTERCTRL:
+    case CMD_SETFILTERCUTOFF:
+    v = (value * 0xff + 63) / 127;
+    break;
+
+    case CMD_SETMASTERVOL:
+    v = (value * 0x0f + 63) / 127;
+    break;
+
+    default:
+    v = value;
+    break;
+  }
+  fxset(v);
 }
 
 // The bottom rows: OCTAVE, PLAYING/STOPPED, MIDI INPUT and STEPS, each two
