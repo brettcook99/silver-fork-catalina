@@ -77,6 +77,14 @@ int undoValidateUndoAreas(GTUNDO_OBJECT *editorSettings);
 int undoAddUndoObjectToList(GTUNDO_OBJECT *gu, GTUNDO_AREA *gArea, char *mem, int size,int offset);
 GTUNDO_OBJECT* undoCreateEditorInfo();
 void undoPerform();
+// Redo: does again the steps undone since the last change (CTRL+Y,
+// CTRL+SHIFT+Z). Returns 0 if there is nothing to redo
+int undoRedo();
+// Nonzero if there is something to undo / redo
+int undoCanUndo();
+int undoCanRedo();
+// Forgets the steps undone (a new change makes them impossible to redo)
+void undoClearRedo();
 void undoFreeUndoObject(GTUNDO_OBJECT *gu);
 void undoFinalizeUndoPackage(GTUNDO_OBJECT *editorSettings);
 void undoFreeAll();

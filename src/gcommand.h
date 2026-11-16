@@ -95,6 +95,15 @@ enum
   GTCMD_IMPORTMIDINOW,    // Import the MIDI file given as path (from the import dialog)
   GTCMD_PLAYPATTSTART,    // Play from the start of the current pattern (F1)
   GTCMD_SONGSTART,        // Back to the song's start, stopped (RETURN)
+  GTCMD_REDO,             // Do again what was undone (CTRL+Y, CTRL+SHIFT+Z)
+  GTCMD_PATTCUT,          // Pattern menu (right click): the marked rows, nothing
+  GTCMD_PATTCOPY,         //   marked: the cursor's track (its whole pattern)
+  GTCMD_PATTPASTE,        //   pasted at the first marked row (a whole track: row 0, some rows: the row clicked)
+  GTCMD_PATTCLEAR,
+  GTCMD_CLEARTRACK,       // CLEAR menu (plugin): the cursor channel's pattern,
+  GTCMD_CLEARPATTERNS,    //   the patterns of all channels shown,
+  GTCMD_CLEARALL,         //   the whole song (asks first)
+  GTCMD_PREFERENCES,      // Preferences: audio output (standalone)
 
   GTCMD_COUNT
 };

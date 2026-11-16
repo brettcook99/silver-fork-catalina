@@ -22,6 +22,92 @@ int undoCounter = 0;
 
 int initUndoBufferFlag = 0;
 int maxUndoSize = MAX_UNDO;
+
+// Redo: for each object undone, the bytes it overwrote (an object like the
+// undo objects: dest, offset and parentArea the same). The last one undone
+// is on top; the first one of each undo (CTRL+Z) has counter 0, the others
+// 1, so that one redo does one undo's objects again (in reverse order)
+static GTUNDO_OBJECT **redoList = NULL;
+static int redoCount = 0;
+static int redoMax = 0;
+
+// The bytes an undo object's area holds now (the program's own data)
+static char *undoLiveBytes(GTUNDO_OBJECT *gu)
+{
+	if (gu->parentArea != NULL)
+		return gu->parentArea->undoObject->dest + gu->offset;
+	return gu->dest + gu->offset;
+}
+
+// A copy of the bytes that applying gu overwrites (an object that puts them
+// back)
+static GTUNDO_OBJECT *undoSnapshot(GTUNDO_OBJECT *gu)
+{
+	GTUNDO_OBJECT *r = (GTUNDO_OBJECT*)malloc(sizeof(GTUNDO_OBJECT));
+
+	memset(r, 0, sizeof(GTUNDO_OBJECT));
+	r->data = malloc(gu->size);
+	memcpy(r->data, undoLiveBytes(gu), gu->size);
+	r->size = gu->size;
+	r->dest = gu->dest;
+	r->offset = gu->offset;
+	r->parentArea = gu->parentArea;
+	r->type = gu->type;
+	undoBufferSize += gu->size;
+	return r;
+}
+
+// Writes an object's bytes into the program's data, and into its area's
+// copy (which the next change is compared with)
+static void undoApply(GTUNDO_OBJECT *gu)
+{
+	char *dest = gu->dest;
+	dest += gu->offset;
+	memcpy(dest, gu->data, gu->size);	// overwrite original buffer
+
+	if (gu->parentArea != NULL)	// NULL if overwriting editor UI
+	{
+		dest = gu->parentArea->undoObject->dest;
+		dest += gu->offset;
+		memcpy(dest, gu->data, gu->size);	// overwrite undo area data too, so that it matches the actual data
+	}
+}
+
+static void redoPush(GTUNDO_OBJECT *r)
+{
+	if (redoCount >= redoMax)
+	{
+		int newMax = redoMax + 256;
+		GTUNDO_OBJECT **newList = (GTUNDO_OBJECT**)malloc(sizeof(GTUNDO_OBJECT*) * newMax);
+		if (redoList)
+		{
+			memcpy(newList, redoList, sizeof(GTUNDO_OBJECT*) * redoCount);
+			free(redoList);
+		}
+		redoList = newList;
+		redoMax = newMax;
+	}
+	redoList[redoCount++] = r;
+}
+
+void undoClearRedo()
+{
+	while (redoCount > 0)
+	{
+		redoCount--;
+		undoFreeUndoObject(redoList[redoCount]);
+	}
+}
+
+int undoCanRedo()
+{
+	return redoCount > 0;
+}
+
+int undoCanUndo()
+{
+	return currentUndoPosition > 0;
+}
 void initUndoBuffer()
 {
 	undoList = malloc((sizeof(char*)) * maxUndoSize);
@@ -108,6 +194,8 @@ void undoFreeAll()
 {
 	if (REMOVE_UNDO)
 		return;
+
+	undoClearRedo();
 
 	if (initAreaListFlag)
 	{
@@ -282,6 +370,7 @@ void* undoCreateUndoObject(char *mem, int size, int offset)
 // changing sng file index will copy from the sng file buffer to current buffer
 void undoInvalidateUndoAreas()
 {
+	undoClearRedo();
 	for (int i = 0;i < undoAreaIndex;i++)
 	{
 		GTUNDO_AREA *ga = (GTUNDO_AREA *)undoAreaList[i];
@@ -504,6 +593,9 @@ void undoFinalizeUndoPackage(GTUNDO_OBJECT *editorSettings)
 	if (undoPackageCounter == 0)
 		return;
 
+	// A new change: what was undone can't be done again
+	undoClearRedo();
+
 	undoCounter++;	// we can use this to know if anything has been modified in the editor
 
 	quickAddObjectToList((char*)editorSettings, NULL);
@@ -537,6 +629,7 @@ void undoAddEditorSettingsToList()
 //		sprintf(textbuffer, "d%d", dcount++);
 //		printtext(75, 1, 0xe, textbuffer);
 
+		undoClearRedo();
 		undoCounter++;	// we can use this to know if anything has been modified in the editor
 
 		GTUNDO_OBJECT *undoEditorInfoBackup2;
@@ -578,26 +671,54 @@ void undoPerform()
 	undoCounter = 0;
 
 	int counter;
+	int first = 1;
 	do {
 		currentUndoPosition--;
 
 		gu = (GTUNDO_OBJECT*)undoList[currentUndoPosition];
 		counter = gu->counter;
 
-		char *dest = gu->dest;
-		dest += gu->offset;
-		memcpy(dest, gu->data, gu->size);	// overwrite original buffer
-
-		if (gu->parentArea != NULL)	// NULL if overwriting editor UI
+		// What it overwrites, for redo
 		{
-			dest = gu->parentArea->undoObject->dest;
-			dest += gu->offset;
-			memcpy(dest, gu->data, gu->size);	// overwrite undo area data too, so that it matches the actual data
+			GTUNDO_OBJECT *r = undoSnapshot(gu);
+			r->counter = first ? 0 : 1;
+			first = 0;
+			redoPush(r);
 		}
+
+		undoApply(gu);
 		undoFreeUndoObject(gu);
 		undoCounter++;	// we can use this to know if anything has been modified in the editor
 
-	} while (counter > 0);
+	} while ((counter > 0) && (currentUndoPosition > 0));
+}
+
+int undoRedo()
+{
+	int counter;
+	int first = 1;
+
+	if (REMOVE_UNDO)
+		return 0;
+	if (redoCount == 0)
+		return 0;
+
+	do {
+		GTUNDO_OBJECT *r = redoList[--redoCount];
+		// What it overwrites goes back on the undo list (as one step)
+		GTUNDO_OBJECT *u = undoSnapshot(r);
+
+		counter = r->counter;
+		quickAddObjectToList((char*)u, r->parentArea);
+		u->counter = first ? 0 : 1;
+		first = 0;
+		undoApply(r);
+		undoFreeUndoObject(r);
+	} while ((counter > 0) && (redoCount > 0));
+
+	undoPackageCounter = 0;
+	undoCounter++;
+	return 1;
 }
 
 

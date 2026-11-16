@@ -570,6 +570,19 @@ void gui::retroblockmouse(void)
   mouseblocked = true;
 }
 
+// Where the text screen was drawn last
+static ImVec2 lastscreen0(0.0f, 0.0f), lastscreen1(800.0f, 518.0f);
+
+ImVec2 gui::retrocellpos(int x, int y)
+{
+  float cw = (lastscreen1.x - lastscreen0.x) / MAX_COLUMNS;
+  float ch = (lastscreen1.y - lastscreen0.y) / MAX_ROWS;
+
+  if (x < 0) x = 0;
+  if (y < 0) y = 0;
+  return ImVec2(lastscreen0.x + x * cw, lastscreen0.y + y * ch);
+}
+
 int gui::drawretrotitlebar(SDL_Renderer *renderer, ImVec2 *screen0, ImVec2 *screen1)
 {
   ImGuiIO &io = ImGui::GetIO();
@@ -579,6 +592,8 @@ int gui::drawretrotitlebar(SDL_Renderer *renderer, ImVec2 *screen0, ImVec2 *scre
   screenrect(renderer, &p0, &p1);
   *screen0 = p0;
   *screen1 = p1;
+  lastscreen0 = p0;
+  lastscreen1 = p1;
   cw = (p1.x - p0.x) / MAX_COLUMNS;
   ch = (p1.y - p0.y) / MAX_ROWS;
   if ((!scrbuffer) || (!createtexture(renderer))) return -1;
@@ -600,6 +615,8 @@ void gui::drawretroscreen(SDL_Renderer *renderer)
   updatetexture();
 
   screenrect(renderer, &p0, &p1);
+  lastscreen0 = p0;
+  lastscreen1 = p1;
   if (retrogradient) drawgradient();
   ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef((ImTextureID)(intptr_t)texture), p0, p1);
 

@@ -43,6 +43,7 @@ static int designerstate = 0;
 - (void)itemSelected:(id)sender;
 - (void)recentSelected:(id)sender;
 - (void)aboutSelected:(id)sender;
+- (void)preferencesSelected:(id)sender;
 @end
 
 @implementation GTMenuTarget
@@ -84,6 +85,14 @@ static int designerstate = 0;
   // An empty copyright line: the credit line is already at the top
   [NSApp orderFrontStandardAboutPanelWithOptions:[NSDictionary dictionaryWithObjectsAndKeys:
     @" ", @"Copyright", credits, @"Credits", nil]];
+}
+
+// The application menu's Preferences item (made by SDL, CMD+,): the audio
+// output. No SDL key event does this, so its shortcut runs it too
+- (void)preferencesSelected:(id)sender
+{
+  (void)sender;
+  cmd_post(GTCMD_PREFERENCES);
 }
 
 - (void)recentSelected:(id)sender
@@ -248,6 +257,7 @@ void macmenu_init(void)
 
     edit = newmenu(@"Edit");
     additem(edit, @"Undo", @"z", MOD_CMD, GTCMD_UNDO);
+    additem(edit, @"Redo", @"z", MOD_CMD | MOD_SHIFT, GTCMD_REDO);
     [edit addItem:[NSMenuItem separatorItem]];
     additem(edit, @"Cut", @"x", MOD_CMD, GTCMD_CUT);
     additem(edit, @"Copy", @"c", MOD_CMD, GTCMD_COPY);
@@ -330,6 +340,11 @@ void macmenu_init(void)
         {
           [item setTarget:target];
           [item setAction:@selector(aboutSelected:)];
+        }
+        if ([[item title] hasPrefix:@"Preferences"])
+        {
+          [item setTarget:target];
+          [item setAction:@selector(preferencesSelected:)];
         }
       }
     }

@@ -37,6 +37,12 @@ int snd_bpmcount;
 int snd_bpmtempo = 125;
 unsigned snd_mixmode;
 unsigned snd_mixrate;
+const char *snd_devicename = NULL;
+unsigned snd_buffersamples = 0;
+unsigned snd_obtainedsamples = 0;
+// The open device (SDL2's device API, so that another than the default
+// output can be chosen), 0 = none
+static SDL_AudioDeviceID snd_device = 0;
 
 static void (*snd_custommixer)(Sint32 *dest, unsigned samples) = NULL;
 static unsigned snd_buffersize;
@@ -82,9 +88,11 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
     if (mixmode & STEREO) desired.channels = 2;
     // The length asked for, rounded up (SDL2 doesn't need a power of two).
     // On macOS SDL queues 2 buffers of 15 ms or more, but more of shorter
-    // ones (4 of 14.9 ms), so a 15 ms buffer is the shortest delay there
+    // ones (4 of 14.9 ms), so a 15 ms buffer is the shortest delay there.
+    // Or a length in samples chosen in the preferences
     {
         unsigned samples = (bufferlength * mixrate + 999) / 1000;
+        if (snd_buffersamples) samples = snd_buffersamples;
 
         if (samples < 64) samples = 64;
         if (samples > 32768) samples = 32768;
@@ -131,19 +139,18 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
         }
     }
 
-    SDL_PauseAudio(1);
-
-    // SDL2: with obtained == NULL the requested format is guaranteed (SDL
-    // converts if the device wants something else, e.g. float on macOS) and
-    // the calculated buffer size is written back into desired
-    if (SDL_OpenAudio(&desired, NULL))
+    // SDL2: with no changes allowed the requested format, rate and buffer
+    // size are guaranteed (SDL converts if the device wants something else,
+    // e.g. float on macOS)
+    snd_device = SDL_OpenAudioDevice((snd_devicename && snd_devicename[0]) ? snd_devicename : NULL, 0, &desired, &obtained, 0);
+    if (!snd_device)
     {
         bme_error = BME_OPEN_ERROR;
         snd_uninit();
         return BME_ERROR;
     }
-    obtained = desired;
     snd_sndinitted = 1;
+    snd_obtainedsamples = obtained.samples;
 
     snd_mixmode = 0;
     snd_samplesize = 1;
@@ -171,7 +178,7 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
         return BME_ERROR;
     }
 
-    SDL_PauseAudio(0);
+    SDL_PauseAudioDevice(snd_device, 0);
 
     bme_error = BME_OK;
     return BME_OK;
@@ -179,12 +186,24 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
 
 void snd_uninit(void)
 {
-    if (snd_sndinitted)
+    if (snd_device)
     {
-        SDL_CloseAudio();
-        snd_sndinitted = 0;
+        SDL_CloseAudioDevice(snd_device);
+        snd_device = 0;
     }
+    snd_sndinitted = 0;
+    snd_obtainedsamples = 0;
     snd_uninitmixer();
+}
+
+void snd_lock(void)
+{
+    if (snd_device) SDL_LockAudioDevice(snd_device);
+}
+
+void snd_unlock(void)
+{
+    if (snd_device) SDL_UnlockAudioDevice(snd_device);
 }
 
 void snd_setcustommixer(void (*custommixer)(Sint32 *dest, unsigned samples))

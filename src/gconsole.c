@@ -36,10 +36,8 @@ int metapressed = 0;
 int cursorflashdelay = 0;
 int midinoteon = 0;
 int midinoteoff = 0;
-// The sustain pedal (MIDI CC 64) was pressed down: a keyoff in the pattern
-// editor
-int midikeyoff = 0;
-// Whether the pedal is down
+// Whether the sustain pedal (MIDI CC 64) is down: down = edit mode, up = jam
+// mode
 static int midipedal = 0;
 unsigned midinotetime = 0;
 int menucommand = 0;
@@ -284,7 +282,6 @@ int input_nextmidi(void)
 
   midinoteon = 0;
   midinoteoff = 0;
-  midikeyoff = 0;
 
   // MIDI note 60 (middle C) is C-4
   for (;;)
@@ -297,19 +294,20 @@ int input_nextmidi(void)
     // dropped
     if (event == MIDI_CONTROL)
     {
-      // CC 64 (sustain pedal): pressing it enters a keyoff, as RETURN did
-      // (the tracker only; releasing it does nothing)
+      // CC 64 (sustain pedal / footswitch): pressed (127) = edit mode,
+      // released (0) = jam mode. Only a change counts: a pedal may send
+      // many values while it is down, and a DAW sends 0 when it stops, so
+      // a mode chosen with the middle mouse button stays until the pedal is
+      // pressed or released (or the button clicked) again
       if (midinote == 64)
       {
         int down = midi_eventvalue() >= 64;
-        int pressed = (down) && (!midipedal);
 
-        midipedal = down;
-        if ((pressed) && (!gui_designeractive()))
+        if (down != midipedal)
         {
-          midikeyoff = 1;
-          midinotetime = midi_eventtime();
-          return 1;
+          midipedal = down;
+          recordmode = down;
+          gui_message(down ? "Edit mode (sustain pedal down): notes are entered" : "Jam mode (sustain pedal up): notes are only played");
         }
         continue;
       }
@@ -556,6 +554,5 @@ void getkey(void)
   hadkey = input_nextkey();
   midinoteon = 0;
   midinoteoff = 0;
-  midikeyoff = 0;
   if (!hadkey) input_nextmidi();
 }

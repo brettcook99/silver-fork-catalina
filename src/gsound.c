@@ -348,6 +348,14 @@ void sound_suspend(void)
   #endif
 }
 
+// Closes the audio output, so that the next sound_init() opens it again
+// with the settings then (the preferences: device, rate, buffer)
+void sound_closeoutput(void)
+{
+  snd_uninit();
+  firsttimeinit = 1;
+}
+
 void sound_flush(void)
 {
   #ifdef __WIN32__

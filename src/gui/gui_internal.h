@@ -131,6 +131,9 @@ namespace gui
   // wider strokes. Returns the width
   float drawretrotext(ImDrawList *dl, ImVec2 pos, float pixel, float pixelh, ImU32 col, const char *text, bool bold = false);
   float retrotextwidth(const char *text, float pixel);
+  // The top left corner of a character cell of the retro text screen, as
+  // drawn last (ImGui points)
+  ImVec2 retrocellpos(int x, int y);
   // Draws only the text screen's top row (the title bar) where it is on the
   // retro screen, for the SID designer. screen0-screen1 get the whole retro
   // screen's place (ImGui points). Returns the column under the mouse
@@ -161,6 +164,7 @@ namespace gui
 
   // About GoatTracker Ultimate, the level meter colors dialog
   void openabout(void);
+  void openpreferences(void);
   void openmetercolors(void);
 
   // The settings folder (ends with a path separator)

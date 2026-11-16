@@ -70,6 +70,11 @@ void gui_message(const char *fmt, ...);
 // by the GUI itself (or by queueing a command)
 void gui_askquit(void);
 void gui_askclear(void);
+// The clear dialog with everything ticked (CLEAR > Clear All)
+void gui_askclearall(void);
+// The pattern editor's menu (right click on a pattern): cut, copy, paste,
+// clear, undo, redo
+void gui_openpatternmenu(void);
 void gui_edithradsr(void);
 // Asks whether to save the changes before running the command (with its
 // file, for GTCMD_OPENFILE). Does nothing and returns 0 if the song is not

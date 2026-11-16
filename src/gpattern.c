@@ -25,6 +25,8 @@ unsigned char jankokeytbl2[] = {KEY_Q, KEY_2, KEY_W, KEY_3, KEY_E, KEY_4, KEY_R,
   KEY_5, KEY_T, KEY_6, KEY_Y, KEY_7, KEY_U, KEY_8, KEY_I, KEY_9, KEY_O, KEY_0, KEY_P};
 
 unsigned char patterncopybuffer[MAX_PATTROWS*4+4];
+// The rows cut / copied last are a whole pattern (nothing was marked)
+int patterncopywhole = 0;
 unsigned char cmdcopybuffer[MAX_PATTROWS*4+4];
 int patterncopyrows = 0;
 int cmdcopyrows = 0;
@@ -308,27 +310,28 @@ void patterncommands(void)
       if (midichord <= 1) newnote = midinoteon;
       else midipolynote(midinoteon);
     }
-    // The sustain pedal (MIDI CC 64) pressed: a keyoff, as RETURN entered
-    // before (in any column, like a MIDI note)
-    if (midikeyoff) newnote = KEYOFF;
     // DEL clears the note (a rest; with SHIFT the command too). It used to
     // delete the row, which BACKSPACE does now (see below)
     if ((rawkey == KEY_DEL) && (!editorInfo.epcolumn)) newnote = REST;
     if ((rawkey == 0x14) && (!editorInfo.epcolumn)) newnote = KEYOFF;
+    // CTRL+SHIFT+RETURN (CMD+SHIFT+RETURN too on macOS) enters a keyoff, in
+    // any column like a MIDI note (the sustain pedal did this before; it
+    // switches between edit and jam mode now). CAPSLOCK enters one too
+    if ((rawkey == KEY_ENTER) && (shiftonlypressed) && ((ctrlpressed) || (metapressed)) && (!altpressed))
+      newnote = KEYOFF;
     // RETURN goes back to the start of the song without playing, as in a
-    // DAW. The keyoff it used to enter comes from the sustain pedal now (MIDI
-    // CC 64; CAPSLOCK still enters one too). What RETURN did in the other
-    // columns is SHIFT+RETURN's: go to the instrument / table, or with an
-    // empty table pointer make a new table entry. The vibrato / portamento
-    // parameter conversion (SHIFT+RETURN before) is CTRL+SHIFT+RETURN
-    if ((rawkey == KEY_ENTER) && (!shiftpressed))
+    // DAW. What RETURN did in the other columns is SHIFT+RETURN's: go to the
+    // instrument / table, or with an empty table pointer make a new table
+    // entry. The vibrato / portamento parameter conversion (SHIFT+RETURN
+    // before) is ALT+SHIFT+RETURN (OPTION+SHIFT+RETURN on macOS)
+    else if ((rawkey == KEY_ENTER) && (!shiftpressed))
     {
       gotosongstart();
       return;
     }
-    if (rawkey == KEY_ENTER)
+    else if (rawkey == KEY_ENTER)
     {
-      int convert = (ctrlpressed) && (shiftonlypressed);
+      int convert = (altpressed) && (shiftonlypressed);
 
       switch(editorInfo.epcolumn)
       {
@@ -955,6 +958,7 @@ void patterncommands(void)
             d++;
           }
           patterncopyrows = d;
+          patterncopywhole = 0;
         }
         else
         {
@@ -976,6 +980,7 @@ void patterncommands(void)
             d++;
           }
           patterncopyrows = d;
+          patterncopywhole = 0;
         }
         editorInfo.epmarkchn = -1;
       }
@@ -998,6 +1003,7 @@ void patterncommands(void)
           d++;
         }
         patterncopyrows = d;
+        patterncopywhole = 1;
       }
     }
     break;

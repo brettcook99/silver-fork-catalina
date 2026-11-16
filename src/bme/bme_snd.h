@@ -17,3 +17,13 @@ extern int snd_channels;
 extern int snd_buffers;
 extern unsigned snd_mixmode;
 extern unsigned snd_mixrate;
+// The output device (NULL or "" = the system's default) and the buffer
+// length in samples (0 = from the length in milliseconds given to
+// snd_init()). Set them before snd_init()
+extern const char *snd_devicename;
+extern unsigned snd_buffersamples;
+// The buffer length the device was opened with (samples), 0 = not open
+extern unsigned snd_obtainedsamples;
+// Keeps the sound callback from running (snd_lock) / lets it run again
+void snd_lock(void);
+void snd_unlock(void);
