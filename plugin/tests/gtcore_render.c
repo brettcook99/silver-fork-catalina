@@ -29,6 +29,9 @@
  *                numpad's period: edit / jam mode)
  *   -stopped     the host's transport stays stopped (MIDI still comes at
  *                its beats, as played live)
+ *   -prerate=N   before rendering, prepare at N Hz and play a second there
+ *                (thrown away), then change to -rate: as auval's render
+ *                test at 22050 Hz after 44100 Hz
  */
 
 #include <stdio.h>
@@ -176,6 +179,7 @@ int main(int argc, char **argv)
   double bpm = 125.0;
   int sync = 1;
   int rate = 44100;
+  int prerate = 0;
   int block = 512;
   double seconds = 10.0;
   double startbeat = 0.0;
@@ -259,6 +263,7 @@ int main(int argc, char **argv)
     else if (!strncmp(argv[i], "-frameend=", 10)) frameendpath = argv[i] + 10;
     else if (!strncmp(argv[i], "-keys=", 6)) keys = argv[i] + 6;
     else if (!strcmp(argv[i], "-stopped")) stopped = 1;
+    else if (!strncmp(argv[i], "-prerate=", 9)) prerate = atoi(argv[i] + 9);
     else if (!strncmp(argv[i], "-state=", 7)) statepath = argv[i] + 7;
     else if (!strncmp(argv[i], "-loadstate=", 11)) loadstatepath = argv[i] + 11;
     else if (!strncmp(argv[i], "-song2=", 7)) song2 = argv[i] + 7;
@@ -363,6 +368,14 @@ int main(int argc, char **argv)
     char path[1024];
     unsigned seed = 12345;
     double peak = 0.0, sum = 0.0;
+
+    if (prerate > 0)
+    {
+      long k;
+      cores[inst].prepare(prerate, 512);
+      for (k = 0; k < prerate; k += 512) cores[inst].process(left, right, 512, NULL, NULL, 0);
+      cores[inst].prepare(rate, block > 0 ? block : 4096);
+    }
 
     while (done < total)
     {
