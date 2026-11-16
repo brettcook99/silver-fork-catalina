@@ -98,6 +98,15 @@ enum
   GTCMD_EXPORTMIDI,       // Save the song as a MIDI file
   GTCMD_EXPORTPATCH,      // Save the current instrument (its patch) as a chipsynth C64 preset
   GTCMD_EXPORTSID,        // The export dialog with the SID format chosen
+  GTCMD_REDO,             // Do again what was undone (CTRL+Y, CTRL+SHIFT+Z)
+  GTCMD_PATTCUT,          // Pattern menu (right click): the marked rows, nothing
+  GTCMD_PATTCOPY,         //   marked: the cursor's track (its whole pattern)
+  GTCMD_PATTPASTE,        //   pasted at the first marked row (a whole track: row 0, some rows: the row clicked)
+  GTCMD_PATTCLEAR,
+  GTCMD_CLEARTRACK,       // CLEAR menu (plugin): the cursor channel's pattern,
+  GTCMD_CLEARPATTERNS,    //   the patterns of all channels shown,
+  GTCMD_CLEARALL,         //   the whole song (asks first)
+  GTCMD_PREFERENCES,      // Preferences: audio output (standalone)
 
   GTCMD_COUNT
 };

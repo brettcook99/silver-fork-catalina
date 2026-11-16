@@ -398,12 +398,20 @@ void sound_suspend(void)
 // meanwhile (playroutine() called from elsewhere does nothing)
 void sound_lockplayer(void)
 {
-  SDL_LockAudio();
+  snd_lock();
 }
 
 void sound_unlockplayer(void)
 {
-  SDL_UnlockAudio();
+  snd_unlock();
+}
+
+// Closes the audio output, so that the next sound_init() opens it again
+// with the settings then (the preferences: device, rate, buffer)
+void sound_closeoutput(void)
+{
+  snd_uninit();
+  firsttimeinit = 1;
 }
 
 void sound_flush(void)

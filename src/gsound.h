@@ -41,6 +41,9 @@ void sound_uninit(void);
 void sound_suspend(void);
 // Keeps the sound from calling the player (playoffline())
 void sound_lockplayer(void);
+#ifndef GT_PLUGIN
+void sound_closeoutput(void);
+#endif
 void sound_unlockplayer(void);
 void sound_flush(void);
 

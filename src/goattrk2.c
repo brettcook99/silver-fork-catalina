@@ -100,6 +100,10 @@ unsigned customclockrate = 0;
 //unsigned usefinevib = 0;
 unsigned b = DEFAULTBUF;
 unsigned mr = DEFAULTMIXRATE;
+// The audio output chosen in the preferences: the buffer length in samples
+// (0 = b milliseconds) and the device's name ("" = the system's default)
+unsigned audiobuffer = 0;
+char audiodevice[MAX_PATHNAME] = "";
 unsigned writer = 0;
 unsigned hardsid = 0;
 unsigned catweasel = 0;
@@ -326,6 +330,9 @@ int main(int argc, char **argv)
 		}
 		for (c = FOLDER_OLDKINDS; c < FOLDER_KINDS; c++)
 			getpathparam(configfile, configfolder[c]);
+		getparam(configfile, &audiobuffer);
+		getpathparam(configfile, audiodevice);
+		if (!strcmp(audiodevice, "0")) audiodevice[0] = 0;
 		fclose(configfile);
 
 		// A config file saved with an old default sound buffer gets the
@@ -614,7 +621,15 @@ int main(int argc, char **argv)
 	gui_marksongsaved();
 
 	// Init sound
+#ifndef GT_PLUGIN
+	snd_devicename = audiodevice;
+	snd_buffersamples = audiobuffer;
+	// The device chosen in the preferences may be gone: then the default
+	if ((!sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate)) &&
+		(!reopenaudio()) && (!snd_sndinitted))
+#else
 	if (!sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate))
+#endif
 	{
 		gui_alert("Sound init failed", "GoatTracker runs without sound. Notice that the song timer won't start.");
 	}
@@ -793,6 +808,8 @@ int main(int argc, char **argv)
 		fprintf(configfile, ";Folders of the MIDI import, chipsynth import, MIDI export and chipsynth export dialogs (0 = none)\n%s\n%s\n%s\n%s\n\n",
 			importmidipath[0] ? importmidipath : "0", importpatchpath[0] ? importpatchpath : "0",
 			exportmidipath[0] ? exportmidipath : "0", exportpatchpath[0] ? exportpatchpath : "0");
+		fprintf(configfile, ";Audio output buffer in samples (0 = the reSID buffer length above, in milliseconds)\n%d\n\n", audiobuffer);
+		fprintf(configfile, ";Audio output device (0 = the system's default)\n%s\n\n", audiodevice[0] ? audiodevice : "0");
 		fclose(configfile);
 	}
 
@@ -910,7 +927,7 @@ static void retromainloop(void)
 			displayupdate();
 			getkey();
 			macmenu_setstate(recordmode, followmode);
-			if ((rawkey) || (key) || (mouseb) || (mousewheel) || (midinoteon) || (midinoteoff) || (midikeyoff) || (menucommand))
+			if ((rawkey) || (key) || (mouseb) || ((prevmouseb) && (!mouseb)) || (mousewheel) || (midinoteon) || (midinoteoff) || (menucommand))
 			{
 				input = 1;
 				break;
@@ -921,7 +938,7 @@ static void retromainloop(void)
 
 		if ((input) && (!exitprogram))
 		{
-			int midi = (midinoteon) || (midinoteoff) || (midikeyoff);
+			int midi = (midinoteon) || (midinoteoff);
 
 			converthex();
 			docommand();
@@ -985,7 +1002,7 @@ void waitkeymouse(void)
 		if ((rawkey) || (key)) break;
 		if (win_quitted) break;
 		if (mouseb) break;
-		if ((midinoteon) || (midinoteoff) || (midikeyoff)) break;
+		if ((midinoteon) || (midinoteoff)) break;
 		if (menucommand) break;
 	}
 
@@ -1039,6 +1056,27 @@ void converthex()
 
 void do_sound_init() {
 	sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate);
+}
+
+int reopenaudio(void)
+{
+#ifndef GT_PLUGIN
+	int ok;
+
+	sound_closeoutput();
+	snd_devicename = audiodevice;
+	snd_buffersamples = audiobuffer;
+	ok = sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate);
+	if ((!ok) && (audiodevice[0]))
+	{
+		sound_closeoutput();
+		snd_devicename = NULL;
+		sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate);
+	}
+	return ok;
+#else
+	return 1;
+#endif
 }
 
 void toggle_interpolation_mode() {
@@ -1561,9 +1599,18 @@ void generalcommands(void)
 		}
 		break;
 
+	// CTRL+Z undo, CTRL+SHIFT+Z or CTRL+Y redo (CMD on macOS)
 	case KEY_Z:
 		if (ctrlpressed || metapressed)
-			undoPerform();
+		{
+			if (shiftonlypressed) runcommand(GTCMD_REDO, NULL);
+			else undoPerform();
+		}
+		break;
+
+	case KEY_Y:
+		if ((ctrlpressed || metapressed) && (!shiftonlypressed) && (!altpressed))
+			runcommand(GTCMD_REDO, NULL);
 		break;
 
 	case KEY_F12:
@@ -1748,6 +1795,54 @@ static void newsong(void)
 	songfilename[0] = 0;
 	gui_marksongsaved();
 	gui_message("New song");
+}
+
+// Clears rows first-last of channel c's pattern (rests, no instruments or
+// commands) as one undo step. last < 0: the whole pattern
+static void clearpatternrows(int c, int first, int last)
+{
+	int p = editorUndoInfo.editorInfo[c].epnum;
+	int r;
+
+	if ((last < 0) || (last >= pattlen[p])) last = pattlen[p] - 1;
+	if (first < 0) first = 0;
+	undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+	for (r = first; r <= last; r++)
+	{
+		pattern[p][r * 4] = REST;
+		pattern[p][r * 4 + 1] = 0;
+		pattern[p][r * 4 + 2] = 0;
+		pattern[p][r * 4 + 3] = 0;
+	}
+}
+
+// The pattern menu's and the CLEAR menu's clearing: what = GTCMD_PATTCLEAR
+// (the marked rows, nothing marked: the cursor's track), GTCMD_CLEARTRACK
+// (the cursor's track) or GTCMD_CLEARPATTERNS (every channel's pattern)
+static void clearpatterns(int what)
+{
+	GTUNDO_OBJECT *ed = undoCreateEditorInfo();
+	int c;
+
+	if ((what == GTCMD_PATTCLEAR) && (editorInfo.epmarkchn != -1))
+	{
+		int first = editorInfo.epmarkstart < editorInfo.epmarkend ? editorInfo.epmarkstart : editorInfo.epmarkend;
+		int last = editorInfo.epmarkstart < editorInfo.epmarkend ? editorInfo.epmarkend : editorInfo.epmarkstart;
+		clearpatternrows(editorInfo.epmarkchn, first, last);
+		editorInfo.epmarkchn = -1;
+		gui_message("Marked rows cleared");
+	}
+	else if (what == GTCMD_CLEARPATTERNS)
+	{
+		for (c = 0; c < MAX_CHN; c++) clearpatternrows(c, 0, -1);
+		gui_message("Patterns %02X %02X %02X cleared", editorUndoInfo.editorInfo[0].epnum, editorUndoInfo.editorInfo[1].epnum, editorUndoInfo.editorInfo[2].epnum);
+	}
+	else
+	{
+		clearpatternrows(editorInfo.epchn, 0, -1);
+		gui_message("Track %d (pattern %02X) cleared", editorInfo.epchn + 1, editorUndoInfo.editorInfo[editorInfo.epchn].epnum);
+	}
+	if (undoValidateUndoAreas(ed) == 0) undoFreeUndoObject(ed);
 }
 
 // Runs a command from the menus, the toolbar, drag & drop or a shortcut key.
@@ -1969,7 +2064,68 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_UNDO:
-		undoPerform();
+		if (undoCanUndo()) undoPerform();
+		else gui_message("Nothing to undo");
+		break;
+
+	case GTCMD_REDO:
+		if (!undoRedo()) gui_message("Nothing to redo");
+		break;
+
+	// The pattern menu (right click on a pattern): the marked rows, or with
+	// nothing marked the cursor's track (the menu put the cursor there). The
+	// cursor row stays, so the patterns don't move
+	case GTCMD_PATTCUT:
+	case GTCMD_PATTCOPY:
+		{
+			int pos = editorInfo.eppos;
+			int markchn = editorInfo.epmarkchn, markstart = editorInfo.epmarkstart, markend = editorInfo.epmarkend;
+			editorInfo.editmode = EDIT_PATTERN;
+			if (cmd == GTCMD_PATTCUT) presskey(KEY_X, 'x', 1);
+			else
+			{
+				// Copying keeps the rows marked (SHIFT+C lets them go)
+				presskey(KEY_C, 'c', 1);
+				editorInfo.epmarkchn = markchn;
+				editorInfo.epmarkstart = markstart;
+				editorInfo.epmarkend = markend;
+			}
+			editorInfo.eppos = pos;
+			gui_message("%s %d rows", cmd == GTCMD_PATTCUT ? "Cut" : "Copied", patterncopyrows);
+		}
+		break;
+
+	// Paste: at the first row marked; nothing marked, a whole track cut /
+	// copied goes to the track's row 0, some rows to the row right-clicked
+	case GTCMD_PATTPASTE:
+		if (patterncopyrows)
+		{
+			int pos = editorInfo.eppos;
+			editorInfo.editmode = EDIT_PATTERN;
+			if (editorInfo.epmarkchn != -1)
+			{
+				editorInfo.epchn = editorInfo.epmarkchn;
+				editorInfo.eppos = editorInfo.epmarkstart < editorInfo.epmarkend ? editorInfo.epmarkstart : editorInfo.epmarkend;
+			}
+			else if (patterncopywhole) editorInfo.eppos = 0;
+			else editorInfo.eppos = retro_pattmenurow;
+			presskey(KEY_V, 'v', 1);
+			editorInfo.eppos = pos;
+			if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
+				editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+			gui_message("Pasted %d rows", patterncopyrows);
+		}
+		else gui_message("Nothing to paste: cut or copy rows first");
+		break;
+
+	case GTCMD_PATTCLEAR:
+	case GTCMD_CLEARTRACK:
+	case GTCMD_CLEARPATTERNS:
+		clearpatterns(cmd);
+		break;
+
+	case GTCMD_CLEARALL:
+		gui_askclearall();
 		break;
 
 	case GTCMD_CUT:

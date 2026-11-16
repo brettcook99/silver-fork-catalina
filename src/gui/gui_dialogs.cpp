@@ -13,6 +13,7 @@ static char alerttext[512] = "";
 
 static bool wantquit = false;
 static bool wantclear = false;
+static bool wantclearall = false;
 static bool wanthr = false;
 static bool wantsave = false;
 
@@ -45,6 +46,12 @@ extern "C" void gui_askquit(void)
 extern "C" void gui_askclear(void)
 {
   wantclear = true;
+}
+
+extern "C" void gui_askclearall(void)
+{
+  wantclear = true;
+  wantclearall = true;
 }
 
 extern "C" void gui_edithradsr(void)
@@ -247,7 +254,8 @@ static void cleardialog(void)
   {
     ImGui::OpenPopup("##clear");
     wantclear = false;
-    cs = cp = ci = ct = cn = false;
+    cs = cp = ci = ct = cn = wantclearall;
+    wantclearall = false;
     plen = defaultpatternlength;
   }
   if (beginmodal("##clear", ImGui::GetFontSize() * 28.0f))
@@ -741,11 +749,208 @@ static void viewmenu(void)
     ImGui::Separator();
     if (ImGui::MenuItem("Gradient Background", NULL, retrogradient != 0)) cmd_post(GTCMD_RETROGRADIENT);
     if (ImGui::MenuItem("Meter Colors...")) cmd_post(GTCMD_METERCOLORS);
+#ifndef GT_PLUGIN
+    ImGui::Separator();
+    if (ImGui::MenuItem("Preferences...")) cmd_post(GTCMD_PREFERENCES);
+#endif
     ImGui::Separator();
     if (ImGui::MenuItem("About GoatTracker Ultimate")) cmd_post(GTCMD_ABOUT);
     ImGui::EndPopup();
   }
 }
+
+/*
+ * The pattern editor's menu (right click on a pattern): cut, copy, paste and
+ * clear the rows marked (with nothing marked the track clicked), undo, redo
+ */
+
+static bool wantpatternmenu = false;
+
+extern "C" void gui_openpatternmenu(void)
+{
+  wantpatternmenu = true;
+}
+
+#ifdef __APPLE__
+#define MENUCMD "CMD"
+#else
+#define MENUCMD "CTRL"
+#endif
+
+static void patternmenu(void)
+{
+  if (wantpatternmenu)
+  {
+    ImGui::OpenPopup("##patternmenu");
+    wantpatternmenu = false;
+  }
+  // The text about as tall as the retro screen's characters (as the
+  // plugin's file menus)
+  ImVec2 cell0 = gui::retrocellpos(0, 1);
+  ImVec2 cell1 = gui::retrocellpos(0, 2);
+  float size = (cell1.y - cell0.y) * 0.8f;
+  if (size < ImGui::GetFontSize()) size = ImGui::GetFontSize();
+  ImGui::PushFont(NULL, size);
+  bool open = ImGui::BeginPopup("##patternmenu");
+  ImGui::PopFont();
+  if (open)
+  {
+    char what[64];
+
+    ImGui::PushFont(NULL, size);
+
+    if (editorInfo.epmarkchn != -1)
+    {
+      int first = editorInfo.epmarkstart < editorInfo.epmarkend ? editorInfo.epmarkstart : editorInfo.epmarkend;
+      int last = editorInfo.epmarkstart < editorInfo.epmarkend ? editorInfo.epmarkend : editorInfo.epmarkstart;
+      snprintf(what, sizeof what, "Track %d, rows %d-%d", editorInfo.epmarkchn + 1, first, last);
+    }
+    else
+      snprintf(what, sizeof what, "Track %d (pattern %02X)", editorInfo.epchn + 1, editorUndoInfo.editorInfo[editorInfo.epchn].epnum);
+    ImGui::TextDisabled("%s", what);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Cut")) cmd_post(GTCMD_PATTCUT);
+    if (ImGui::MenuItem("Copy")) cmd_post(GTCMD_PATTCOPY);
+    if (ImGui::MenuItem("Paste", NULL, false, patterncopyrows > 0)) cmd_post(GTCMD_PATTPASTE);
+    if (ImGui::MenuItem("Clear")) cmd_post(GTCMD_PATTCLEAR);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Undo", MENUCMD "+Z", false, undoCanUndo() != 0)) cmd_post(GTCMD_UNDO);
+    if (ImGui::MenuItem("Redo", MENUCMD "+Y", false, undoCanRedo() != 0)) cmd_post(GTCMD_REDO);
+    ImGui::PopFont();
+    ImGui::EndPopup();
+  }
+}
+
+#ifndef GT_PLUGIN
+/*
+ * Preferences (standalone): the audio output. A change opens the output
+ * again at once
+ */
+
+static bool wantpreferences = false;
+
+void gui::openpreferences(void)
+{
+  wantpreferences = true;
+}
+
+static const unsigned prefrates[] = { 44100, 48000 };
+static const unsigned prefbuffers[] = { 64, 128, 256, 512, 1024, 2048, 4096 };
+
+static void preferencesdialog(void)
+{
+  static char devices[32][128];
+  static int ndevices = 0;
+  static bool failed = false;
+  bool changed = false;
+  char text[256];
+  int c;
+
+  if (wantpreferences)
+  {
+    ImGui::OpenPopup("##preferences");
+    wantpreferences = false;
+    failed = false;
+    ndevices = SDL_GetNumAudioDevices(0);
+    if (ndevices < 0) ndevices = 0;
+    if (ndevices > 32) ndevices = 32;
+    for (c = 0; c < ndevices; c++)
+    {
+      const char *name = SDL_GetAudioDeviceName(c, 0);
+      snprintf(devices[c], sizeof devices[c], "%s", name ? name : "?");
+    }
+  }
+  if (beginmodal("##preferences", ImGui::GetFontSize() * 30.0f))
+  {
+    const char *labels[] = { "Close" };
+    float w = ImGui::GetFontSize() * 16.0f;
+
+    title("Preferences");
+    ImGui::TextUnformatted("Audio output");
+    ImGui::Spacing();
+
+    // The device
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("Output device", audiodevice[0] ? audiodevice : "System default"))
+    {
+      if (ImGui::Selectable("System default", !audiodevice[0]))
+      {
+        audiodevice[0] = 0;
+        changed = true;
+      }
+      for (c = 0; c < ndevices; c++)
+      {
+        if (ImGui::Selectable(devices[c], !strcmp(audiodevice, devices[c])))
+        {
+          snprintf(audiodevice, MAX_PATHNAME, "%s", devices[c]);
+          changed = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    // The sample rate
+    snprintf(text, sizeof text, "%u Hz", mr);
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("Sample rate", text))
+    {
+      for (c = 0; c < (int)(sizeof prefrates / sizeof prefrates[0]); c++)
+      {
+        char item[32];
+        snprintf(item, sizeof item, "%u Hz", prefrates[c]);
+        if (ImGui::Selectable(item, mr == prefrates[c]))
+        {
+          mr = prefrates[c];
+          changed = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    // The buffer size: in samples, or the default length in milliseconds
+    if (audiobuffer) snprintf(text, sizeof text, "%u samples (%.1f ms)", audiobuffer, audiobuffer * 1000.0 / mr);
+    else snprintf(text, sizeof text, "Default (%u ms)", b);
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("Buffer size", text))
+    {
+      char item[64];
+      snprintf(item, sizeof item, "Default (%u ms)", b);
+      if (ImGui::Selectable(item, !audiobuffer))
+      {
+        audiobuffer = 0;
+        changed = true;
+      }
+      for (c = 0; c < (int)(sizeof prefbuffers / sizeof prefbuffers[0]); c++)
+      {
+        snprintf(item, sizeof item, "%u samples (%.1f ms)", prefbuffers[c], prefbuffers[c] * 1000.0 / mr);
+        if (ImGui::Selectable(item, audiobuffer == prefbuffers[c]))
+        {
+          audiobuffer = prefbuffers[c];
+          changed = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    if (changed) failed = !reopenaudio();
+
+    ImGui::Spacing();
+    if (snd_sndinitted)
+      snprintf(text, sizeof text, "%s %u Hz, %u samples per buffer (%.1f ms). A smaller buffer plays notes sooner; if the sound "
+        "crackles, choose a bigger one.", failed ? "That output couldn't be opened: the system's default output plays now," : "Now:",
+        snd_mixrate, snd_obtainedsamples, snd_mixrate ? snd_obtainedsamples * 1000.0 / snd_mixrate : 0.0);
+    else
+      snprintf(text, sizeof text, "No audio output could be opened.");
+    body(text);
+    if (buttons(labels, 1, 0) >= 0) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+}
+#else
+void gui::openpreferences(void)
+{
+}
+#endif
 
 static void aboutdialog(void)
 {
@@ -1147,6 +1352,10 @@ void gui::drawdialogs(void)
   filemenu();
 #endif
   viewmenu();
+  patternmenu();
+#ifndef GT_PLUGIN
+  preferencesdialog();
+#endif
   aboutdialog();
   metercolorsdialog();
   exportdialog();

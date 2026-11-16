@@ -440,6 +440,7 @@ void gui::drawmenubar(void)
   if (ImGui::BeginMenu("Edit"))
   {
     if (ImGui::MenuItem("Undo", "CTRL+Z")) cmd_post(GTCMD_UNDO);
+    if (ImGui::MenuItem("Redo", "CTRL+Y")) cmd_post(GTCMD_REDO);
     ImGui::Separator();
     if (ImGui::MenuItem("Cut", "SHIFT+X")) cmd_post(GTCMD_CUT);
     if (ImGui::MenuItem("Copy", "SHIFT+C")) cmd_post(GTCMD_COPY);
@@ -494,6 +495,10 @@ void gui::drawmenubar(void)
     // The retro screen has no menu bar on Windows / Linux: it is set here
     if (ImGui::MenuItem("Gradient Background (Retro Interface)", NULL, retrogradient != 0)) cmd_post(GTCMD_RETROGRADIENT);
     if (ImGui::MenuItem("Meter Colors (Retro Interface)...")) cmd_post(GTCMD_METERCOLORS);
+#ifndef GT_PLUGIN
+    ImGui::Separator();
+    if (ImGui::MenuItem("Preferences...")) cmd_post(GTCMD_PREFERENCES);
+#endif
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Help"))

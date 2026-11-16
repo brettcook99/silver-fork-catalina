@@ -1407,9 +1407,68 @@ static int retrowheel(void)
   return 0;
 }
 
+// The left button pressed on a pattern row: 1 = not moved off the row yet
+// (let go there it is a click, which puts the cursor on the row), 2 =
+// dragged: the rows from the one pressed to the one under the mouse are
+// marked. The patterns don't move while it is held, except at the top and
+// bottom edge, where they scroll to mark more rows
+static int pattdrag = 0;
+static int pattdragchn = 0;
+static int pattdragrow = 0;
+int retro_pattmenurow = 0;
+
+// The mouse is on a pattern row of channel c (the header row above them
+// and the row below them count too, for the edge scrolling)
+static int onpattern(int c)
+{
+  return (mousey >= 2) && (mousey <= PATTROWY + VISIBLEPATTROWS) && (mousex >= 6 + c * 15) && (mousex <= 14 + c * 15);
+}
+
+static void pattdragupdate(void)
+{
+  int len = pattlen[editorUndoInfo.editorInfo[pattdragchn].epnum];
+  int row;
+
+  if (len < 1) return;
+  if (pattdrag == 2)
+  {
+    if ((mousey < PATTROWY) && (editorInfo.eppos > 0)) editorInfo.eppos--;
+    if ((mousey >= PATTROWY + VISIBLEPATTROWS) && (editorInfo.eppos < len)) editorInfo.eppos++;
+    editorInfo.epview = editorInfo.eppos - VISIBLEPATTROWS / 2;
+  }
+  row = mousey - PATTROWY + editorInfo.epview;
+  if (mousey < PATTROWY) row = editorInfo.epview;
+  if (mousey >= PATTROWY + VISIBLEPATTROWS) row = editorInfo.epview + VISIBLEPATTROWS - 1;
+  if (row < 0) row = 0;
+  if (row > len - 1) row = len - 1;
+  if ((pattdrag == 1) && (row != pattdragrow))
+  {
+    int start = pattdragrow;
+    if (start > len - 1) start = len - 1;
+    pattdrag = 2;
+    editorInfo.epmarkchn = pattdragchn;
+    editorInfo.epmarkstart = start;
+  }
+  if (pattdrag == 2) editorInfo.epmarkend = row;
+}
+
 void retro_mousecommands(void)
 {
   int c;
+
+  // The left button let go after a press on a pattern row: not dragged, it
+  // was a click, which puts the cursor there (the patterns scroll to show
+  // it in the middle) and lets go of the rows marked
+  if ((pattdrag) && (!(mouseb & MOUSEB_LEFT)))
+  {
+    if (pattdrag == 1)
+    {
+      int len = pattlen[editorUndoInfo.editorInfo[pattdragchn].epnum];
+      editorInfo.eppos = pattdragrow > len ? len : pattdragrow;
+      editorInfo.epmarkchn = -1;
+    }
+    pattdrag = 0;
+  }
 
   // Mouse wheel over a value changes it. Over the patterns it scrolls the
   // pattern editor. While the song plays, the view then stops following the
@@ -1438,6 +1497,9 @@ void retro_mousecommands(void)
   // The effects panel: pick an effect or let it go
   if ((mouseb & MOUSEB_LEFT) && (!prevmouseb)) fxclick();
 
+  // Dragging from a pattern row marks rows
+  if ((pattdrag) && (mouseb & MOUSEB_LEFT)) pattdragupdate();
+
   // Pattern editpos & pattern number selection
   for (c = 0; c < MAX_CHN; c++)
   {
@@ -1457,50 +1519,40 @@ void retro_mousecommands(void)
         }
       }
     }
-    else
+    else if ((onpattern(c)) && (!prevmouseb))
     {
-      if ((mousey >= 2) && (mousey <= PATTROWY + VISIBLEPATTROWS) && (mousex >= 6 + c * 15) && (mousex <= 14 + c * 15))
+      // A press on a pattern row. The left button chooses the channel and
+      // column at once; the row when it is let go without a drag (a drag
+      // marks rows instead, see pattdragupdate()). The right button opens
+      // the pattern menu: cut, copy, paste, clear, undo, redo of the rows
+      // marked, or with nothing marked of the track clicked
+      int x = mousex - 6 - c * 15;
+      int len = pattlen[editorUndoInfo.editorInfo[c].epnum];
+      int newpos = mousey - PATTROWY + editorInfo.epview;
+      if (newpos < 0) newpos = 0;
+      if (newpos > len) newpos = len;
+
+      editorInfo.editmode = EDIT_PATTERN;
+
+      if (mouseb & MOUSEB_RIGHT)
       {
-        int x = mousex - 6 - c * 15;
-        int newpos = mousey - PATTROWY + editorInfo.epview;
-        if (newpos < 0) newpos = 0;
-        if (newpos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) newpos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
-
-        editorInfo.editmode = EDIT_PATTERN;
-
-        if ((mouseb & MOUSEB_RIGHT) && (!prevmouseb))
-        {
-          if ((editorInfo.epmarkchn != c) || (newpos != editorInfo.epmarkend))
-          {
-            editorInfo.epmarkchn = c;
-            editorInfo.epmarkstart = editorInfo.epmarkend = newpos;
-          }
-        }
-
-        if (mouseb & MOUSEB_LEFT)
+        if (editorInfo.epmarkchn == -1)
         {
           editorInfo.epchn = c;
-          if (x < 4) editorInfo.epcolumn = 0;
-          if (x >= 4) editorInfo.epcolumn = x - 3;
+          if (editorInfo.eppos > len) editorInfo.eppos = len;
         }
-
-        if (!prevmouseb)
-        {
-          if (mouseb & MOUSEB_LEFT)
-            editorInfo.eppos = newpos;
-        }
-        else
-        {
-          if (mouseb & MOUSEB_LEFT)
-          {
-            if (mousey < PATTROWY) editorInfo.eppos--;
-            if (mousey == PATTROWY + VISIBLEPATTROWS) editorInfo.eppos++;
-          }
-        }
-        if (editorInfo.eppos < 0) editorInfo.eppos = 0;
-        if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
-
-        if (mouseb & MOUSEB_RIGHT) editorInfo.epmarkend = newpos;
+        retro_pattmenurow = newpos;
+        gui_openpatternmenu();
+      }
+      else if ((mouseb & MOUSEB_LEFT) && (mousey >= PATTROWY) && (mousey < PATTROWY + VISIBLEPATTROWS))
+      {
+        editorInfo.epchn = c;
+        if (x < 4) editorInfo.epcolumn = 0;
+        if (x >= 4) editorInfo.epcolumn = x - 3;
+        if (editorInfo.eppos > len) editorInfo.eppos = len;
+        pattdrag = 1;
+        pattdragchn = c;
+        pattdragrow = newpos;
       }
     }
   }

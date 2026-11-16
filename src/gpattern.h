@@ -70,6 +70,10 @@ typedef struct {
 }EDITOR_INFO;
 
 extern EDITOR_INFO editorInfo;
+// The rows cut / copied last (SHIFT+X, C) and how many there are
+extern unsigned char patterncopybuffer[];
+extern int patterncopyrows;
+extern int patterncopywhole;
 
 void patterncommands(void);
 int notekeytonote(int key);

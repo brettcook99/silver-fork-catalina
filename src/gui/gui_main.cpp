@@ -731,6 +731,7 @@ extern "C" int gui_command(int cmd)
       return 1;
     case GTCMD_METERCOLORS: openmetercolors(); return 1;
     case GTCMD_ABOUT: openabout(); return 1;
+    case GTCMD_PREFERENCES: openpreferences(); return 1;
   }
   return 0;
 }

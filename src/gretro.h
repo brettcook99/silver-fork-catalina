@@ -9,6 +9,9 @@
 void retro_printstatus(void);
 // Handles the mouse on the main screen (mousex/mousey/mouseb/mousewheel)
 void retro_mousecommands(void);
+// The pattern row right-clicked last (the pattern menu pastes there when
+// nothing is marked)
+extern int retro_pattmenurow;
 // MIDI CC 90 (value 0-127): the value of the effect picked in the effects
 // panel, as the mouse wheel sets it
 void retro_fxknob(int value);

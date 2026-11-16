@@ -98,6 +98,8 @@ extern unsigned sidaddress;
 //extern unsigned usefinevib;
 extern unsigned b;
 extern unsigned mr;
+extern unsigned audiobuffer;
+extern char audiodevice[MAX_PATHNAME];
 extern unsigned writer;
 extern unsigned hardsid;
 extern unsigned catweasel;
@@ -127,6 +129,11 @@ extern unsigned char hexkeytbl[16];
 extern unsigned char datafile[];
 #endif
 
+// Preferences (standalone): opens the audio output again with the device
+// (audiodevice), mixing rate (mr) and buffer length (audiobuffer samples, 0 =
+// b milliseconds) set now. If that fails, the system's default output is
+// opened instead and 0 returned
+int reopenaudio(void);
 void getparam(FILE *handle, unsigned *value);
 void getfloatparam(FILE *handle, float *value);
 void getstringparam(FILE *handle, char *value);

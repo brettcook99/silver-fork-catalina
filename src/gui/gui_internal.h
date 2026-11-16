@@ -164,6 +164,7 @@ namespace gui
 
   // About GoatTracker Ultimate, the level meter colors dialog
   void openabout(void);
+  void openpreferences(void);
   void openmetercolors(void);
 
   // The settings folder (ends with a path separator)
