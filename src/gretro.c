@@ -476,14 +476,14 @@ double retro_songbpm(void)
 // The title bar's SYNC: where it is (set when printed)
 static int tbsyncx = -1;
 // The plugin's menu bar (no menu bar of the system in a plugin): a right
-// click on the title bar shows LOAD, SAVE, IMPORT, EXPORT and CLEAR there
+// click on the title bar shows LOAD, SAVE, IMPORT, EXPORT, EDIT and CLEAR there
 // instead, each a dropdown. It stays until an item is chosen (a left click,
 // or the right button let go over it) or a click elsewhere. A host's editor
 // window may not report a left click while the right button is down, so
 // the standalone program's way (hold the right button, click with the left)
 // isn't needed
-#define TB_MENUS 5
-static const char *tbmenuname[TB_MENUS] = { "LOAD", "SAVE", "IMPORT", "EXPORT", "CLEAR" };
+#define TB_MENUS 6
+static const char *tbmenuname[TB_MENUS] = { "LOAD", "SAVE", "IMPORT", "EXPORT", "EDIT", "CLEAR" };
 static int tbmenux[TB_MENUS];
 static int tbmenuopen = 0;        // the menu bar is shown
 static int tbmenuheld = 0;        // the right button that showed it is still down

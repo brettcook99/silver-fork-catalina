@@ -20,11 +20,13 @@ terms cover the "VST" name; the plugin is free software and isn't sold.
 
 - Put it on an instrument track. The song is saved in the DAW's project.
 - **The blue title bar** shows the song's name. A **right click** on it shows
-  **LOAD, SAVE, IMPORT, EXPORT, CLEAR** there instead (it stays until an item
-  is chosen or you click elsewhere); a left click on one, or letting go of the
-  right button over it, opens its dropdown: load / save a song or an
+  **LOAD, SAVE, IMPORT, EXPORT, EDIT, CLEAR** there instead (it stays until an
+  item is chosen or you click elsewhere); a left click on one, or letting go of
+  the right button over it, opens its dropdown: load / save a song or an
   instrument, import SID, MIDI or chipsynth C64 (.fermatax) files, export SID
-  (the packer / relocator), MIDI or .fermatax, clear the track (the cursor
+  (the packer / relocator), MIDI or .fermatax, undo / redo (CMD+Z /
+  CMD+SHIFT+Z, CTRL on Windows, if the DAW lets the plugin have those keys),
+  clear the track (the cursor
   channel's pattern), the pattern (all three channels' patterns) or all (the
   clear dialog, everything ticked). The files are chosen in the system's own
   file dialogs, and each kind of file starts in the folder used last for it
@@ -39,7 +41,7 @@ terms cover the "VST" name; the plugin is free software and isn't sold.
   clock follows the DAW's.
 - **MIDI**: channels 1, 2 and 3 play voices 1, 2 and 3. The plugin starts in
   jam mode. The **sustain pedal / footswitch (CC 64)** switches: pressed =
-  edit mode, released = jam mode (the middle mouse button and NUMPAD . switch
+  edit mode, released = jam mode (ESC, the middle mouse button and NUMPAD . switch
   too, and the mode stays until one of them switches again; the DAW's own
   record button doesn't change it). In edit mode the notes are recorded into
   the patterns at the rows playing while the DAW plays (note-offs as `---`;

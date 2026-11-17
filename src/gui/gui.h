@@ -57,7 +57,8 @@ int gui_designershown(void);
 // Opens the retro menu bar's VIEW menu (SID designer, background, meter
 // colors, About) at the mouse pointer
 void gui_openviewmenu(void);
-// The plugin's file menu (0 = LOAD, 1 = SAVE, 2 = IMPORT, 3 = EXPORT) under
+// The plugin's title-bar menu (0 = LOAD, 1 = SAVE, 2 = IMPORT, 3 = EXPORT,
+// 4 = EDIT, 5 = CLEAR) under
 // its title on the retro title bar, which starts at text column column
 void gui_openfilemenu(int which, int column);
 void gui_designermidi(int noteon, int noteoff);

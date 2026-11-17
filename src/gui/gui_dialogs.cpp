@@ -1225,9 +1225,10 @@ extern "C" void gui_opendawsync(void)
 }
 
 /*
- * The plugin's file menus on the title bar: LOAD, SAVE, IMPORT, EXPORT. The
- * files are chosen in the system's file dialogs, each kind of file starting
- * in the folder used last for it
+ * The plugin's menus on the title bar: LOAD, SAVE, IMPORT, EXPORT, EDIT,
+ * CLEAR. The files are chosen in the system's file dialogs, each kind of
+ * file starting in the folder used last for it. EDIT: undo / redo (a host
+ * may keep CMD+Z and CMD+SHIFT+Z for itself)
  */
 
 static int wantfilemenu = -1;
@@ -1286,6 +1287,11 @@ static void filemenu(void)
       if (ImGui::MenuItem("SID...")) cmd_post(GTCMD_EXPORTSID);
       if (ImGui::MenuItem("MIDI...")) cmd_post(GTCMD_EXPORTMIDI);
       if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_EXPORTPATCH);
+      break;
+
+      case 4:
+      if (ImGui::MenuItem("Undo", MENUCMD "+Z", false, undoCanUndo() != 0)) cmd_post(GTCMD_UNDO);
+      if (ImGui::MenuItem("Redo", MENUCMD "+SHIFT+Z", false, undoCanRedo() != 0)) cmd_post(GTCMD_REDO);
       break;
 
       default:
