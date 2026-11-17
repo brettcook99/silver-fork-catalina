@@ -477,17 +477,21 @@ double retro_songbpm(void)
 static int tbsyncx = -1;
 // The plugin's menu bar (no menu bar of the system in a plugin): a right
 // click on the title bar shows LOAD, SAVE, IMPORT, EXPORT, EDIT and CLEAR there
-// instead, each a dropdown. It stays until an item is chosen (a left click,
-// or the right button let go over it) or a click elsewhere. A host's editor
-// window may not report a left click while the right button is down, so
-// the standalone program's way (hold the right button, click with the left)
-// isn't needed
+// instead, each a dropdown. Then, as in a system's menu bar, the mouse over
+// an item opens its dropdown (no click needed), and moving along the bar
+// opens the others. The bar goes when the dropdown closes (something chosen
+// in it, a click elsewhere) or, with no dropdown open, at a click elsewhere.
+// A host's editor window may not report a left click while the right button
+// is down, so the standalone program's way (hold the right button, click
+// with the left) isn't needed
 #define TB_MENUS 6
 static const char *tbmenuname[TB_MENUS] = { "LOAD", "SAVE", "IMPORT", "EXPORT", "EDIT", "CLEAR" };
 static int tbmenux[TB_MENUS];
 static int tbmenuopen = 0;        // the menu bar is shown
 static int tbmenuheld = 0;        // the right button that showed it is still down
 static int tbmenupressx = 0;      // where it was pressed
+static int tbmenumoved = 0;       // the mouse has moved since
+static int tbmenudrop = -1;       // the item whose dropdown is open, -1 none
 
 // The menu at column x of the menu bar, -1 if none
 static int tbmenuat(int x)
@@ -501,11 +505,18 @@ static int tbmenuat(int x)
   return -1;
 }
 
+// Opens item m's dropdown (another one open closes)
 static void tbmenuchoose(int m)
+{
+  tbmenudrop = m;
+  gui_openfilemenu(m, tbmenux[m]);
+}
+
+static void tbmenuclose(void)
 {
   tbmenuopen = 0;
   tbmenuheld = 0;
-  gui_openfilemenu(m, tbmenux[m]);
+  tbmenudrop = -1;
 }
 
 // Once per frame (the mouse as getkey() read it last): shows, opens or
@@ -513,17 +524,18 @@ static void tbmenuchoose(int m)
 static void tbmenuupdate(void)
 {
   int pressed = mouseb & ~prevmouseb;
+  int m;
 
   if (eamode)
   {
-    tbmenuopen = 0;
+    tbmenuclose();
     return;
   }
   if (!tbmenuopen)
   {
     if ((pressed & MOUSEB_RIGHT) && (mousey == 0))
     {
-      int m, mx = 1;
+      int mx = 1;
 
       for (m = 0; m < TB_MENUS; m++)
       {
@@ -533,27 +545,32 @@ static void tbmenuupdate(void)
       tbmenuopen = 1;
       tbmenuheld = 1;
       tbmenupressx = mousex;
+      tbmenumoved = 0;
+      tbmenudrop = -1;
     }
     return;
   }
-  // A left click on an item opens it, also while the right button is down
-  if ((pressed & MOUSEB_LEFT) && (mousey == 0) && (tbmenuat(mousex) >= 0))
+  if ((mousey != 0) || (mousex != tbmenupressx)) tbmenumoved = 1;
+  if ((tbmenuheld) && (!(mouseb & MOUSEB_RIGHT))) tbmenuheld = 0;
+  m = (mousey == 0) ? tbmenuat(mousex) : -1;
+
+  // A dropdown is open (the mouse buttons go to it): the mouse over another
+  // item opens that one instead. When it closes the menu bar goes too
+  if (tbmenudrop >= 0)
   {
-    tbmenuchoose(tbmenuat(mousex));
+    if (gui_filemenushown() < 0) tbmenuclose();
+    else if ((m >= 0) && (m != tbmenudrop)) tbmenuchoose(m);
     return;
   }
-  if (tbmenuheld)
+  // The mouse over an item opens it, once it has moved (a right click
+  // without moving only shows the menu bar); a click on it too
+  if ((m >= 0) && ((tbmenumoved) || (pressed & MOUSEB_LEFT)))
   {
-    if (mouseb & MOUSEB_RIGHT) return;
-    // The right button let go over an item opens it, if the mouse was
-    // moved there (a right click without moving only shows the menu bar);
-    // otherwise the menu bar stays
-    tbmenuheld = 0;
-    if ((mousey == 0) && (mousex != tbmenupressx) && (tbmenuat(mousex) >= 0)) tbmenuchoose(tbmenuat(mousex));
+    tbmenuchoose(m);
     return;
   }
   // Any other click hides it
-  if (pressed) tbmenuopen = 0;
+  if ((pressed) && (!tbmenuheld)) tbmenuclose();
 }
 #endif
 
@@ -781,6 +798,8 @@ void retro_printstatus(void)
     printblankc(0, 0, 15+16, MAX_COLUMNS);
     for (m = 0; m < TB_MENUS; m++)
       printtext(tbmenux[m], 0, 15+16, tbmenuname[m]);
+    // The item whose dropdown is open: highlighted
+    if (tbmenudrop >= 0) printbg(tbmenux[tbmenudrop] - 1, 0, 9, (int)strlen(tbmenuname[tbmenudrop]) + 2);
   }
 #else
   if ((mouseb > MOUSEB_LEFT) && (mousey <= 1) && (!eamode)) menu = 1;

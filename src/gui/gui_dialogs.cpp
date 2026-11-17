@@ -1234,6 +1234,7 @@ extern "C" void gui_opendawsync(void)
 static int wantfilemenu = -1;
 static int filemenuwhich = 0;
 static int filemenucolumn = 0;
+static int filemenushown = -1;
 
 extern "C" void gui_openfilemenu(int which, int column)
 {
@@ -1241,14 +1242,24 @@ extern "C" void gui_openfilemenu(int which, int column)
   filemenucolumn = column;
 }
 
+extern "C" int gui_filemenushown(void)
+{
+  return (wantfilemenu >= 0) ? wantfilemenu : filemenushown;
+}
+
 static void filemenu(void)
 {
+  char id[24];
+
+  // Each menu its own popup: opening one closes another one open
   if (wantfilemenu >= 0)
   {
     filemenuwhich = wantfilemenu;
     wantfilemenu = -1;
-    ImGui::OpenPopup("##filemenu");
+    snprintf(id, sizeof id, "##filemenu%d", filemenuwhich);
+    ImGui::OpenPopup(id);
   }
+  snprintf(id, sizeof id, "##filemenu%d", filemenuwhich);
   // Under its title (the text screen's second row), the text about as tall
   // as the screen's characters
   ImVec2 cell0 = gui::retrocellpos(filemenucolumn - 1, 1);
@@ -1257,8 +1268,9 @@ static void filemenu(void)
   if (size < ImGui::GetFontSize()) size = ImGui::GetFontSize();
   ImGui::SetNextWindowPos(cell0, ImGuiCond_Appearing);
   ImGui::PushFont(NULL, size);
-  bool open = ImGui::BeginPopup("##filemenu");
+  bool open = ImGui::BeginPopup(id);
   ImGui::PopFont();
+  filemenushown = open ? filemenuwhich : -1;
   if (open)
   {
     ImGui::PushFont(NULL, size);

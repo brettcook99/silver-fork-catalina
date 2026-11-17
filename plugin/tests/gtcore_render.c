@@ -32,6 +32,11 @@
  *                numpad's period: edit / jam mode)
  *   -stopped     the host's transport stays stopped (MIDI still comes at
  *                its beats, as played live)
+ *   -wait=S      the host's transport is stopped for the first S seconds
+ *                (no MIDI), then starts at -start: as a DAW's play button
+ *   -lag=N       when it starts, the host says it plays only N blocks after
+ *                sending the first MIDI (its position stays at the start
+ *                until then)
  *   -prerate=N   before rendering, prepare at N Hz and play a second there
  *                (thrown away), then change to -rate: as auval's render
  *                test at 22050 Hz after 44100 Hz
@@ -200,6 +205,8 @@ int main(int argc, char **argv)
   const char *keys = NULL;
   const char *mouse = NULL;
   int stopped = 0;
+  double waitseconds = 0.0;
+  int lagblocks = 0;
   const char *statepath = NULL;
   const char *loadstatepath = NULL;
   const char *song2 = NULL;
@@ -268,6 +275,8 @@ int main(int argc, char **argv)
     else if (!strncmp(argv[i], "-keys=", 6)) keys = argv[i] + 6;
     else if (!strncmp(argv[i], "-mouse=", 7)) mouse = argv[i] + 7;
     else if (!strcmp(argv[i], "-stopped")) stopped = 1;
+    else if (!strncmp(argv[i], "-wait=", 6)) waitseconds = atof(argv[i] + 6);
+    else if (!strncmp(argv[i], "-lag=", 5)) lagblocks = atoi(argv[i] + 5);
     else if (!strncmp(argv[i], "-prerate=", 9)) prerate = atoi(argv[i] + 9);
     else if (!strncmp(argv[i], "-state=", 7)) statepath = argv[i] + 7;
     else if (!strncmp(argv[i], "-loadstate=", 11)) loadstatepath = argv[i] + 11;
@@ -404,12 +413,14 @@ int main(int argc, char **argv)
   for (inst = 0; inst < instances; inst++)
   {
     long total = (long)(seconds * rate);
+    long waitsamples = (long)(waitseconds * rate);
     long done = 0;
     short *out = (short *)malloc(total * 4);
     float left[4096], right[4096];
     double beat = startbeat;
     int playing = 1;
     int jumped = 0;
+    int lag = lagblocks;
     char path[1024];
     unsigned seed = 12345;
     double peak = 0.0, sum = 0.0;
@@ -429,6 +440,7 @@ int main(int argc, char **argv)
       int nmidi = 0;
       int n = block;
       double blockbeats;
+      int waiting;
 
       if (n <= 0)
       {
@@ -436,6 +448,9 @@ int main(int argc, char **argv)
         n = 1 + (int)((seed >> 8) % 4096);
       }
       if (n > total - done) n = (int)(total - done);
+      // -wait: stopped until then (a block ends there)
+      waiting = (done < waitsamples);
+      if ((waiting) && (n > waitsamples - done)) n = (int)(waitsamples - done);
       blockbeats = (bpm > 0.0) ? n * bpm / 60.0 / rate : 0.0;
 
       if ((stopat >= 0.0) && (beat >= stopat)) playing = 0;
@@ -446,16 +461,16 @@ int main(int argc, char **argv)
       }
       memset(&tp, 0, sizeof tp);
       tp.valid = (bpm > 0.0);
-      tp.playing = (playing) && (!stopped);
+      tp.playing = (playing) && (!stopped) && (!waiting) && (!lag);
       tp.bpm = bpm;
-      tp.ppq = beat;
+      tp.ppq = (lag) ? startbeat : beat;
       tp.timesignum = 4;
       tp.timesigden = 4;
 
       tp.recording = (playing) && (recordfrom >= 0.0) && (beat >= recordfrom) && (beat < recordto);
 
       // The block's MIDI events, in time order
-      if (bpm > 0.0)
+      if ((bpm > 0.0) && (!waiting))
       {
         int e, k;
         for (e = 0; e < numev; e++)
@@ -485,7 +500,8 @@ int main(int argc, char **argv)
         out[(done + i) * 2 + 1] = (short)(r * 32767.0f);
       }
       done += n;
-      if (playing) beat += blockbeats;
+      if ((playing) && (!waiting)) beat += blockbeats;
+      if ((lag) && (!waiting)) lag--;
     }
     if (instances > 1)
     {

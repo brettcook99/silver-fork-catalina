@@ -61,6 +61,9 @@ void gui_openviewmenu(void);
 // 4 = EDIT, 5 = CLEAR) under
 // its title on the retro title bar, which starts at text column column
 void gui_openfilemenu(int which, int column);
+// The plugin's title bar menu whose dropdown is open (or about to open), -1
+// if none
+int gui_filemenushown(void);
 void gui_designermidi(int noteon, int noteoff);
 // A MIDI control change (knob) while the SID designer is shown: attack
 // (CC 73), decay (75), sustain (70, 76 or 20), release (72), filter cutoff

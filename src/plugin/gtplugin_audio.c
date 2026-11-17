@@ -50,8 +50,45 @@ static int recordpass = 0;        // the next recorded note starts a pass
 static volatile int resync = 0;   // chase again (a new song)
 static int wasplaying = 0;
 
-// Notes sounding from the routed MIDI channels (the voice's note, 0 = none)
+// Notes sounding from the routed MIDI channels (the voice's note, 0 = none),
+// and whether that note was recorded (its note-off is recorded then)
 static int routednote[MAX_CHN];
+static int routedrecorded[MAX_CHN];
+
+// Notes that come just before the song's first row while following the host
+// (the DAW starts a moment before the song, or the song's first note comes a
+// moment early): they sound from the first row on and are recorded on it.
+// Per voice: the note (0 = none), its instrument, whether it is recorded,
+// whether it is still to be played (it came before the song started) and
+// whether it has been let go already
+static int startnote[MAX_CHN];
+static int startinstr[MAX_CHN];
+static int startrecord[MAX_CHN];
+static int startplay[MAX_CHN];
+static int startreleased[MAX_CHN];
+
+// Edit mode with the host stopped: the notes from the host are entered at
+// the cursor (by the GoatTracker thread), but a moment later: a host may say
+// that it plays only a block or two after sending the first notes. If it
+// starts meanwhile, they are the recording's first notes instead
+#define HOLDSIZE 64
+#define HOLDSECONDS 0.02
+typedef struct
+{
+  int ev, ch, data1, data2;
+  double clock;                   // the sample clock when it came
+  unsigned call;                  // the gtcore_process() call it came in
+} HELDEVENT;
+static HELDEVENT held[HOLDSIZE];
+static int heldcount = 0;
+static double sampleclock = 0.0;  // samples rendered
+static unsigned processcalls = 0;
+static int syncing = 0;           // following the host is possible (DAW SYNC)
+
+// The MIDI event being handled: its sample clock, and (following the host)
+// its song position in beats
+static double eventclock = 0.0;
+static double eventbeat = 0.0;
 // MIDI INPUT 2-3 (midichord): the next voice in turn, and when each voice's
 // note started (to take the oldest when all are playing)
 static int spreadturn = 0;
@@ -270,7 +307,12 @@ static void chase(double target)
 
   playerreset();
   sid_resetchip();
-  for (c = 0; c < MAX_CHN; c++) routednote[c] = 0;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    routednote[c] = 0;
+    routedrecorded[c] = 0;
+    startnote[c] = 0;
+  }
   recordpass = 1;
 
   // The song's first frame comes this many frames before its first row's
@@ -488,6 +530,181 @@ static int spreadfind(int note)
   return -1;
 }
 
+// One pattern row in beats while following the host
+static double rowbeats(void)
+{
+  return 1.0 / (stepsize > 0 ? stepsize : 4);
+}
+
+// Whether voice c plays its rows yet (the song's first row has started)
+static int rowsplaying(int c)
+{
+  return (songinit != PLAY_STOPPED) && (!waitstart) && (chn[c].playvalid);
+}
+
+// While the song plays: a note on voice c that starts with the channel's
+// next row, as a note played on that row (the row's own note gives way)
+static void playonrow(int c, int note, int ins)
+{
+  playtestnote(note, ins, c);
+  if ((chn[c].tick > 0) && (chn[c].tick < 0x80)) chn[c].jamtime = chn[c].tick;
+}
+
+// A note-on on voice c before the song's first row (following the host).
+// Close to the row it is played from the row on and recorded there (see
+// startnotes()); long before it (a host's pre-roll) it is only played
+static void earlynote(int c, int note, int ins, int nearstart)
+{
+  routednote[c] = note;
+  routedrecorded[c] = 0;
+  startnote[c] = 0;
+  if (!nearstart)
+  {
+    playtestnote(note, ins, c);
+    return;
+  }
+  startnote[c] = note;
+  startinstr[c] = ins;
+  startrecord[c] = recordmode;
+  startreleased[c] = 0;
+  routedrecorded[c] = recordmode;
+  // Before the song's first frame the player would forget it: it is played
+  // after that frame
+  startplay[c] = (songinit == PLAY_STOPPED);
+  if (!startplay[c]) playonrow(c, note, ins);
+}
+
+// After each frame while following the host: the early notes start after
+// the song's first frame and are recorded when their channel's first row
+// has started
+static void startnotes(void)
+{
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if (!startnote[c]) continue;
+    if ((startplay[c]) && (songinit != PLAY_STOPPED) && (!waitstart))
+    {
+      startplay[c] = 0;
+      playonrow(c, startnote[c], startinstr[c]);
+    }
+    if ((!startplay[c]) && (rowsplaying(c)))
+    {
+      int state = (startrecord[c]) && (recordmode);
+
+      recordnote(c, startnote[c], startinstr[c], 0.0, state);
+      // Let go before the row came: a short note, its keyoff on the next row
+      if (startreleased[c])
+      {
+        releasenote(c);
+        if (gtsync_recordoff) recordnote(c, KEYOFF, 0, chn[c].rowlen, state);
+      }
+      startnote[c] = 0;
+    }
+  }
+}
+
+// A note-on from a routed MIDI channel ch (eventbeat: when, following the
+// host)
+static void routednoteon(int ch, int note, double framefraction)
+{
+  int playing = (songinit != PLAY_STOPPED);
+  int ins = programinstr(ch);
+  int c = (midichord > 1) ? spreadvoice() : ch;
+
+  // Before the song's first row: close to it (half a row) it belongs to the
+  // first row
+  if ((following) && (!rowsplaying(c)) && (eventbeat < 0.5 * rowbeats()))
+  {
+    earlynote(c, note, ins, eventbeat >= -0.5 * rowbeats() - 1e-9);
+    return;
+  }
+  playtestnote(note, ins, c);
+  routednote[c] = note;
+  routedrecorded[c] = recordstate(playing);
+  recordnote(c, note, ins, framefraction, recordstate(playing));
+}
+
+static void routednoteoff(int ch, int note, double framefraction)
+{
+  int playing = (songinit != PLAY_STOPPED);
+  int c = (midichord > 1) ? spreadfind(note) : ch;
+
+  if ((c < 0) || (routednote[c] != note)) return;
+  routednote[c] = 0;
+  // Before its row: let go after it has started there
+  if (startnote[c] == note)
+  {
+    startreleased[c] = 1;
+    return;
+  }
+  releasenote(c);
+  if ((gtsync_recordoff) && (routedrecorded[c])) recordnote(c, KEYOFF, 0, framefraction, recordstate(playing));
+  routedrecorded[c] = 0;
+}
+
+// Edit mode, the host stopped: a note event to be entered at the cursor a
+// moment later (releaseheld())
+static void releaseheld(int all);
+
+static void holdevent(int ev, int ch, int data1, int data2)
+{
+  HELDEVENT *h;
+
+  if (heldcount >= HOLDSIZE) releaseheld(1);
+  h = &held[heldcount++];
+  h->ev = ev;
+  h->ch = ch;
+  h->data1 = data1;
+  h->data2 = data2;
+  h->clock = eventclock;
+  h->call = processcalls;
+}
+
+// The held events whose time is up (all: every one) go to the GoatTracker
+// thread, with the times they came at
+static void releaseheld(int all)
+{
+  unsigned now = SDL_GetTicks();
+  int n = 0;
+
+  while (n < heldcount)
+  {
+    HELDEVENT *h = &held[n];
+    double age = sampleclock - h->clock;
+
+    // Kept for at least the next block, and HOLDSECONDS
+    if ((!all) && ((h->call == processcalls) || (age < HOLDSECONDS * samplerate))) break;
+    if (age < 0.0) age = 0.0;
+    midi_pushevent_at(h->ev, h->ch, h->data1, h->data2, now - (unsigned)(age * 1000.0 / samplerate));
+    n++;
+  }
+  if (n)
+  {
+    memmove(held, held + n, (heldcount - n) * sizeof held[0]);
+    heldcount -= n;
+  }
+}
+
+// The host has started: the notes held meanwhile are played and recorded
+// as notes played where it started (eventbeat)
+static void startheld(void)
+{
+  int k;
+
+  for (k = 0; k < heldcount; k++)
+  {
+    HELDEVENT *h = &held[k];
+    int note = FIRSTNOTE + h->data1 - 12;
+
+    if ((note < FIRSTNOTE) || (note > LASTNOTE)) continue;
+    if (h->ev == MIDI_NOTEON) routednoteon(h->ch, note, 0.0);
+    else if (h->ev == MIDI_NOTEOFF) routednoteoff(h->ch, note, 0.0);
+  }
+  heldcount = 0;
+}
+
 static void handlemidi(const gtcore_midi *m, double framefraction)
 {
   int type = m->status & 0xf0;
@@ -546,38 +763,26 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
   // player. With MIDI INPUT 2-3 PATTERNS (midichord) the channel doesn't
   // matter: the notes of every channel are shared out to 2-3 voices, so that
   // one DAW track can play chords and overlapping notes. In edit mode
-  // without playback they are entered at the cursor like notes from a MIDI
-  // keyboard; so they are in the SID designer
+  // without playback (the host stopped) they are entered at the cursor like
+  // notes from a MIDI keyboard, a moment later (see holdevent()); so they
+  // are in the SID designer
   spread = (midichord > 1);
   if ((!gui_designeractive()) && ((spread) || ((gtsync_route) && (ch < MAX_CHN))))
   {
     int playing = (songinit != PLAY_STOPPED);
-    int note = FIRSTNOTE + m->data1 - 12;
 
-    if ((ev != MIDI_CONTROL) && ((!recordmode) || (playing)))
+    if ((ev != MIDI_CONTROL) && (recordmode) && (!playing) && (!following) && (syncing))
     {
-      int c;
+      holdevent(ev, ch, m->data1, m->data2);
+      return;
+    }
+    if ((ev != MIDI_CONTROL) && ((!recordmode) || (playing) || (following)))
+    {
+      int note = FIRSTNOTE + m->data1 - 12;
 
       if ((note < FIRSTNOTE) || (note > LASTNOTE)) return;
-      if (ev == MIDI_NOTEON)
-      {
-        int ins = programinstr(ch);
-
-        c = spread ? spreadvoice() : ch;
-        playtestnote(note, ins, c);
-        routednote[c] = note;
-        recordnote(c, note, ins, framefraction, recordstate(playing));
-      }
-      else
-      {
-        c = spread ? spreadfind(note) : ch;
-        if ((c >= 0) && (routednote[c] == note))
-        {
-          releasenote(c);
-          routednote[c] = 0;
-          if (gtsync_recordoff) recordnote(c, KEYOFF, 0, framefraction, recordstate(playing));
-        }
-      }
+      if (ev == MIDI_NOTEON) routednoteon(ch, note, framefraction);
+      else routednoteoff(ch, note, framefraction);
       return;
     }
   }
@@ -644,9 +849,11 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
     tp = &none;
   }
 
+  processcalls++;
   hostbpm = ((tp->valid) && (tp->bpm > 1.0)) ? tp->bpm : 0.0;
   hostplaying = (tp->valid) && (tp->playing);
   sync = (gtsync_enabled) && (hostbpm > 0.0);
+  syncing = sync;
   if (sync) samplesperbeat = samplerate * 60.0 / hostbpm;
   offset = startoffset(tp);
   ppqbase = tp->ppq;
@@ -662,18 +869,29 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
     double tol = 2.0 * framebeats();
     if ((!following) || (resync) || (fabs(tp->ppq - expectedppq) > tol))
     {
+      int started = !following;
+
       following = 1;
       resync = 0;
       chase(tp->ppq - offset);
+      // Notes held while it was stopped are its first ones
+      if ((started) && (heldcount))
+      {
+        eventbeat = tp->ppq - offset;
+        startheld();
+      }
     }
   }
   else if (following)
   {
+    int c;
+
     // The host stopped
     following = 0;
     waitstart = 0;
     songinit = PLAY_STOP;
     framecount = 0.0;
+    for (c = 0; c < MAX_CHN; c++) startnote[c] = 0;
   }
 
   while (pos < samples)
@@ -684,9 +902,11 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
     while ((m < nmidi) && (midi[m].offset <= pos))
     {
       double fraction;
+      eventclock = sampleclock + pos;
       if (following)
       {
         double ppq = ppqbase + pos / samplesperbeat - offset;
+        eventbeat = ppq;
         fraction = (ppq - songbeat) / (nextbeat - songbeat);
       }
       else
@@ -734,6 +954,7 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
         playframe();
         songbeat = nextbeat;
         nextbeat += framebeats();
+        startnotes();
         logframe();
         continue;
       }
@@ -763,6 +984,8 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
   }
 
   // The rest of the MIDI events (offsets past the block)
+  eventclock = sampleclock + samples;
+  if (following) eventbeat = ppqbase + samples / samplesperbeat - offset;
   while (m < nmidi)
   {
     handlemidi(&midi[m], 1.0);
@@ -770,5 +993,8 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
   }
 
   if (following) expectedppq = ppqbase + samples / samplesperbeat;
+  sampleclock += samples;
+  // Held notes (edit mode, the host stopped) go to the cursor in time
+  if (heldcount) releaseheld(0);
   SDL_UnlockMutex(gtplugin_enginemutex);
 }

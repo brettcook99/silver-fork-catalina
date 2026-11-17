@@ -40,6 +40,12 @@ static int mididevices = 0;
 // thread). Events are dropped if the queue is full
 void midi_pushevent_ch(int type, int channel, int data1, int data2)
 {
+  midi_pushevent_at(type, channel, data1, data2, SDL_GetTicks());
+}
+
+// The same, for an event that came at time (SDL_GetTicks() milliseconds)
+void midi_pushevent_at(int type, int channel, int data1, int data2, unsigned time)
+{
   unsigned next;
 
   while (__sync_lock_test_and_set(&midiqueuelock, 1))
@@ -48,7 +54,7 @@ void midi_pushevent_ch(int type, int channel, int data1, int data2)
   if (next != midiqueueread)
   {
     midiqueue[midiqueuewrite] = (type << 20) | ((channel & 0xf) << 16) | ((data1 & 0x7f) << 8) | (data2 & 0x7f);
-    midiqueuetime[midiqueuewrite] = SDL_GetTicks();
+    midiqueuetime[midiqueuewrite] = time;
     __sync_synchronize();
     midiqueuewrite = next;
   }
@@ -334,6 +340,15 @@ void midi_pushevent_ch(int type, int channel, int data1, int data2)
   (void)channel;
   (void)data1;
   (void)data2;
+}
+
+void midi_pushevent_at(int type, int channel, int data1, int data2, unsigned time)
+{
+  (void)type;
+  (void)channel;
+  (void)data1;
+  (void)data2;
+  (void)time;
 }
 
 int midi_eventchannel(void)

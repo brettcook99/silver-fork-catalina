@@ -29,6 +29,8 @@ int midi_eventchannel(void);
 // Queues an event as if it came from a MIDI device (the plugin's MIDI from
 // the host). Safe from one other thread
 void midi_pushevent_ch(int type, int channel, int data1, int data2);
+// The same for an event that came earlier, at time (SDL_GetTicks())
+void midi_pushevent_at(int type, int channel, int data1, int data2, unsigned time);
 
 // When the event midi_getevent() returned last arrived, in milliseconds
 // (SDL_GetTicks())
