@@ -815,7 +815,7 @@ static void patternmenu(void)
     if (ImGui::MenuItem("Clear")) cmd_post(GTCMD_PATTCLEAR);
     ImGui::Separator();
     if (ImGui::MenuItem("Undo", MENUCMD "+Z", false, undoCanUndo() != 0)) cmd_post(GTCMD_UNDO);
-    if (ImGui::MenuItem("Redo", MENUCMD "+Y", false, undoCanRedo() != 0)) cmd_post(GTCMD_REDO);
+    if (ImGui::MenuItem("Redo", MENUCMD "+SHIFT+Z", false, undoCanRedo() != 0)) cmd_post(GTCMD_REDO);
     ImGui::PopFont();
     ImGui::EndPopup();
   }
@@ -835,7 +835,7 @@ void gui::openpreferences(void)
 }
 
 static const unsigned prefrates[] = { 44100, 48000 };
-static const unsigned prefbuffers[] = { 64, 128, 256, 512, 1024, 2048, 4096 };
+static const unsigned prefbuffers[] = { 32, 64, 128, 256, 512 };
 
 static void preferencesdialog(void)
 {
@@ -907,27 +907,30 @@ static void preferencesdialog(void)
       ImGui::EndCombo();
     }
 
-    // The buffer size: in samples, or the default length in milliseconds
+    // The buffer size: 32-512 samples (the one chosen ticked), or the
+    // default length in milliseconds. A size from an older version's list
+    // (1024-4096) stays until another is chosen
     if (audiobuffer) snprintf(text, sizeof text, "%u samples (%.1f ms)", audiobuffer, audiobuffer * 1000.0 / mr);
     else snprintf(text, sizeof text, "Default (%u ms)", b);
     ImGui::SetNextItemWidth(w);
     if (ImGui::BeginCombo("Buffer size", text))
     {
       char item[64];
-      snprintf(item, sizeof item, "Default (%u ms)", b);
-      if (ImGui::Selectable(item, !audiobuffer))
-      {
-        audiobuffer = 0;
-        changed = true;
-      }
       for (c = 0; c < (int)(sizeof prefbuffers / sizeof prefbuffers[0]); c++)
       {
-        snprintf(item, sizeof item, "%u samples (%.1f ms)", prefbuffers[c], prefbuffers[c] * 1000.0 / mr);
-        if (ImGui::Selectable(item, audiobuffer == prefbuffers[c]))
+        snprintf(item, sizeof item, "%u", prefbuffers[c]);
+        if ((ImGui::MenuItem(item, NULL, audiobuffer == prefbuffers[c])) && (audiobuffer != prefbuffers[c]))
         {
           audiobuffer = prefbuffers[c];
           changed = true;
         }
+      }
+      ImGui::Separator();
+      snprintf(item, sizeof item, "Default (%u ms)", b);
+      if ((ImGui::MenuItem(item, NULL, !audiobuffer)) && (audiobuffer))
+      {
+        audiobuffer = 0;
+        changed = true;
       }
       ImGui::EndCombo();
     }

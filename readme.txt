@@ -244,7 +244,8 @@ mouse-friendly editors) for that time; -u1 starts the modern one.
 The SID Designer is a full-window editor for instruments: under the
 tracker's title bar, a violet C64 screen with a lavender border in a white
 frame with the C64's nameplate, laid out like Plogue chipsynth C64's patch
-page. It opens on the tracker's current instrument (INSTRUMENT NUM.).
+page. It opens on the BROWSER page, with the tracker's current instrument
+(INSTRUMENT NUM.).
 CTRL+numpad 7 opens it from anywhere and returns to the tracker, as do "SID Designer" / "Tracker" at the
 right end of the title bar, CTRL+D (CMD+D on macOS), ALT/OPTION+numpad 5,
 the rainbow button in the modern control bar and View > SID Designer; ESC
@@ -394,10 +395,11 @@ SHIFT+TAB Cycle between editing modes (backwards)
 INS       Insert row (Press INS/DEL on endmark to change pattern/song length)
 DEL       Delete row
 SHIFT+ESC Optimize musicdata, or clear musicdata & set default pattern length
-ESC       Exit program
+ESC       Switch between jam/editmode, like NUMPAD . (quit with the window's
+          close button, the QUIT menu or CMD+Q on macOS)
 NUMPAD 0  Play from the cursor / stop, like SPACE
-NUMPAD .  Switch between jam/editmode (also the middle mouse button; CMD+R no
-          longer does)
+NUMPAD .  Switch between jam/editmode (also ESC and the middle mouse button;
+          CMD+R no longer does)
 SPACE     Play from the cursor / stop, in every editor except the songname
           editor and the instrument name (SHIFT+SPACE: play without following).
           Stopping (SPACE, NUMPAD 0, F4) puts the cursor back where the

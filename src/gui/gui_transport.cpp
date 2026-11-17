@@ -434,13 +434,13 @@ void gui::drawmenubar(void)
     if (ImGui::MenuItem("Export MIDI File...")) cmd_post(GTCMD_EXPORTMIDI);
     if (ImGui::MenuItem("Export chipsynth C64 Patch (.fermatax)...")) cmd_post(GTCMD_EXPORTPATCH);
     ImGui::Separator();
-    if (ImGui::MenuItem("Quit", "ESC")) cmd_post(GTCMD_QUIT);
+    if (ImGui::MenuItem("Quit", "ALT+F4")) cmd_post(GTCMD_QUIT);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Edit"))
   {
     if (ImGui::MenuItem("Undo", "CTRL+Z")) cmd_post(GTCMD_UNDO);
-    if (ImGui::MenuItem("Redo", "CTRL+Y")) cmd_post(GTCMD_REDO);
+    if (ImGui::MenuItem("Redo", "CTRL+SHIFT+Z")) cmd_post(GTCMD_REDO);
     ImGui::Separator();
     if (ImGui::MenuItem("Cut", "SHIFT+X")) cmd_post(GTCMD_CUT);
     if (ImGui::MenuItem("Copy", "SHIFT+C")) cmd_post(GTCMD_COPY);

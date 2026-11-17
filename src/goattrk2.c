@@ -1572,9 +1572,15 @@ void generalcommands(void)
 	}
 	switch (rawkey)
 	{
+	// ESC: switch between edit mode and jam mode, as NUMPAD . and the middle
+	// mouse button (quit: the window's close button, the QUIT menu, CMD+Q
+	// on macOS). SHIFT+ESC: clear / optimize the song
 	case KEY_ESC:
 		if (!shiftpressed)
-			gui_askquit();
+		{
+			recordmode ^= 1;
+			gui_message(recordmode ? "Edit mode: notes are entered" : "Jam mode: notes are only played");
+		}
 		else
 			gui_askclear();
 		break;

@@ -907,7 +907,9 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     case SDLK_RETURN: case SDLK_KP_ENTER: ch = 13; break;
     case SDLK_BACKSPACE: ch = 8; break;
     case SDLK_TAB: ch = 9; break;
-    case SDLK_ESCAPE: ch = 27; break;
+    // ESC switches edit / jam mode: held down it doesn't repeat (it would
+    // flip back and forth)
+    case SDLK_ESCAPE: if (k.repeat) return; ch = 27; break;
     case SDLK_DELETE: ch = 127; break;
   }
   input_pushkey((int)sym, ch, modbits(mod));
