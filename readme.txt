@@ -419,14 +419,17 @@ BACKQUOTE   Select channel
 0-9 & A-F   Enter parameters
 SPACE       Play from cursor position / stop
 RETURN      Go to the start of the song (stops the playback), as in a DAW
-SUSTAIN PEDAL (MIDI CC 64) or CAPSLOCK Insert keyoff
+CTRL+SHIFT+RET. or CAPSLOCK Insert keyoff, in any column (CMD+SHIFT+RETURN
+            too on macOS). The sustain pedal (MIDI CC 64) switches between
+            edit mode (down) and jam mode (up)
 SHIFT+RET.  Insert keyon (on the note)
             Enter table (when cursor is over a table-utilizing command)
             Enter instrument (when cursor is over a nonzero instrument number)
             Go into an empty table entry (when parameter is zero on a
             table-utilizing command)
-CTRL+SHIFT+RET. Convert portamento/vibrato/funktempo old style parameter to a
-            speedtable entry (when cursor is over the command)
+ALT+SHIFT+RET. Convert portamento/vibrato/funktempo old style parameter to a
+            speedtable entry (when cursor is over the command; OPTION on
+            macOS)
 DEL         Clear: on the note a rest, on the instrument or command that
             (the cursor moves down)
 SHIFT+DEL   Insert rest and clear commands
@@ -446,6 +449,9 @@ SHIFT+Q     Transpose halfstep up
 SHIFT+A     Transpose halfstep down
 SHIFT+W     Transpose octave up
 SHIFT+S     Transpose octave down
+ALT+CRSR UP,DOWN Transpose halfstep up / down (ALT+SHIFT: an octave; OPTION on
+            macOS). As SHIFT+Q,A,W,S: the marked rows, or with nothing
+            marked the cursor track's pattern
 SHIFT+O     Shrink pattern (divide size by 2)
 SHIFT+P     Expand pattern (multiply size by 2)
 SHIFT+J     Join pattern with next pattern in orderlist
