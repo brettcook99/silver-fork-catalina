@@ -2852,6 +2852,9 @@ void gui::opendesigner(void)
   editorInfo.editmode = EDIT_INSTRUMENT;
   showdesigner = true;
   drawnlastframe = false;
+  // It always opens on the BROWSER page
+  page = PAGE_BROWSER;
+  focus = 0;
   nameedit = false;
   active = 0;
   navhead = navtail = 0;

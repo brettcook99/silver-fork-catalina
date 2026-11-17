@@ -45,7 +45,7 @@ static const HelpLine interfacelines[] = {
 };
 
 static const HelpLine designerlines[] = {
-  { "Opening / closing", "CTRL+numpad 7, " CMD "+D, ALT/OPTION+numpad 5, Tracker at the right of the title bar or ESC (RUN/STOP). It opens on the tracker's current instrument (INSTRUMENT NUM.); the tracker returns to it. The title bar's settings work there too." },
+  { "Opening / closing", "CTRL+numpad 7, " CMD "+D, ALT/OPTION+numpad 5, Tracker at the right of the title bar or ESC (RUN/STOP). It opens on the BROWSER page, with the tracker's current instrument (INSTRUMENT NUM.); the tracker returns to it. The title bar's settings work there too." },
   { "Patch", "Up to three oscillators, each an instrument played on SID voice 1, 2 or 3 together, so that sync and ring modulation work between them. The oscillators of the patch BASS are the instruments named BASS:1, BASS:2 and BASS:3 (as chipsynth patches are imported). Click an oscillator's light to add it (a copy of the first, in the next empty instrument) or mute it. CTRL+[ / ] / \\ mute or unmute SID voice 1 / 2 / 3 as in the tracker (the oscillator on it goes grey; a click on its light brings it back)." },
   { "PATCH page", "Waveforms, FILT / SYNC / RING / TEST, hard restart and legato, pulse width and the envelope (drag the bars, SHIFT+drag for fine steps, or the wheel), transpose / fixed pitch, vibrato and the gate timer. The filter panel sets cutoff, resonance, type and the voices it filters; click the chip display to switch 6581 / 8580 and PAL / NTSC." },
   { "WAVE / PULSE / FILTER", "The instrument's wave, pulse and filter table rows as steps: waveform bits and arpeggio notes, pulse width and filter sweeps with a graph of the result, where the table loops, presets and sweep makers. SHARED: other instruments use the same rows; UNSHARE gives this one its own copy." },
@@ -76,7 +76,7 @@ static const HelpLine generallines[] = {
   { "SHIFT+F8", "Switch between 6581 and 8580" },
   { "SHIFT+F9", "Toggle reSID interpolation" },
   { "NUMPAD 0", "Play from the cursor / stop, like SPACE" },
-  { "NUMPAD .", "Edit mode / jam mode (the middle mouse button too)" },
+  { "ESC, NUMPAD .", "Edit mode / jam mode (the middle mouse button too)" },
   { "SUSTAIN PEDAL", "MIDI CC 64: down = edit mode, up = jam mode" },
   { "ALT+NUMPAD 1-3", "MIDI input on 1-3 tracks (OPTION on macOS)" },
   { "CTRL+NUMPAD 1-3", "Go to track 1 / 2 / 3 in the pattern editor" },
@@ -88,7 +88,6 @@ static const HelpLine generallines[] = {
   { CMD "+1-9", "Same as F1-F9" },
   { CMD "+F", "Follow playback" },
   { "SHIFT+ESC", "Clear / optimize the song" },
-  { "ESC", "Quit" },
   { NULL, NULL }
 };
 

@@ -94,7 +94,7 @@ int snd_init(unsigned mixrate, unsigned mixmode, unsigned bufferlength, unsigned
         unsigned samples = (bufferlength * mixrate + 999) / 1000;
         if (snd_buffersamples) samples = snd_buffersamples;
 
-        if (samples < 64) samples = 64;
+        if (samples < 32) samples = 32;
         if (samples > 32768) samples = 32768;
         desired.samples = (Uint16)samples;
     }
