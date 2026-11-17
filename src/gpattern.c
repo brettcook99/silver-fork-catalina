@@ -237,6 +237,18 @@ static void patternnudge(int drow, int dchn)
   }
 }
 
+// ALT+UP/DOWN (OPTION on macOS): the marked rows, or with nothing marked the
+// cursor track's pattern, a halfstep up / down (with SHIFT an octave)
+static void patternalttranspose(int dir)
+{
+  int marked = (editorInfo.epmarkchn != -1);
+  int octave = shiftonlypressed;
+  int patt = patterntranspose(octave ? dir * 12 : dir);
+
+  gui_message("%s %02X: %s %s", marked ? "Marked rows of pattern" : "Pattern", patt,
+    octave ? "octave" : "halfstep", (dir > 0) ? "up" : "down");
+}
+
 void patterncommands(void)
 {
   int c, scrrep;
@@ -1155,13 +1167,16 @@ void patterncommands(void)
       patterndown();
     break;
 
+    // CTRL+UP/DOWN nudge, ALT+UP/DOWN transpose
     case KEY_UP:
     if (ctrlpressed) patternnudge(-1, 0);
+    else if (altpressed) patternalttranspose(1);
     else patternup();
     break;
 
     case KEY_DOWN:
     if (ctrlpressed) patternnudge(1, 0);
+    else if (altpressed) patternalttranspose(-1);
     else patterndown();
     break;
 

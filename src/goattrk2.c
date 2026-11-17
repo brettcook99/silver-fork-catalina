@@ -1168,8 +1168,10 @@ void docommand(void)
 		}
 		undoAreaSetCheckForChange(UNDO_AREA_ORDERLIST_LEN, 0, UNDO_AREA_DIRTY_CHECK);
 		// The notes of a MIDI chord go to the other channels' patterns too,
-		// so does a note nudged to the next track (CTRL+LEFT/RIGHT)
-		if (((midinoteon) && ((midichord > 1) || (midinoterouted))) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))))
+		// so does a note nudged to the next track (CTRL+LEFT/RIGHT); ALT+UP/
+		// DOWN transposes the marked rows, maybe on another track
+		if (((midinoteon) && ((midichord > 1) || (midinoterouted))) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))) ||
+			((altpressed) && ((rawkey == KEY_UP) || (rawkey == KEY_DOWN))))
 		{
 			for (int i = 0;i < MAX_CHN;i++)
 				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[i].epnum, UNDO_AREA_DIRTY_CHECK);
