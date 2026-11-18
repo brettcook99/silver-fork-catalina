@@ -207,6 +207,9 @@ int gtplugin_soundinit(unsigned model, unsigned ntsc, unsigned multiplier, unsig
   cur_clock = customclockrate;
   soundparamsset = 1;
   initsid();
+  // Notes played (MIDI, keys) start at the sample they come at (see
+  // playnow_run() in gplay.c)
+  playnowon = 1;
   gtplugin_unlockengine();
   return 1;
 }
@@ -546,8 +549,7 @@ static int rowsplaying(int c)
 // next row, as a note played on that row (the row's own note gives way)
 static void playonrow(int c, int note, int ins)
 {
-  playtestnote(note, ins, c);
-  if ((chn[c].tick > 0) && (chn[c].tick < 0x80)) chn[c].jamtime = chn[c].tick;
+  playtestnoterow(note, ins, c);
 }
 
 // A note-on on voice c before the song's first row (following the host).
@@ -976,10 +978,13 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
       }
       if (framecount < n) n = (int)ceil(framecount - 0.5);
       if (n < 1) n = 1;
-      framecount -= n;
     }
 
+    // Notes played start (and stop) here, between the frames
+    n = playnow_run(n, samplerate / framerate(sync), samplerate);
+    if (!following) framecount -= n;
     render(left + pos, right + pos, n);
+    playnow_advance(n);
     pos += n;
   }
 
