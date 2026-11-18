@@ -53,6 +53,9 @@ public:
 
   // Envelope level (0-255) of a voice, for level meters (GoatTracker)
   reg8 envelope_level(int v) { return voice[v].envelope.envelope_counter; }
+  // Restarts a voice's envelope clock (GoatTracker: a note played at once
+  // needs no hardrestart frames for the ADSR delay bug, as if they had been)
+  void restart_envelope_clock(int v) { voice[v].envelope.rate_counter = 0; voice[v].envelope.exponential_counter = 0; }
 
   // 16-bit input (EXT IN).
   void input(int sample);

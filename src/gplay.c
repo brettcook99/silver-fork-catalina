@@ -49,11 +49,42 @@ int songinit = 0;
 // A note played while the song plays sounds at least this many frames
 // before the pattern's next note (see playroutine())
 #define JAMMINFRAMES 3
-// A note played from the keyboard or MIDI starts after this many hardrestart
-// frames (fewer if the instrument's gate timer is shorter): enough for the
-// envelope to start again cleanly, and quicker than waiting the instrument's
-// whole gate timer (often 2-3 frames, 40-60 ms) as a pattern note does
+// A note played from the keyboard or MIDI the old way (HardSID / CatWeasel
+// output; an emulated SID starts it at once, see playnow_run()) starts
+// after this many hardrestart frames (fewer if the instrument's gate timer
+// is shorter): enough for the envelope to start again cleanly, and quicker
+// than waiting the instrument's whole gate timer (often 2-3 frames, 40-60
+// ms) as a pattern note does
 #define JAMHRFRAMES 1
+
+// Notes played from the keyboard or MIDI start at once when the sound code
+// starts them (see gplay.h, playnow_run()): playnowon. The editor's thread
+// asks for them by mail: per channel the note |
+// instrument << 8 | NOWMAIL_NOTE, and / or NOWMAIL_RELEASE (let go, after
+// the note if it comes with one)
+int playnowon = 0;
+#define NOWMAIL_NOTE 0x10000
+#define NOWMAIL_RELEASE 0x20000
+static SDL_atomic_t nowmail[MAX_CHN];
+// The states of a note played at once (CHN nowstate): in its hardrestart,
+// then playing with the channel on its own frame clock
+#define NOW_HR 1
+#define NOW_OWN 2
+// Samples spent in the hardrestart (NOW_HR) / until the channel's next own
+// frame (NOW_OWN), and whether that is the note's first after its start
+static double nowcount[MAX_CHN];
+static int nowfirst[MAX_CHN];
+// The hardrestart lasts until the envelope is down (at the hardrestart
+// ADSR's release rate 0 that takes 7 ms at most), but no longer than this
+#define NOWHRSECONDS 0.008
+// While it waits, the sound code renders this many samples at a time
+#define NOWPOLLSAMPLES 16
+static void nowmailframes(void);
+static void nowtogrid(int c);
+static void playchannel(int c);
+static void chnregs(int c, CHN *cptr);
+static void runchannels(int mask);
+
 int lastsonginit = 0;
 // SPACE / numpad 0 started the playback: the editor goes back there when it
 // is stopped (gpattern.c). Every other start of playback clears it
@@ -160,15 +191,11 @@ void playjump(int c, int pos)
   if ((c >= 0) && (c < MAX_CHN)) jumpto[c] = pos;
 }
 
-void playtestnote(int note, int ins, int chnnum)
+// A note played the old way: it starts on the player's frames, after the
+// hardrestart frames (see playroutine())
+static void playnoteframes(int note, int ins, int chnnum)
 {
-  if (note == KEYON) return;
-  if ((note == REST) || (note == KEYOFF))
-  {
-    releasenote(chnnum);
-    return;
-  }
-
+  chn[chnnum].nowstate = 0;
   if (!(instr[ins].gatetimer & 0x40))
   {
     chn[chnnum].gate = 0xfe; // Keyoff
@@ -197,8 +224,39 @@ void playtestnote(int note, int ins, int chnnum)
   }
 }
 
+void playtestnote(int note, int ins, int chnnum)
+{
+  if (note == KEYON) return;
+  if ((note == REST) || (note == KEYOFF))
+  {
+    releasenote(chnnum);
+    return;
+  }
+  if ((chnnum < 0) || (chnnum >= MAX_CHN)) return;
+  if ((ins < 0) || (ins >= MAX_INSTR)) ins = 1;
+
+  // At once: the sound code starts it (a release asked for before it is
+  // forgotten)
+  if (playnowon)
+  {
+    SDL_AtomicSet(&nowmail[chnnum], (note & 0xff) | ((ins & 0xff) << 8) | NOWMAIL_NOTE);
+    return;
+  }
+  playnoteframes(note, ins, chnnum);
+}
+
 void releasenote(int chnnum)
 {
+  if ((chnnum < 0) || (chnnum >= MAX_CHN)) return;
+  // At once too (after the note, if it hasn't started yet)
+  if (playnowon)
+  {
+    int old;
+
+    do old = SDL_AtomicGet(&nowmail[chnnum]);
+    while (!SDL_AtomicCAS(&nowmail[chnnum], old, old | NOWMAIL_RELEASE));
+    return;
+  }
   chn[chnnum].gate = 0xfe;
 }
 
@@ -281,9 +339,13 @@ static void startnewnote(int c, CHN *cptr, INSTR *iptr, int toneporta)
 
 void playroutine(void)
 {
-  INSTR *iptr;
   CHN *cptr = &chn[0];
   int c;
+  int mask;
+
+  // Notes played while the sound doesn't start them at once (HardSID): the
+  // old way, on these frames
+  if (!playnowon) nowmailframes();
 
   if (songinit == PLAY_STOP)
     followplay = 0;
@@ -319,6 +381,11 @@ void playroutine(void)
       cptr->repeat = 0;
       cptr->looping = 0;
       cptr->lastvalid = 0;
+      // A note played at once goes on with the player's frames (one in its
+      // hardrestart still starts)
+      if (cptr->nowstate == NOW_OWN) cptr->nowstate = 0;
+      cptr->nowlead = 0;
+      cptr->skipvalid = 0;
       jumpto[c] = -1;
       if (editorInfo.multiplier)
         cptr->tick = 6* editorInfo.multiplier-1;
@@ -427,9 +494,44 @@ void playroutine(void)
     sidreg[0x17] = filterctrl;
     sidreg[0x18] = filtertype | masterfader;
 
+    // The channels. One that plays a note played at once runs on its own
+    // clock, or waits for the player's frames when it has run ahead of them
+    // (only while the song plays: the rows must stay in time)
+    mask = 0;
+    for (c = 0; c < MAX_CHN; c++)
+    {
+      if (songinit == PLAY_STOPPED) chn[c].nowlead = 0;
+      if (chn[c].nowstate)
+      {
+        if (songinit != PLAY_STOPPED) chn[c].nowlead--;
+      }
+      else if (chn[c].nowlead > 0) chn[c].nowlead--;
+      else mask |= 1 << c;
+    }
+    runchannels(mask);
+  }
+  if (songinit != PLAY_STOPPED) incrementtime();
+}
+
+// One frame of the channels in mask (bit per channel): row timing, notes,
+// tables and effects
+static void runchannels(int mask)
+{
+  INSTR *iptr;
+  CHN *cptr = &chn[0];
+  int c;
+
+  // (The channel loop as it was in runplayer())
+  {
     for (c = 0; c < MAX_CHN; c++)
     {
       int jam = 0;
+
+      if (!(mask & (1 << c)))
+      {
+        cptr++;
+        continue;
+      }
 
       // The channel goes to another orderlist position (playjump()): the
       // pattern there from the same row on, so that it stays in time with
@@ -1055,6 +1157,12 @@ void playroutine(void)
         int first, last;
 
         newnote = pattern[cptr->pattnum][cptr->pattptr];
+        // A note played just before the row was read: it isn't played again
+        if ((cptr->skipvalid) && (cptr->skippatt == cptr->pattnum) && (cptr->skiprow == row))
+        {
+          cptr->skipvalid = 0;
+          if (newnote <= LASTNOTE) newnote = REST;
+        }
         if (pattern[cptr->pattnum][cptr->pattptr+1])
           cptr->instr = pattern[cptr->pattnum][cptr->pattptr+1];
         cptr->newcommand = pattern[cptr->pattnum][cptr->pattptr+2];
@@ -1090,20 +1198,272 @@ void playroutine(void)
         }
       }
       NEXTCHN:
-      if (cptr->mute)
-        sidreg[0x4+7*c] = cptr->wave = 0x08;
-      else
-      {
-        sidreg[0x0+7*c] = cptr->freq & 0xff;
-        sidreg[0x1+7*c] = cptr->freq >> 8;
-        sidreg[0x2+7*c] = cptr->pulse & 0xfe;
-        sidreg[0x3+7*c] = cptr->pulse >> 8;
-        sidreg[0x4+7*c] = cptr->wave & cptr->gate;
-      }
+      chnregs(c, cptr);
       cptr++;
     }
   }
-  if (songinit != PLAY_STOPPED) incrementtime();
+}
+
+// The channel's registers as a frame leaves them
+static void chnregs(int c, CHN *cptr)
+{
+  if (cptr->mute)
+    sidreg[0x4+7*c] = cptr->wave = 0x08;
+  else
+  {
+    sidreg[0x0+7*c] = cptr->freq & 0xff;
+    sidreg[0x1+7*c] = cptr->freq >> 8;
+    sidreg[0x2+7*c] = cptr->pulse & 0xfe;
+    sidreg[0x3+7*c] = cptr->pulse >> 8;
+    sidreg[0x4+7*c] = cptr->wave & cptr->gate;
+  }
+}
+
+// One frame of channel c, on its own clock (see playnow_run())
+static void playchannel(int c)
+{
+  runchannels(1 << c);
+}
+
+/*
+ * Notes played at once
+ *
+ * A note played from the keyboard or MIDI doesn't wait for the player's
+ * next frame and then its hardrestart frames, as a pattern's note is
+ * prepared (which made it sound 40-60 ms late, unevenly). The sound code
+ * calls playnow_run() between the frames, and the note starts at the
+ * sample its request came at:
+ * - the hardrestart (gate off, hardrestart ADSR) is written at once, and
+ *   the voice's envelope clock restarted (so that the release starts at
+ *   once, as after enough hardrestart frames). It lasts until the envelope
+ *   is down: none if the voice was silent, 7 ms at most at release rate 0
+ * - then the note starts (its first frame: first wave, gate, ADSR) and the
+ *   channel runs on its own frame clock from there. Its first frame (on
+ *   which a pattern's note waits a whole frame) lasts as long as the
+ *   attack: the wavetable starts with the envelope at its top, as after a
+ *   whole frame, 2 ms after the start with attack 0
+ * - while the song plays, the channel goes back to the player's frames
+ *   before it starts its next row, so that the song stays in time
+ */
+
+// Cycles per envelope step of each attack rate
+static const unsigned short attackcycles[16] =
+  {9, 32, 63, 95, 149, 220, 267, 313, 392, 977, 1954, 3126, 3907, 11720, 19532, 31251};
+
+// The channel's registers are written to the SID now
+static void nowwrite(int c)
+{
+  chnregs(c, &chn[c]);
+  sid_writevoice(c, editorInfo.adparam);
+}
+
+// The tick the channel's next frame comes to
+static int nownexttick(CHN *cptr)
+{
+  int t = (cptr->tick - 1) & 0xff;
+
+  if (t >= 0x80) t = (cptr->tempo >= 2) ? cptr->tempo : funktable[cptr->tempo & 1];
+  return t;
+}
+
+// The channel goes on with the player's frames: those it has missed run now
+// (if it is behind them)
+static void nowtogrid(int c)
+{
+  CHN *cptr = &chn[c];
+  int ran = 0;
+
+  if (!cptr->nowstate) return;
+  while ((songinit != PLAY_STOPPED) && (cptr->nowlead < 0))
+  {
+    playchannel(c);
+    cptr->nowlead++;
+    ran = 1;
+  }
+  if (ran) sid_writevoice(c, editorInfo.adparam);
+  cptr->nowstate = 0;
+}
+
+// While the song plays: a note played on channel c takes the place of the
+// note of the row about to start (read already, or read within JAMMINFRAMES
+// frames), as the old way's note waited for that row
+static void nowrowplace(int c)
+{
+  CHN *cptr = &chn[c];
+
+  if ((cptr->tick >= 0x80) || (!cptr->tick)) return;
+  if (cptr->tick <= cptr->gatetimer)
+  {
+    cptr->newnote = 0;
+    return;
+  }
+  if ((cptr->tick <= cptr->gatetimer + JAMMINFRAMES) && (cptr->pattptr != 0x7fffffff))
+  {
+    unsigned char *row = &pattern[cptr->pattnum][cptr->pattptr];
+
+    if ((row[0] <= LASTNOTE) && (row[2] != CMD_TONEPORTA))
+    {
+      cptr->skippatt = cptr->pattnum;
+      cptr->skiprow = cptr->pattptr / 4;
+      cptr->skipvalid = 1;
+    }
+  }
+}
+
+// A requested note: its hardrestart starts now (one going on goes on)
+static void nowhardrestart(int c, int note, int ins)
+{
+  CHN *cptr = &chn[c];
+  INSTR *iptr = &instr[ins];
+
+  if (!cptr->nowstate) cptr->nowlead = 0;
+  cptr->nownote = note;
+  cptr->nowinstr = ins;
+  cptr->nowrelease = 0;
+  // An old way's note waiting is replaced
+  cptr->jamnote = 0;
+  cptr->jamtime = 0;
+  if (cptr->nowstate == NOW_HR) return;
+  cptr->nowstate = NOW_HR;
+  nowcount[c] = 0.0;
+  if (iptr->gatetimer & 0x40) return;
+  cptr->gate = 0xfe;
+  if (!(iptr->gatetimer & 0x80))
+  {
+    sidreg[0x5+7*c] = editorInfo.adparam>>8;
+    sidreg[0x6+7*c] = editorInfo.adparam&0xff;
+  }
+  nowwrite(c);
+  sid_restartenvelope(c);
+}
+
+// The hardrestart is over: the note starts, and the channel's own frames
+static void nowstart(int c, double spf, double rate)
+{
+  CHN *cptr = &chn[c];
+  INSTR *iptr = &instr[cptr->nowinstr];
+  int clock = sid_clockrate();
+  int env = sid_envelope(c);
+  double first;
+
+  if (songinit != PLAY_STOPPED) nowrowplace(c);
+  else cptr->gatetimer = iptr->gatetimer & 0x3f;
+  cptr->instr = cptr->nowinstr;
+  cptr->newnote = cptr->nownote;
+  startnewnote(c, cptr, iptr, 0);
+  cptr->newnote = 0;
+  nowwrite(c);
+  sid_restartenvelope(c);
+  cptr->nowstate = NOW_OWN;
+  nowfirst[c] = 1;
+
+  // The first frame lasts as long as the attack (from where the envelope
+  // is), at most a frame; a legato note's (no hardrestart) only a moment
+  if ((env < 0) || (env > 255)) env = 0;
+  if ((iptr->gatetimer & 0x40) || (clock <= 0)) first = 1.0;
+  else first = (double)attackcycles[iptr->ad >> 4] * (255 - env) * rate / clock;
+  if (first > spf) first = spf;
+  if (first < 1.0) first = 1.0;
+  nowcount[c] = first;
+}
+
+// Let go now
+static void nowrelease(int c)
+{
+  chn[c].gate = 0xfe;
+  nowwrite(c);
+}
+
+int playnow_run(int maxsamples, double spf, double rate)
+{
+  int n = maxsamples;
+  int c;
+
+  if (n < 1) n = 1;
+  if (spf < 1.0) spf = 1.0;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    CHN *cptr = &chn[c];
+    int mail = SDL_AtomicSet(&nowmail[c], 0);
+
+    if (mail & NOWMAIL_NOTE) nowhardrestart(c, mail & 0xff, (mail >> 8) & 0xff);
+    if (mail & NOWMAIL_RELEASE)
+    {
+      if (cptr->nowstate == NOW_HR) cptr->nowrelease = 1;
+      else nowrelease(c);
+    }
+
+    if (cptr->nowstate == NOW_HR)
+    {
+      INSTR *iptr = &instr[cptr->nowinstr];
+
+      if ((iptr->gatetimer & 0x40) || (!sid_envelope(c)) || (nowcount[c] >= NOWHRSECONDS * rate))
+        nowstart(c, spf, rate);
+      else
+      {
+        if (n > NOWPOLLSAMPLES) n = NOWPOLLSAMPLES;
+        continue;
+      }
+    }
+
+    // The channel's own frames due now. While the song plays it goes back to
+    // the player's frames before a frame that starts a row (tick 0), so that
+    // a pattern's note starts in time; but not before the note's first frame
+    // after its start (its sound would wait). A row may be read up to a
+    // frame early then: its hardrestart lasts that much longer
+    while ((cptr->nowstate == NOW_OWN) && (nowcount[c] < 0.5))
+    {
+      if (cptr->nowrelease)
+      {
+        cptr->nowrelease = 0;
+        cptr->gate = 0xfe;
+      }
+      if ((songinit != PLAY_STOPPED) && (!nowfirst[c]) && (!nownexttick(cptr)))
+      {
+        nowtogrid(c);
+        break;
+      }
+      nowfirst[c] = 0;
+      playchannel(c);
+      sid_writevoice(c, editorInfo.adparam);
+      if (songinit != PLAY_STOPPED) cptr->nowlead++;
+      nowcount[c] += spf;
+    }
+    if (cptr->nowstate == NOW_OWN)
+    {
+      int k = (int)ceil(nowcount[c] - 0.5);
+      if (k < n) n = k;
+    }
+  }
+  if (n < 1) n = 1;
+  return n;
+}
+
+void playnow_advance(int samples)
+{
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if (chn[c].nowstate == NOW_HR) nowcount[c] += samples;
+    else if (chn[c].nowstate == NOW_OWN) nowcount[c] -= samples;
+  }
+}
+
+// Without the sound code starting notes at once: the notes asked for start
+// the old way, on the player's frames
+static void nowmailframes(void)
+{
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    int mail = SDL_AtomicSet(&nowmail[c], 0);
+
+    if (chn[c].nowstate) nowtogrid(c);
+    if (mail & NOWMAIL_NOTE) playnoteframes(mail & 0xff, (mail >> 8) & 0xff, c);
+    if (mail & NOWMAIL_RELEASE) chn[c].gate = 0xfe;
+  }
 }
 
 void sequencer(int c, CHN *cptr)

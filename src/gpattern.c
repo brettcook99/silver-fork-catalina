@@ -122,7 +122,7 @@ static void midipolynote(int note)
       gui_message("Chord note not entered: channels %d and %d show the same pattern", shared + 1, c + 1);
   }
   if ((recordmode) && (midichordfirst) && (autoadvance < 2)) noteadvance();
-  playtestnote(note, editorInfo.einum, c);
+  if (!midinoteplayed) playtestnote(note, editorInfo.einum, c);
 }
 
 // INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
@@ -264,6 +264,8 @@ void patterncommands(void)
   }
   {
     int newnote = -1;
+    // A MIDI note has been played already, as it came (midinotehook())
+    int midiplayed = 0;
     if (key)
     {
       switch (keypreset)
@@ -319,7 +321,11 @@ void patterncommands(void)
     // MIDI INPUT 2-3 PATTERNS the notes go to 2-3 channels (see midichord)
     if (midinoteon)
     {
-      if (midichord <= 1) newnote = midinoteon;
+      if (midichord <= 1)
+      {
+        newnote = midinoteon;
+        midiplayed = midinoteplayed;
+      }
       else midipolynote(midinoteon);
     }
     // DEL clears the note (a rest; with SHIFT the command too). It used to
@@ -544,7 +550,7 @@ void patterncommands(void)
       {
         if (autoadvance < 2) noteadvance();
       }
-      playtestnote(newnote, editorInfo.einum, editorInfo.epchn);
+      if ((!midiplayed) || (newnote != midinoteon)) playtestnote(newnote, editorInfo.einum, editorInfo.epchn);
     }
   }
   switch(rawkey)

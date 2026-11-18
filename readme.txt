@@ -520,11 +520,17 @@ When all the notes are on one MIDI channel in several tracks of the file (as
 many sequencers save them), the tracks are read as channels 1, 2, 3. A MIDI
 file opened from the Finder or the command line becomes a new song.
 
-Notes played (keys or MIDI) start after one hardrestart frame (20 ms; none
-if the instrument's gate timer is 0), enough for the envelope to start
-again cleanly, not after the instrument's whole gate timer as pattern notes
-do. While the song plays they start at once like that on their channel, and
-a note of the pattern on that row doesn't take their place.
+Notes played (keys or MIDI) start at once, at the moment they come, not
+on the player's next frame: the hardrestart lasts only until the envelope
+is down (none if the channel is silent, at most 7 ms), and the note's first
+frame, the silent one before its wavetable starts, only as long as its
+attack (2 ms with attack 0). So a note sounds 2-10 ms after it is played
+(it was 40-60 ms, unevenly). A MIDI note is played as it arrives, even while
+the editor is busy drawing. The channel then plays on from the note's own
+start; while the song plays it goes back in step with the song before its
+next row, and a note of the pattern on that row doesn't take the played
+note's place. (With HardSID or CatWeasel output notes still start on the
+player's frames, after one hardrestart frame.)
 
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and

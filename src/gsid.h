@@ -26,6 +26,14 @@ void sid_init(int speed, unsigned m, unsigned ntsc, unsigned interpolate, unsign
 int sid_fillbuffer(short *ptr, int samples,  unsigned int adparam);
 unsigned char sid_getorder(unsigned char index, unsigned int adparam);
 int sid_envelope(int voice);
+// Rendering frame by frame (see gsid.cpp)
+void sid_newframe(void);
+int sid_render(short *ptr, int samples, unsigned int adparam);
+// Notes played at once (see gplay.c playnow_run()): one voice's registers
+// written now, its envelope clock restarted
+void sid_writevoice(int voice, unsigned int adparam);
+void sid_restartenvelope(int voice);
+int sid_clockrate(void);
 
 #ifndef GSID_C
 extern unsigned char sidreg[NUMSIDREGS];

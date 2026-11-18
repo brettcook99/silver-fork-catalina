@@ -65,6 +65,16 @@ typedef struct
   unsigned char loopsongptr, looptrans, looprepeat;
   unsigned char lastvalid;
   unsigned char lastsongptr, lasttrans, lastrepeat;
+  // A row whose note was played just before the row was read: its note
+  // isn't played again
+  unsigned char skippatt, skiprow, skipvalid;
+  // A note played at once (see playnow_run()): its state (in its
+  // hardrestart, or playing with the channel on its own frame clock), note,
+  // instrument, and a release that came before it started. How many frames
+  // the channel's own clock has run ahead of the player's while the song
+  // plays (behind if negative)
+  unsigned char nowstate, nownote, nowinstr, nowrelease;
+  int nowlead;
 } CHN;
 
 #ifndef GPLAY_C
@@ -85,6 +95,19 @@ void stopsong(void);
 void rewindsong(void);
 void playtestnote(int note, int ins, int chnnum);
 void releasenote(int chnnum);
+
+// Notes played from the keyboard or MIDI (playtestnote(), releasenote())
+// start and stop at once, at the sample they come at, when the sound code
+// (an emulated SID) sets playnowon and between the player's frames does
+//   n = playnow_run(n, samplesperframe, samplerate);
+//   (render n samples)
+//   playnow_advance(n);
+// playnow_run() does what is due now and makes n no longer than the time
+// to the next thing due. Otherwise (HardSID, CatWeasel) they start on the
+// player's frames after the hardrestart frames
+extern int playnowon;
+int playnow_run(int maxsamples, double spf, double rate);
+void playnow_advance(int samples);
 void mutechannel(int chnnum);
 int isplaying(void);
 int playstarting(void);

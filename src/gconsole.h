@@ -99,6 +99,8 @@ extern int key, rawkey, shiftpressed, ctrlpressed, altpressed, metapressed, shif
 extern int midinoteon, midinoteoff;
 // When the MIDI note event arrived (milliseconds, SDL_GetTicks())
 extern unsigned midinotetime;
+// What the note hook made of the MIDI note (see goattrk2.c midinotehook())
+extern int midinoteassign;
 extern int menucommand;
 extern int mouseb, prevmouseb;
 extern int mousewheel;

@@ -40,6 +40,9 @@ int midinoteoff = 0;
 // mode
 static int midipedal = 0;
 unsigned midinotetime = 0;
+// Where the note hook (goattrk2.c midinotehook()) sent the note, and whether
+// it has played it already (MIDIASSIGN_...)
+int midinoteassign = 0;
 int menucommand = 0;
 int mouseb = 0;
 int prevmouseb = 0;
@@ -322,6 +325,7 @@ int input_nextmidi(void)
   if (event == MIDI_NOTEON) midinoteon = note;
   else midinoteoff = note;
   midinotetime = midi_eventtime();
+  midinoteassign = midi_eventassign();
   return 1;
 }
 

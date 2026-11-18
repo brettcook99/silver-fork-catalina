@@ -3,9 +3,12 @@
 //
 // Every MIDI input device is opened and note on/off and control change
 // messages from all channels are put into a queue, which the editor reads
-// once per frame.
-// The MIDI system calls us from its own thread, so the queue is the only
-// thing shared between the threads.
+// once per frame. Notes are played at once as they are queued, by the
+// editor's note hook (midi_setnotehook()): waiting for the editor's next
+// frame made them up to a frame late, unevenly.
+// The MIDI system calls us from its own thread, so the queue (and the
+// hook's state, under the same lock) is the only thing shared between the
+// threads.
 //
 
 #define GMIDI_C
@@ -26,9 +29,13 @@ unsigned midiinput = 1;
 #define MIDI_MAXDEVICES 64
 
 static volatile int midiqueue[MIDI_QUEUESIZE];
-// When each event arrived (SDL_GetTicks() milliseconds)
+// When each event arrived (SDL_GetTicks() milliseconds), and what the note
+// hook made of it
 static volatile unsigned midiqueuetime[MIDI_QUEUESIZE];
+static volatile int midiqueueassign[MIDI_QUEUESIZE];
 static unsigned midilasttime = 0;
+static int midilastassign = 0;
+static int (*midi_notehook)(int type, int channel, int note, unsigned time) = NULL;
 static int midilastvalue = 0;
 static volatile unsigned midiqueuewrite = 0;
 static volatile unsigned midiqueueread = 0;
@@ -36,21 +43,50 @@ static volatile int midiqueuelock = 0;
 static int mididevices = 0;
 
 // Called from the MIDI thread(s). Events are dropped if the queue is full
-static void midi_pushevent(int type, int data1, int data2)
+static void midi_pushevent(int type, int channel, int data1, int data2)
 {
   unsigned next;
+  unsigned time = SDL_GetTicks();
+  int assign = 0;
 
   while (__sync_lock_test_and_set(&midiqueuelock, 1))
     ;
+  // The note sounds now (even if the queue is full)
+  if ((midi_notehook) && ((type == MIDI_NOTEON) || (type == MIDI_NOTEOFF)))
+    assign = midi_notehook(type, channel & 0xf, data1 & 0x7f, time);
   next = (midiqueuewrite + 1) % MIDI_QUEUESIZE;
   if (next != midiqueueread)
   {
     midiqueue[midiqueuewrite] = (type << 16) | ((data1 & 0x7f) << 8) | (data2 & 0x7f);
-    midiqueuetime[midiqueuewrite] = SDL_GetTicks();
+    midiqueuetime[midiqueuewrite] = time;
+    midiqueueassign[midiqueuewrite] = assign;
     __sync_synchronize();
     midiqueuewrite = next;
   }
   __sync_lock_release(&midiqueuelock);
+}
+
+void midi_setnotehook(int (*hook)(int type, int channel, int note, unsigned time))
+{
+  midi_lock();
+  midi_notehook = hook;
+  midi_unlock();
+}
+
+void midi_lock(void)
+{
+  while (__sync_lock_test_and_set(&midiqueuelock, 1))
+    ;
+}
+
+void midi_unlock(void)
+{
+  __sync_lock_release(&midiqueuelock);
+}
+
+int midi_eventassign(void)
+{
+  return midilastassign;
 }
 
 static void midi_handlemessage(int status, int data1, int data2)
@@ -59,15 +95,15 @@ static void midi_handlemessage(int status, int data1, int data2)
   {
     case 0x90:
     // Note on with velocity 0 is a note off
-    midi_pushevent(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, data1, data2);
+    midi_pushevent(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, status & 0x0f, data1, data2);
     break;
 
     case 0x80:
-    midi_pushevent(MIDI_NOTEOFF, data1, 0);
+    midi_pushevent(MIDI_NOTEOFF, status & 0x0f, data1, 0);
     break;
 
     case 0xb0:
-    midi_pushevent(MIDI_CONTROL, data1, data2);
+    midi_pushevent(MIDI_CONTROL, status & 0x0f, data1, data2);
     break;
   }
 }
@@ -80,6 +116,7 @@ int midi_getevent(int *note)
   __sync_synchronize();
   event = midiqueue[midiqueueread];
   midilasttime = midiqueuetime[midiqueueread];
+  midilastassign = midiqueueassign[midiqueueread];
   __sync_synchronize();
   midiqueueread = (midiqueueread + 1) % MIDI_QUEUESIZE;
 
@@ -331,6 +368,24 @@ int midi_eventvalue(void)
 int midi_devicecount(void)
 {
   return 0;
+}
+
+void midi_setnotehook(int (*hook)(int type, int channel, int note, unsigned time))
+{
+  (void)hook;
+}
+
+int midi_eventassign(void)
+{
+  return 0;
+}
+
+void midi_lock(void)
+{
+}
+
+void midi_unlock(void)
+{
 }
 
 #endif
