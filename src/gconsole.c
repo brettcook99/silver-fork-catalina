@@ -43,6 +43,9 @@ int midinoteoff = 0;
 // mode
 static int midipedal = 0;
 unsigned midinotetime = 0;
+// Where the note hook (goattrk2.c midinotehook()) sent the note, and whether
+// it has played it already (MIDIASSIGN_...)
+int midinoteassign = 0;
 // The MIDI channel (0-15) of the note in midinoteon / midinoteoff
 int midinotechannel = 0;
 int menucommand = 0;
@@ -279,13 +282,19 @@ static void instrumentknob(int value)
   gui_message("Instrument %02X (MIDI CC 60)", editorInfo.einum);
 }
 
-int midinoteinstr(void)
+int midichannelinstr(int channel)
 {
 #ifdef GT_PLUGIN
-  int ins = gtsync_programinstr[midinotechannel & 15];
+  int ins = gtsync_programinstr[channel & 15];
   if ((ins > 0) && (ins < MAX_INSTR)) return ins;
 #endif
+  (void)channel;
   return editorInfo.einum;
+}
+
+int midinoteinstr(void)
+{
+  return midichannelinstr(midinotechannel);
 }
 
 int input_nextmidi(void)
@@ -337,6 +346,7 @@ int input_nextmidi(void)
   else midinoteoff = note;
   midinotetime = midi_eventtime();
   midinotechannel = midi_eventchannel();
+  midinoteassign = midi_eventassign();
   return 1;
 }
 

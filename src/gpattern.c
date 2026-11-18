@@ -125,7 +125,7 @@ static void midipolynote(int note)
       gui_message("Chord note not entered: channels %d and %d show the same pattern", shared + 1, c + 1);
   }
   if ((recordmode) && (midichordfirst) && (autoadvance < 2)) noteadvance();
-  playtestnote(note, midinoteinstr(), c);
+  if (!midinoteplayed) playtestnote(note, midinoteinstr(), c);
 }
 
 // INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
@@ -268,6 +268,8 @@ void patterncommands(void)
   {
     int newnote = -1;
     int newinstr = editorInfo.einum;
+    // A MIDI note has been played already, as it came (midinotehook())
+    int midiplayed = 0;
     if (key)
     {
       switch (keypreset)
@@ -327,6 +329,7 @@ void patterncommands(void)
       {
         newnote = midinoteon;
         newinstr = midinoteinstr();
+        midiplayed = midinoteplayed;
       }
       else midipolynote(midinoteon);
     }
@@ -552,7 +555,7 @@ void patterncommands(void)
       {
         if (autoadvance < 2) noteadvance();
       }
-      playtestnote(newnote, newinstr, editorInfo.epchn);
+      if ((!midiplayed) || (newnote != midinoteon)) playtestnote(newnote, newinstr, editorInfo.epchn);
     }
   }
   switch(rawkey)

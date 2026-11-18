@@ -36,6 +36,18 @@ void midi_pushevent_at(int type, int channel, int data1, int data2, unsigned tim
 // (SDL_GetTicks())
 unsigned midi_eventtime(void);
 
+// A function that handles each note on / off as it is queued, in the thread
+// that queues it (the MIDI input's, or the plugin's audio thread), so that
+// the note sounds at once instead of when the editor gets to it. Its
+// return value is kept with the event: midi_eventassign() for the event
+// midi_getevent() returned last (0 for events it didn't see)
+void midi_setnotehook(int (*hook)(int type, int channel, int note, unsigned time));
+int midi_eventassign(void);
+// Holds the queue (and the note hook) while the editor changes what the
+// hook uses
+void midi_lock(void);
+void midi_unlock(void);
+
 // Number of MIDI input devices currently open
 int midi_devicecount(void);
 

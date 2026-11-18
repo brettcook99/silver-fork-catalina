@@ -100,9 +100,13 @@ extern int midinoteon, midinoteoff;
 // When the MIDI note event arrived (milliseconds, SDL_GetTicks())
 extern unsigned midinotetime;
 extern int midinotechannel;
+// What the note hook made of the MIDI note (see goattrk2.c midinotehook())
+extern int midinoteassign;
 // The instrument the MIDI note is entered and played with: in the plugin
-// the one its MIDI channel chose with a program change, else the editor's
+// the one its MIDI channel chose with a program change, else the editor's.
+// The same for a note from MIDI channel channel (0-15)
 int midinoteinstr(void);
+int midichannelinstr(int channel);
 extern int menucommand;
 extern int mouseb, prevmouseb;
 extern int mousewheel;

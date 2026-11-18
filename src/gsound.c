@@ -22,6 +22,8 @@ FILE *writehandle = NULL;
 
 void sound_playrout(void);
 void sound_mixer(Sint32 *dest, unsigned samples);
+// reSID output: samples until the player's next frame
+static double mixframecount = 0.0;
 Uint32 sound_timer(Uint32 interval, void *param);
 
 // SDL2 timer used for HardSID / CatWeasel output (SDL 1.2 had SDL_SetTimer)
@@ -277,8 +279,12 @@ int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsig
   playspeed = snd_mixrate;
   sid_init(playspeed, model, ntsc, interpolate & 1, customclockrate, interpolate >> 1);
 
-  snd_player = &sound_playrout;
+  // sound_mixer() calls the player itself, between its frames the notes
+  // played (keys, MIDI) start and stop at once (see playnow_run())
+  mixframecount = 0.0;
+  snd_player = NULL;
   snd_setcustommixer(sound_mixer);
+  playnowon = 1;
 
   SOUNDOK:
   initted = 1;
@@ -289,6 +295,7 @@ void sound_uninit(void)
 {
   int c;
 
+  playnowon = 0;
   if (!initted) return;
   initted = 0;
 
@@ -563,15 +570,39 @@ void sound_playrout(void)
   }
 }
 
+// The audio callback (reSID output): the player's frames, the SID rendered
+// in between, and the notes played start there at once (playnow_run())
 void sound_mixer(Sint32 *dest, unsigned samples)
 {
   int c;
+  unsigned pos = 0;
+  // Samples per frame, as BME's player timing had it
+  double spf = (double)(((snd_mixrate * 5) >> 1) / (snd_bpmtempo > 0 ? snd_bpmtempo : 125));
 
   if (!initted) return;
   if (samples > MIXBUFFERSIZE) return;
   if (!buffer) return;
+  if (spf < 1.0) spf = 1.0;
 
-  sid_fillbuffer(buffer, samples,editorInfo.adparam);
+  while (pos < samples)
+  {
+    int n = samples - pos;
+
+    if (mixframecount < 0.5)
+    {
+      playroutine();
+      sid_newframe();
+      mixframecount += spf;
+      continue;
+    }
+    if (mixframecount < n) n = (int)ceil(mixframecount - 0.5);
+    n = playnow_run(n, spf, playspeed);
+    if (n > (int)(samples - pos)) n = samples - pos;
+    sid_render(buffer + pos, n, editorInfo.adparam);
+    playnow_advance(n);
+    mixframecount -= n;
+    pos += n;
+  }
   if (writehandle)
     fwrite(buffer, samples * sizeof(Uint16), 1, writehandle);
 

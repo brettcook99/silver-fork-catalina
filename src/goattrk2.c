@@ -70,6 +70,10 @@ int midichordmask = 0;
 // Nonzero while the MIDI note goes to the voice of its MIDI channel
 // (plugin: channels 1-3 to voices 1-3, see DAW SYNC)
 int midinoterouted = 0;
+// Nonzero when the MIDI note has been played already, as it came (see
+// midinotehook()): the editor only enters it
+int midinoteplayed = 0;
+static int midinotehook(int type, int channel, int midinote, unsigned time);
 int followplay = 0;
 int followmode = 1;
 int hexnybble = -1;
@@ -634,6 +638,8 @@ int main(int argc, char **argv)
 		gui_alert("Sound init failed", "GoatTracker runs without sound. Notice that the song timer won't start.");
 	}
 
+	// MIDI notes are played as they come (see midinotehook())
+	midi_setnotehook(midinotehook);
 #ifndef GT_PLUGIN
 	// Open MIDI input devices (the plugin gets its MIDI from the host)
 	if (midiinput)
@@ -1295,16 +1301,18 @@ int numpadcommands(void)
 	return 0;
 }
 
+// The state below up to midinextslot belongs to the note hook
+// (midinotehook()), which runs in the MIDI input's thread under the MIDI
+// queue's lock: the editor changes it only under that lock.
 // MIDI keys held down: the channel each plays on + 1 (-1 = left out of the
 // chord, 0 = not held)
 static int midiheldchn[LASTNOTE + 1];
 static int midiheldcount = 0;
 // The MIDI note each channel plays (0 = none)
 static int midichnnote[MAX_CHN];
-// The chord being played: notes so far, row of the first note, its channels
-// (bits) and when its first key was struck
+// The chord being played: notes so far, its channels (bits) and when its
+// first key was struck
 static int chordnotes = 0;
-static int chordrow = 0;
 static int chordmask = 0;
 static unsigned chordtime = 0;
 // Keys struck within this many milliseconds of the first one, while it is
@@ -1312,10 +1320,24 @@ static unsigned chordtime = 0;
 // ones are still held (legato playing)
 #define MIDICHORDTIME 60
 // The next channel in turn (0 = the cursor's) for MIDI input on 2-3
-// channels, and where the cursor was after the last note
+// channels, and (the editor's) where the cursor was after the last note
 static int midinextslot = 0;
-static int miditurnchn = -1;
-static int miditurnrow = -1;
+static volatile int miditurnchn = -1;
+static volatile int miditurnrow = -1;
+// The editor's: the row of the chord's first note
+static int chordrow = 0;
+
+// What the note hook made of a MIDI note (midinoteassign, kept with the
+// event): the channel + 1 (0 = left out of a chord), whether it starts a
+// new row (the cursor moves down after it), the channels of the chord's
+// earlier notes (bits), whether it goes to the voice of its MIDI channel
+// (plugin), whether the hook has played it
+#define MIDIASSIGN_CHN 0x03
+#define MIDIASSIGN_FIRST 0x04
+#define MIDIASSIGN_MASKSHIFT 3
+#define MIDIASSIGN_ROUTED 0x40
+#define MIDIASSIGN_PLAYED 0x80
+#define MIDIASSIGN_VALID 0x100
 
 // Sets the number of channels MIDI chords go to (1-3, see midichord). The
 // notes still sounding from the MIDI keyboard are released, and the keys
@@ -1328,6 +1350,7 @@ void setmidichord(int channels)
 	if (channels > MAX_CHN) channels = MAX_CHN;
 	midichord = channels;
 
+	midi_lock();
 	for (c = 0; c < MAX_CHN; c++)
 	{
 		if ((midichnnote[c]) && (!gui_designeractive())) releasenote(c);
@@ -1337,6 +1360,7 @@ void setmidichord(int channels)
 	midiheldcount = 0;
 	chordnotes = 0;
 	midinextslot = 0;
+	midi_unlock();
 
 	if (midichord > 1)
 		gui_message("MIDI input: notes go to %d channels in turn, chords to %d channels", midichord, midichord);
@@ -1352,72 +1376,84 @@ void seteditstep(int steps)
 	editstep = steps;
 }
 
-// Decides where the MIDI note-on midinoteon goes (see midichord)
-static void midichordassign(void)
+// The note hook (see gmidi.h): a MIDI note as it comes, in the MIDI input's
+// thread (the plugin's audio thread). Where a note-on goes is decided here
+// (see midichord) and it is played at once; a note-off releases its note.
+// The editor enters the note later, where this has sent it
+// (midichordassign()). Runs under the MIDI queue's lock
+static int midinotehook(int type, int channel, int midinote, unsigned time)
 {
-	int note = midinoteon;
+	int note = FIRSTNOTE + midinote - 12;
+	int designer = gui_designeractive();
+	int chn, first = 1, mask = 0, routed = 0, played = 0;
 
-	midinoterouted = 0;
-	if ((note < 0) || (note > LASTNOTE)) return;
+	if ((note < FIRSTNOTE) || (note > LASTNOTE)) return 0;
+
+	if (type == MIDI_NOTEOFF)
+	{
+		// Releasing a key releases its note, like on a synth, unless another
+		// key has taken the channel meanwhile (the instrument designer lets
+		// go of its own notes)
+		if (midiheldchn[note])
+		{
+			int c = midiheldchn[note] - 1;
+
+			midiheldchn[note] = 0;
+			if (midiheldcount > 0) midiheldcount--;
+			if ((c >= 0) && (midichnnote[c] == note))
+			{
+				if (!designer) releasenote(c);
+				midichnnote[c] = 0;
+			}
+		}
+		return MIDIASSIGN_VALID;
+	}
 
 #ifdef GT_PLUGIN
 	// MIDI channels 1-3: the voice of the channel, on the cursor's row.
 	// Notes struck together (a chord across the channels) go on one row.
 	// With MIDI INPUT 2-3 the channel doesn't matter: the notes are shared
 	// out as from a MIDI keyboard (below)
-	if ((gtsync_route) && (midichord <= 1) && (midinotechannel >= 0) && (midinotechannel < MAX_CHN))
+	if ((gtsync_route) && (midichord <= 1) && (channel >= 0) && (channel < MAX_CHN))
 	{
-		midinoterouted = 1;
-		if ((midiheldcount) && (chordnotes) && (midinotetime - chordtime <= MIDICHORDTIME))
+		routed = 1;
+		if ((midiheldcount) && (chordnotes) && (time - chordtime <= MIDICHORDTIME))
 		{
-			midichordfirst = 0;
-			midichordrow = chordrow;
-			midichordmask = chordmask;
+			first = 0;
+			mask = chordmask;
 		}
 		else
 		{
-			midichordfirst = 1;
-			midichordrow = editorInfo.eppos;
-			midichordmask = 0;
 			chordmask = 0;
 			chordnotes = 0;
-			chordrow = editorInfo.eppos;
-			chordtime = midinotetime;
+			chordtime = time;
 		}
-		midichordchn = midinotechannel;
-		chordmask |= 1 << midichordchn;
+		chn = channel;
+		chordmask |= 1 << chn;
 		chordnotes++;
-		if (!midiheldchn[note]) midiheldcount++;
-		midiheldchn[note] = midichordchn + 1;
-		midichnnote[midichordchn] = note;
-		return;
 	}
+	else
 #endif
-
 	if (midichord <= 1)
 	{
 		// Every note to the cursor, like a note key
-		midichordfirst = 1;
-		midichordchn = editorInfo.epchn;
-		midichordrow = editorInfo.eppos;
-		midichordmask = 0;
+		chn = editorInfo.epchn;
 		chordnotes = 0;
 	}
-	else if ((midiheldcount) && (chordnotes) && (midinotetime - chordtime <= MIDICHORDTIME))
+	else if ((midiheldcount) && (chordnotes) && (time - chordtime <= MIDICHORDTIME))
 	{
 		// Struck together with the chord's first key: the next channel, on the
 		// chord's row
-		midichordfirst = 0;
-		midichordrow = chordrow;
-		midichordmask = chordmask;
+		first = 0;
+		mask = chordmask;
 		if (chordnotes < midichord)
 		{
-			midichordchn = (editorInfo.epchn + midinextslot) % MAX_CHN;
+			chn = (editorInfo.epchn + midinextslot) % MAX_CHN;
 			midinextslot = (midinextslot + 1) % midichord;
-			chordmask |= 1 << midichordchn;
+			chordmask |= 1 << chn;
 			chordnotes++;
 		}
-		else midichordchn = -1;
+		else chn = -1;
 	}
 	else
 	{
@@ -1425,21 +1461,56 @@ static void midichordassign(void)
 		// turn, on the cursor's row. If the cursor has been moved, the turn
 		// starts again at its channel
 		if ((editorInfo.epchn != miditurnchn) || (editorInfo.eppos != miditurnrow)) midinextslot = 0;
-		midichordfirst = 1;
-		midichordrow = editorInfo.eppos;
-		midichordchn = (editorInfo.epchn + midinextslot) % MAX_CHN;
+		chn = (editorInfo.epchn + midinextslot) % MAX_CHN;
 		midinextslot = (midinextslot + 1) % midichord;
-		midichordmask = 0;
-		chordmask = 1 << midichordchn;
+		chordmask = 1 << chn;
 		chordnotes = 1;
-		chordrow = editorInfo.eppos;
-		chordtime = midinotetime;
+		chordtime = time;
 	}
+	if ((chn < 0) || (chn >= MAX_CHN)) chn = -1;
 
 	// A key that sends note-on twice is counted once
 	if (!midiheldchn[note]) midiheldcount++;
-	midiheldchn[note] = (midichordchn >= 0) ? midichordchn + 1 : -1;
-	if (midichordchn >= 0) midichnnote[midichordchn] = note;
+	midiheldchn[note] = (chn >= 0) ? chn + 1 : -1;
+	if (chn >= 0) midichnnote[chn] = note;
+
+	// It sounds now. The instrument designer plays its whole patch (when the
+	// editor gets to the note), the song name editor nothing
+	if ((chn >= 0) && (!designer) && (editorInfo.editmode != EDIT_NAMES))
+	{
+		playtestnote(note, midichannelinstr(channel), chn);
+		played = 1;
+	}
+	return MIDIASSIGN_VALID | (chn + 1) | (first ? MIDIASSIGN_FIRST : 0) | ((mask & 7) << MIDIASSIGN_MASKSHIFT) |
+		(routed ? MIDIASSIGN_ROUTED : 0) | (played ? MIDIASSIGN_PLAYED : 0);
+}
+
+// Where the MIDI note-on midinoteon goes, as the note hook decided
+// (midinoteassign): its channel, and the cursor's row (a chord's later
+// notes go on the row of its first)
+static void midichordassign(void)
+{
+	int a = midinoteassign;
+
+	midinoterouted = 0;
+	midinoteplayed = 0;
+	if ((midinoteon < 0) || (midinoteon > LASTNOTE)) return;
+	if (!(a & MIDIASSIGN_VALID))
+	{
+		// Not seen by the hook: to the cursor
+		midichordfirst = 1;
+		midichordchn = editorInfo.epchn;
+		midichordrow = editorInfo.eppos;
+		midichordmask = 0;
+		return;
+	}
+	midichordchn = (a & MIDIASSIGN_CHN) - 1;
+	midichordfirst = (a & MIDIASSIGN_FIRST) != 0;
+	midichordmask = (a >> MIDIASSIGN_MASKSHIFT) & 7;
+	midinoterouted = (a & MIDIASSIGN_ROUTED) != 0;
+	midinoteplayed = (a & MIDIASSIGN_PLAYED) != 0;
+	if (midichordfirst) chordrow = editorInfo.eppos;
+	midichordrow = chordrow;
 }
 
 void midicommands(void)
@@ -1451,11 +1522,12 @@ void midicommands(void)
 	{
 		if ((midinoteon) || (midinoteoff)) gui_designermidi(midinoteon, midinoteoff);
 	}
-	else if ((midinoteon) && (midichordchn >= 0))
+	else if ((midinoteon) && (midichordchn >= 0) && (!midinoteplayed))
 	{
 		// The pattern editor enters & plays the note like a note key does.
 		// Elsewhere (except the songname editor) the note is just played,
-		// the notes of a chord on their channels
+		// the notes of a chord on their channels. (Played already as it
+		// came, see midinotehook())
 		if ((editorInfo.editmode != EDIT_PATTERN) && (editorInfo.editmode != EDIT_NAMES))
 			playtestnote(midinoteon, midinoteinstr(), midichordchn);
 	}
@@ -1468,20 +1540,7 @@ void midicommands(void)
 		miditurnrow = editorInfo.eppos;
 	}
 
-	// Releasing a key releases its note, like on a synth, unless another
-	// key has taken the channel meanwhile
-	if ((midinoteoff > 0) && (midinoteoff <= LASTNOTE) && (midiheldchn[midinoteoff]))
-	{
-		int c = midiheldchn[midinoteoff] - 1;
-
-		midiheldchn[midinoteoff] = 0;
-		if (midiheldcount > 0) midiheldcount--;
-		if ((c >= 0) && (midichnnote[c] == midinoteoff))
-		{
-			if (!designer) releasenote(c);
-			midichnnote[c] = 0;
-		}
-	}
+	// Releasing a key has released its note already (midinotehook())
 }
 
 void generalcommands(void)

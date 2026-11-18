@@ -143,7 +143,38 @@ unsigned char sid_getorder(unsigned char index, unsigned int adparam)
     return sidorder[index];
 }
 
-// Plugin builds render with these instead of sid_fillbuffer(): the player
+// A note played at once (gplay.c): the registers of one voice are written
+// now, between the player's frames, in the order a frame writes them
+void sid_writevoice(int voice, unsigned int adparam)
+{
+  int c;
+
+  if ((voice < 0) || (voice > 2)) return;
+  for (c = 0; c < NUMSIDREGS; c++)
+  {
+    unsigned char o = sid_getorder(c, adparam);
+    if ((o < voice * 7) || (o >= voice * 7 + 7)) continue;
+    if (sid) sid->write(o, sidreg[o]);
+    else if (sidfp) sidfp->write(o, sidreg[o]);
+  }
+}
+
+// ... and its envelope clock starts again, as after enough hardrestart
+// frames: the release and the attack start at once (no ADSR delay bug)
+void sid_restartenvelope(int voice)
+{
+  if ((voice < 0) || (voice > 2)) return;
+  if (sid) sid->restart_envelope_clock(voice);
+  else if (sidfp) sidfp->restart_envelope_clock(voice);
+}
+
+// The emulated SID's clock (cycles per second)
+int sid_clockrate(void)
+{
+  return clockrate;
+}
+
+// The sound renders with these instead of sid_fillbuffer(): the player
 // writes the registers once per frame (sid_newframe() after playroutine()),
 // 14 cycles apart as the player on a C64 does, and sid_render() then makes
 // exactly the samples asked for, however the host splits its blocks. A
