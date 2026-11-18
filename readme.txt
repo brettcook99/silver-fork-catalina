@@ -281,10 +281,9 @@ Try the command line options if there are any problems. For example, if you
 experience choppy audio you can increase audio buffering with -B option (the
 default is 15 ms, so that notes played on the keyboard or a MIDI keyboard are
 heard right away; it used to be 100 ms, then 25 ms, and a config file still
-holding one of those gets 15). On macOS the sound goes through Core Audio; SDL
-queues two buffers there, or more if they are shorter than 15 ms, so a shorter
-buffer doesn't make the delay shorter. SDL
-seems to have trouble with some soundcards under Windows; you might want to
+holding one of those gets 15). On macOS the sound goes straight to Core Audio,
+so a shorter buffer (Preferences, down to 32 samples) makes the delay shorter.
+SDL seems to have trouble with some soundcards under Windows; you might want to
 try even a 500ms buffer, or tweak the hardware acceleration level of the
 soundcard (from Control Panel). Also, reSID interpolation will take remarkably
 more CPU time and could cause the sound and/or editing to get choppy.

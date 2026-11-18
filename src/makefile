@@ -10,9 +10,11 @@ PREFIX=../linux/
 SUFFIX=
 LIBS+=`$(SDLCONFIG) --libs`
 
-# MIDI input uses CoreMIDI on macOS; the menu bar and file panels Cocoa
+# MIDI input uses CoreMIDI on macOS; the menu bar and file panels Cocoa; the
+# sound output Core Audio
 ifeq ($(shell uname -s),Darwin)
 LIBS+=-framework CoreMIDI -framework CoreFoundation -framework Cocoa
+LIBS+=-framework CoreAudio -framework AudioUnit -framework AudioToolbox
 MACOBJ=gmacmenu.o gmacfile.o
 endif
 
