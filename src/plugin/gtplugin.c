@@ -853,6 +853,7 @@ static void applystate(const unsigned char *data, int size)
     }
     SETINT("stepsize", stepsize);
     if (stepsize < 1) stepsize = 4;
+    doublerestored();
     // recordmode isn't taken from the project: the plugin always starts in
     // jam mode (the sustain pedal, the middle mouse button or NUMPAD .
     // switch to edit mode)

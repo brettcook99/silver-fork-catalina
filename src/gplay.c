@@ -118,6 +118,17 @@ int playofflineloop(int c)
 
 void sequencer(int c, CHN *cptr);
 
+// Playing from a pattern or a position before the song has been played from
+// its start: instead of the default tempo, the one the tempo instrument ($3F)
+// starts the song with
+static void starttempoinstr(CHN *cptr)
+{
+  int deftempo = editorInfo.multiplier ? 6 * editorInfo.multiplier - 1 : 6 - 1;
+
+  if ((cptr->tempo == deftempo) && (instr[MAX_INSTR-1].ad >= 2) && (!(instr[MAX_INSTR-1].ptr[WTBL])))
+    cptr->tempo = instr[MAX_INSTR-1].ad - 1;
+}
+
 void initchannels(void)
 {
   int c;
@@ -479,6 +490,7 @@ static void runplayer(void)
         break;
 
         case PLAY_PATTERN:
+        starttempoinstr(cptr);
         cptr->advance = 0;
         cptr->pattptr = startpattpos * 4;
         cptr->pattnum = editorUndoInfo.editorInfo[c].epnum;
@@ -487,6 +499,7 @@ static void runplayer(void)
         break;
 
         case PLAY_POS:
+        starttempoinstr(cptr);
         cptr->songptr = editorUndoInfo.editorInfo[c].espos;
         sequencer(c, cptr);
         break;
@@ -1052,7 +1065,9 @@ static void runchannels(int mask)
 
       // Tick N command
       TICKNEFFECTS:
-      if ((!editorInfo.optimizerealtime) || (cptr->tick))
+      // DOUBLE: the optimizations work once per row of the single speed song,
+      // not on the rows in between (the odd ones), so that it sounds the same
+      if ((!editorInfo.optimizerealtime) || (cptr->tick) || ((doublemode) && (!(cptr->pattptr & 4))))
       {
         switch(cptr->command)
         {
@@ -1172,15 +1187,16 @@ static void runchannels(int mask)
       PULSEEXEC:
       if (editorInfo.optimizepulse)
       {
-        if ((songinit != PLAY_STOPPED) && (cptr->tick == cptr->gatetimer)) goto GETNEWNOTES;
+        if ((songinit != PLAY_STOPPED) && (cptr->tick == cptr->gatetimer) && ((!doublemode) || (!(cptr->pattptr & 4)))) goto GETNEWNOTES;
       }
 
       if (cptr->ptr[PTBL])
       {
-        // Skip pulse when sequencer has been executed
+        // Skip pulse when sequencer has been executed (DOUBLE: on the row
+        // before the last one, where the single speed song's last row starts)
         if (editorInfo.optimizepulse)
         {
-          if ((!cptr->tick) && (!cptr->pattptr)) goto NEXTCHN;
+          if ((!cptr->tick) && (cptr->pattptr == (doublemode ? (unsigned)(pattlen[cptr->pattnum] - 1) * 4 : 0))) goto NEXTCHN;
         }
 
         // Pulsetable jump

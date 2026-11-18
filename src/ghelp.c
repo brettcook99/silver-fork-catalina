@@ -116,6 +116,8 @@ void onlinehelp(int standalone,int context)
     "  chords to 2-3 chns. on one row",
     "STEPS (bottom): rows skipped",
     "  after each note entered (0-16)",
+    "DOUBLE (bottom): click for twice the",
+    "  rows per beat (128-row patterns)",
     "0-9 & A-F to enter commands",
     "SPC Play from cursor pos / stop",
     "  (in all editors but song info);",

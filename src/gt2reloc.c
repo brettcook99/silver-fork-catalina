@@ -40,6 +40,7 @@ int followplay = 0;
 int followmode = 1;
 int hexnybble = -1;
 int stepsize = 4;
+int doublemode = 0;
 int autoadvance = 0;
 int defaultpatternlength = 64;
 int cursorflash = 0;
