@@ -488,6 +488,20 @@ are skipped after a note is entered, 0-16: with 1 the cursor moves from row
 00 to 02, with 2 from 00 to 03 and so on. It works for the note keys and the
 MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
 
+DOUBLE (next to STEPS on the retro screen) gives twice as many rows per beat,
+so that notes played in land twice as finely, for example tuplets. Click it to
+switch it on or off. The music keeps its speed and the plugin stays in time
+with the host: each pattern gets twice the rows (up to 128, also for new
+patterns), the notes move to the even rows and every tempo is halved. The song
+remembers it: instrument $3F is named DOUBLE and holds the tempo the song
+starts with. Switching is one undo step.
+
+DOUBLE doesn't switch on if a pattern in use is longer than 64 rows, if a tempo
+is odd or below 6, if the song uses funktempo, if instrument $3F is in use or if
+an instrument's gate timer is too long for the faster rows. It doesn't switch
+off while odd rows have notes, because they would be lost. A message tells
+which pattern or instrument is the reason.
+
 MIDI controllers: in the SID Designer knobs sending CC73, CC75, CC70 (or
 CC76 or CC20) and CC72 set attack, decay, sustain and release of the
 oscillators heard, CC1 (the mod wheel) the pulse width (the PW slider) of

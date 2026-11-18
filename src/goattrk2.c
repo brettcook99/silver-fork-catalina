@@ -33,6 +33,7 @@ static int chooseinterface(void);
 static void presskey(int newrawkey, int newkey, int shift);
 static void startplay(int mode);
 static void midichordassign(void);
+static void doublesync(void);
 
 int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
@@ -53,6 +54,8 @@ int midichord = 1;
 // STEPS (0-16): rows skipped after a note is entered, so that the cursor
 // moves down 1 + editstep rows
 int editstep = 0;
+// DOUBLE: twice as many rows per beat (see setdoublemode())
+int doublemode = 0;
 // Where the current MIDI note-on goes (set by midichordassign()): the
 // channel (-1 = left out), the row, whether it starts a new row (the
 // cursor moves down after it) and the channels of the chord's earlier notes
@@ -714,7 +717,7 @@ int main(int argc, char **argv)
 			zeropageadr,
 			playerversion,
 			keypreset,
-			stepsize,
+			doublemode ? stepsize / 2 : stepsize,
 			editorInfo.multiplier,
 			catweasel,
 			editorInfo.adparam,
@@ -791,6 +794,7 @@ static void mainloopframe(void)
 		textscreenactive = 0;
 	}
 	cursorflashdelay += win_getspeed(50);
+	doublesync();
 	displayupdate();
 	followplayback();
 	gui_frame(0);
@@ -876,6 +880,7 @@ static void retromainloop(void)
 		retroatmainscreen = 1;
 		for (;;)
 		{
+			doublesync();
 			followplayback();
 			displayupdate();
 			getkey();
@@ -1321,6 +1326,328 @@ void seteditstep(int steps)
 	editstep = steps;
 }
 
+// DOUBLE: twice as many rows per beat, so that notes played in can land twice
+// as finely (tuplets). The music stays as it is: every pattern gets twice the
+// rows (its rows on the even ones), every tempo is halved, and a beat is twice
+// the rows (stepsize), which also keeps the plugin in time with the host. New
+// patterns get 128 rows.
+//
+// The song itself tells that it is doubled, so that it stays so when saved and
+// loaded, and so that undo and redo work: instrument $3F is named DOUBLE, and
+// its attack/decay is the tempo the song starts with (the player's and the
+// packer's "tempo instrument")
+#define DOUBLEINSTR (MAX_INSTR - 1)
+#define DOUBLELONGEST (MAX_PATTROWS / 2)
+#define DOUBLELOWEST 6
+
+static const char doublename[] = "DOUBLE";
+static int doubleoldlength = 64;
+
+// Frames per row the song starts with when nothing else says so
+static int doubledefaulttempo(void)
+{
+	return editorInfo.multiplier ? 6 * editorInfo.multiplier : 6;
+}
+
+// Nonzero if the song is a doubled one
+static int doublemarked(void)
+{
+	INSTR *in = &instr[DOUBLEINSTR];
+
+	return (in->ad >= 2) && (!in->ptr[WTBL]) && (!strncmp(in->name, doublename, MAX_INSTRNAMELEN));
+}
+
+// Makes the song a doubled one that starts at half the default tempo
+static void doublemark(void)
+{
+	INSTR *in = &instr[DOUBLEINSTR];
+
+	clearinstr(DOUBLEINSTR);
+	in->ad = doubledefaulttempo() / 2;
+	strcpy(in->name, doublename);
+}
+
+// A tempo can be halved if the half is a whole number of frames, at least 3
+static int doublehalves(int tempo)
+{
+	return (tempo >= DOUBLELOWEST) && (!(tempo & 1));
+}
+
+static int rowempty(const unsigned char *row)
+{
+	return (row[0] == REST) && (!row[1]) && (!row[2]) && (!row[3]);
+}
+
+static int patternempty(int p)
+{
+	int d;
+
+	for (d = 0; d < pattlen[p]; d++)
+	{
+		if (!rowempty(&pattern[p][d*4])) return 0;
+	}
+	return 1;
+}
+
+// Slides and vibrato last for one row: on the doubled song the row in between
+// goes on with the same command
+static int doublecontinues(int command)
+{
+	return (command >= CMD_PORTAUP) && (command <= CMD_VIBRATO);
+}
+
+// Nothing is lost without this row in between (the row before it is given)
+static int doublerowspare(const unsigned char *row, const unsigned char *before)
+{
+	if (rowempty(row)) return 1;
+	return (row[0] == REST) && (!row[1]) && (doublecontinues(row[2])) && (row[2] == before[2]) && (row[3] == before[3]);
+}
+
+// Whether the song can be doubled. If not, the message says why
+static int doublecanstart(void)
+{
+	INSTR *in = &instr[DOUBLEINSTR];
+	unsigned char used[MAX_INSTR];
+	int start, fastest, c, d;
+
+	if ((in->name[0]) || (in->ptr[WTBL]) || (in->ptr[PTBL]) || (in->ptr[FTBL]) || (in->ptr[STBL]))
+	{
+		gui_message("DOUBLE needs instrument 3F, which is in use");
+		return 0;
+	}
+	start = ((in->ad >= 2) && (!in->ptr[WTBL])) ? in->ad : doubledefaulttempo();
+	if (!doublehalves(start))
+	{
+		gui_message("DOUBLE: the song's tempo %02X can't be halved", start);
+		return 0;
+	}
+	fastest = start / 2;
+
+	findusedpatterns();
+	memset(used, 0, sizeof used);
+	used[1] = 1;  // Every channel starts on instrument 1
+	for (c = 0; c < MAX_PATT; c++)
+	{
+		if ((pattlen[c] > DOUBLELONGEST) && ((pattused[c]) || (!patternempty(c))))
+		{
+			gui_message("DOUBLE: pattern %02X is longer than %d rows", c, DOUBLELONGEST);
+			return 0;
+		}
+		for (d = 0; d < pattlen[c]; d++)
+		{
+			unsigned char *row = &pattern[c][d*4];
+
+			if (row[1] < MAX_INSTR) used[row[1]] = 1;
+			if ((row[2] == CMD_FUNKTEMPO) || ((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) < 2)))
+			{
+				gui_message("DOUBLE: the funktempo in pattern %02X can't be halved", c);
+				return 0;
+			}
+			if (row[2] == CMD_SETTEMPO)
+			{
+				int tempo = row[3] & 0x7f;
+
+				if (!doublehalves(tempo))
+				{
+					gui_message("DOUBLE: tempo %02X in pattern %02X can't be halved", tempo, c);
+					return 0;
+				}
+				if (tempo / 2 < fastest) fastest = tempo / 2;
+			}
+		}
+	}
+	// The player reads the next row this many frames before it starts
+	for (c = 1; c < DOUBLEINSTR; c++)
+	{
+		if ((used[c]) && ((instr[c].gatetimer & 0x3f) >= fastest))
+		{
+			gui_message("DOUBLE: instrument %02X's gate timer must be below %02X", c, fastest);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+// Whether the song can go back to single speed without losing anything
+static int doublecanstop(void)
+{
+	int c, d;
+
+	findusedpatterns();
+	for (c = 0; c < MAX_PATT; c++)
+	{
+		if ((pattlen[c] & 1) && ((pattused[c]) || (!patternempty(c))))
+		{
+			gui_message("DOUBLE stays on: pattern %02X has an odd number of rows", c);
+			return 0;
+		}
+		for (d = 1; d < pattlen[c]; d += 2)
+		{
+			if (!doublerowspare(&pattern[c][d*4], &pattern[c][(d-1)*4]))
+			{
+				gui_message("DOUBLE stays on: pattern %02X has notes on odd rows", c);
+				return 0;
+			}
+		}
+	}
+	return 1;
+}
+
+// Pattern p with twice the rows or, going back, half of them
+static void doublepattern(int p, int on)
+{
+	unsigned char old[MAX_PATTROWS*4+4];
+	int oldlen = pattlen[p];
+	int newlen = on ? oldlen * 2 : (oldlen + 1) / 2;
+	int d;
+
+	if (newlen > MAX_PATTROWS) newlen = MAX_PATTROWS;
+	memcpy(old, pattern[p], sizeof old);
+	memset(pattern[p], 0, sizeof old);
+	for (d = 0; d < newlen; d++)
+	{
+		int from = on ? d / 2 : d * 2;
+
+		if ((on) && (d & 1))
+		{
+			pattern[p][d*4] = REST;
+			if (doublecontinues(old[from*4+2]))
+			{
+				pattern[p][d*4+2] = old[from*4+2];
+				pattern[p][d*4+3] = old[from*4+3];
+			}
+		}
+		else memcpy(&pattern[p][d*4], &old[from*4], 4);
+
+		// The tempo commands
+		if (pattern[p][d*4+2] == CMD_SETTEMPO)
+		{
+			int tempo = pattern[p][d*4+3] & 0x7f;
+
+			if (tempo >= 2)
+			{
+				tempo = on ? tempo / 2 : tempo * 2;
+				if (tempo > 0x7f) tempo = 0x7f;
+				pattern[p][d*4+3] = (pattern[p][d*4+3] & 0x80) | tempo;
+			}
+		}
+	}
+	for (d = newlen; d <= MAX_PATTROWS; d++) pattern[p][d*4] = ENDPATT;
+	pattlen[p] = newlen;
+}
+
+// What goes with the song being doubled: a beat's rows and new patterns' rows
+static void doubleapply(int on)
+{
+	if (on)
+	{
+		doubleoldlength = defaultpatternlength;
+		defaultpatternlength = MAX_PATTROWS;
+		stepsize = (stepsize * 2 > MAX_PATTROWS) ? MAX_PATTROWS : stepsize * 2;
+	}
+	else
+	{
+		defaultpatternlength = doubleoldlength;
+		stepsize = (stepsize / 2 < 2) ? 2 : stepsize / 2;
+	}
+	doublemode = on;
+}
+
+// The plugin's audio thread doesn't play the song while it changes, and
+// follows the host's position again after it
+static void doublelock(void)
+{
+#ifdef GT_PLUGIN
+	gtplugin_lockengine();
+#endif
+}
+
+static void doubleunlock(void)
+{
+#ifdef GT_PLUGIN
+	gtplugin_unlockengine();
+	gtsync_requestresync();
+#endif
+}
+
+// Sets DOUBLE (one undo step). Stays as it is if the song can't be changed
+void setdoublemode(int on)
+{
+	INSTR *in = &instr[DOUBLEINSTR];
+	GTUNDO_OBJECT *undo;
+	int c;
+
+	on = on ? 1 : 0;
+	if (on == doublemode) return;
+	if (!(on ? doublecanstart() : doublecanstop())) return;
+
+	// While following the host the plugin goes on playing
+#ifdef GT_PLUGIN
+	if (!gtsync_following()) stopsong();
+#else
+	stopsong();
+#endif
+	doublelock();
+	undo = undoCreateEditorInfo();
+	for (c = 0; c < MAX_PATT; c++)
+		undoAreaSetCheckForChange(UNDO_AREA_PATTERN, c, UNDO_AREA_DIRTY_CHECK);
+	undoAreaSetCheckForChange(UNDO_AREA_PATTERN_LEN, 0, UNDO_AREA_DIRTY_CHECK);
+	undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, DOUBLEINSTR, UNDO_AREA_DIRTY_CHECK);
+
+	for (c = 0; c < MAX_PATT; c++) doublepattern(c, on);
+	if (on)
+	{
+		int start = (in->ad >= 2) ? in->ad : doubledefaulttempo();
+
+		doublemark();
+		in->ad = start / 2;
+	}
+	else
+	{
+		int start = in->ad * 2;
+
+		clearinstr(DOUBLEINSTR);
+		// A tempo of its own stays; the default one needs no instrument
+		if (start != doubledefaulttempo()) in->ad = (start > 0xff) ? 0xff : start;
+	}
+	doubleapply(on);
+
+	// The cursor stays on the same music
+	editorInfo.eppos = on ? editorInfo.eppos * 2 : editorInfo.eppos / 2;
+	editorInfo.epview = editorInfo.eppos - VISIBLEPATTROWS / 2;
+	editorInfo.epmarkchn = -1;
+
+	if (undoValidateUndoAreas(undo) == 0) undoFreeUndoObject(undo);
+	doubleunlock();
+	gui_message(on ? "DOUBLE on: twice the rows per beat, patterns of 128 rows" : "DOUBLE off");
+}
+
+// The song has changed by itself (loaded, undo, redo): DOUBLE follows it
+static void doublesync(void)
+{
+	int on = doublemarked();
+
+	if (on == doublemode) return;
+	doublelock();
+	doubleapply(on);
+	doubleunlock();
+}
+
+// The plugin's project has been restored, with the rows per beat it was saved
+// with: only DOUBLE itself follows the song
+void doublerestored(void)
+{
+	int on = doublemarked();
+
+	if ((on) && (!doublemode))
+	{
+		doubleoldlength = defaultpatternlength;
+		defaultpatternlength = MAX_PATTROWS;
+	}
+	if ((!on) && (doublemode)) defaultpatternlength = doubleoldlength;
+	doublemode = on;
+}
+
 // The note hook (see gmidi.h): a MIDI note as it comes, in the MIDI input's
 // thread. Where a note-on goes is decided here
 // (see midichord) and it is played at once; a note-off releases its note.
@@ -1759,6 +2086,7 @@ static void newsong(void)
 
 	stopsong();
 	clearsong(1, 1, 1, 1, 1);
+	if (doublemode) doublemark();
 	for (c = 0; c < MAX_CHN; c++)
 	{
 		editorUndoInfo.editorInfo[c].epnum = c;
@@ -2241,6 +2569,8 @@ void clearsongparts(int optimize, int cs, int cp, int ci, int ct, int cn, int pa
 	if (cs | cp | ci | ct | cn)
 	{
 		clearsong(cs, cp, ci, ct, cn);
+		// DOUBLE stays on when the instruments go
+		if ((ci) && (doublemode)) doublemark();
 		undoInitAllAreas();
 		gui_message("Song cleared");
 	}

@@ -407,6 +407,11 @@ void retro_fxknob(int value)
 #define INPUTWIDTH 10
 #define STEPSCOLUMN (INPUTCOLUMN + INPUTWIDTH + 2)
 #define STEPSWIDTH 5
+// DOUBLE ends under the last digit of channel 3's pattern, ON / OFF under its
+// middle
+#define DOUBLEWIDTH 6
+#define DOUBLECOLUMN (2 + (MAX_CHN - 1) * 15 + 12 - DOUBLEWIDTH + 1)
+#define DOUBLEVALUECOLUMN (DOUBLECOLUMN + 2)
 #define MSGCOLUMN RX
 #define MSGWIDTH (MAX_COLUMNS - 2 - MSGCOLUMN)
 #define LOCKCOLUMN (MAX_COLUMNS - 1)
@@ -1028,6 +1033,11 @@ void retro_printstatus(void)
   printtext(STEPSCOLUMN, 35, CTITLE, "STEPS");
   sprintf(textbuffer, "%-2d", editstep);
   printtext(STEPSCOLUMN, 36, CEDIT, textbuffer);
+
+  // DOUBLE: twice the rows per beat. Click to switch
+  printtext(DOUBLECOLUMN, 35, CTITLE, "DOUBLE");
+  printtext(DOUBLEVALUECOLUMN, 36, CEDIT, doublemode ? "ON " : "OFF");
+
   if (editorInfo.multiplier)
   {
     if (!editorInfo.ntsc)
@@ -1629,6 +1639,9 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_LEFT) seteditstep(editstep < MAX_EDITSTEP ? editstep + 1 : 0);
     if (mouseb & MOUSEB_RIGHT) seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
   }
+  // DOUBLE: either button switches it
+  if ((!prevmouseb) && (mouseb & (MOUSEB_LEFT | MOUSEB_RIGHT)) && (mousex >= DOUBLECOLUMN) && (mousex < DOUBLECOLUMN + DOUBLEWIDTH) && (mousey >= 23 + 3 + 9))
+    setdoublemode(!doublemode);
   // Titlebar actions
   if (!menu)
   {
