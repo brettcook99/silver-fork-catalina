@@ -400,18 +400,20 @@ void retro_fxknob(int value)
   fxset(v);
 }
 
-// The bottom rows: OCTAVE, PLAYING/STOPPED, MIDI INPUT and STEPS, each two
-// columns after the one before. The message area is at the right, under the
+// The bottom rows: OCTAVE, PLAYING/STOPPED, MIDI INPUT, STEPS and RESO, two
+// and a half columns apart (as Scott laid them out), each value under the
+// middle of its title (MIDI INPUT's under its start). RESO ends under
+// channel 3's command column. The message area is at the right, under the
 // song info (from the C of COPYR.), the table view lock "U" in the corner
-#define INPUTCOLUMN 19
+#define PLAYCENTER 14
+#define INPUTCOLUMN 20
 #define INPUTWIDTH 10
-#define STEPSCOLUMN (INPUTCOLUMN + INPUTWIDTH + 2)
-#define STEPSWIDTH 5
-// DOUBLE ends under the last digit of channel 3's pattern, ON / OFF under its
-// middle
-#define DOUBLEWIDTH 6
-#define DOUBLECOLUMN (2 + (MAX_CHN - 1) * 15 + 12 - DOUBLEWIDTH + 1)
-#define DOUBLEVALUECOLUMN (DOUBLECOLUMN + 2)
+#define STEPSCENTER 35
+#define STEPSCOLUMN (STEPSCENTER - 3)
+#define STEPSWIDTH 6
+#define RESOCENTER 42
+#define RESOCOLUMN (RESOCENTER - 2)
+#define RESOWIDTH 5
 #define MSGCOLUMN RX
 #define MSGWIDTH (MAX_COLUMNS - 2 - MSGCOLUMN)
 #define LOCKCOLUMN (MAX_COLUMNS - 1)
@@ -1017,8 +1019,8 @@ void retro_printstatus(void)
   if (recordmode) printtext(0, 36, color, "EDITMODE");
   else printtext(0, 36, color, "JAM MODE");
 
-  if (isplaying()) printtext(10, 35, CTITLE, "PLAYING");
-  else printtext(10, 35, CTITLE, "STOPPED");
+  printblankc(PLAYCENTER - 4, 35, CNORMAL, 9);
+  printtextcentered(PLAYCENTER, 35, CTITLE, isplaying() ? "PLAYING" : "STOPPED");
 
   // MIDI input: how many patterns (channels) the notes played on the MIDI
   // keyboard go to. Click or wheel to change
@@ -1030,13 +1032,17 @@ void retro_printstatus(void)
   printtext(INPUTCOLUMN, 36, CEDIT, textbuffer);
 
   // STEPS: rows skipped after a note is entered. Click or wheel to change
-  printtext(STEPSCOLUMN, 35, CTITLE, "STEPS");
-  sprintf(textbuffer, "%-2d", editstep);
-  printtext(STEPSCOLUMN, 36, CEDIT, textbuffer);
+  printblankc(STEPSCOLUMN, 35, CNORMAL, STEPSWIDTH);
+  printblankc(STEPSCOLUMN, 36, CNORMAL, STEPSWIDTH);
+  printtextcentered(STEPSCENTER, 35, CTITLE, "STEPS");
+  sprintf(textbuffer, "%d", editstep);
+  printtextcentered(STEPSCENTER, 36, CEDIT, textbuffer);
 
-  // DOUBLE: twice the rows per beat. Click to switch
-  printtext(DOUBLECOLUMN, 35, CTITLE, "DOUBLE");
-  printtext(DOUBLEVALUECOLUMN, 36, CEDIT, doublemode ? "ON " : "OFF");
+  // RESO: the rows per beat times 2 or 3. Click to change (right-click: back)
+  printblankc(RESOCOLUMN, 35, CNORMAL, RESOWIDTH);
+  printblankc(RESOCOLUMN, 36, CNORMAL, RESOWIDTH);
+  printtextcentered(RESOCENTER, 35, CTITLE, "RESO");
+  printtextcentered(RESOCENTER, 36, CEDIT, (resomode == 3) ? "X3" : (resomode == 2) ? "X2" : "OFF");
 
   if (editorInfo.multiplier)
   {
@@ -1053,7 +1059,8 @@ void retro_printstatus(void)
       sprintf(textbuffer, " %02d%c%02d ", timemin, timechar[(timeframe/15) & 1], timesec);
   }
 
-  printtext(10, 36, CEDIT, textbuffer);
+  printblankc(PLAYCENTER - 4, 36, CNORMAL, 9);
+  printtextcentered(PLAYCENTER, 36, CEDIT, textbuffer);
 
   // Messages (file opened, saved, imported...) under the song info. A long
   // one goes on two lines: broken near the middle if both halves fit,
@@ -1639,9 +1646,12 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_LEFT) seteditstep(editstep < MAX_EDITSTEP ? editstep + 1 : 0);
     if (mouseb & MOUSEB_RIGHT) seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
   }
-  // DOUBLE: either button switches it
-  if ((!prevmouseb) && (mouseb & (MOUSEB_LEFT | MOUSEB_RIGHT)) && (mousex >= DOUBLECOLUMN) && (mousex < DOUBLECOLUMN + DOUBLEWIDTH) && (mousey >= 23 + 3 + 9))
-    setdoublemode(!doublemode);
+  // RESO: left button = OFF, X2, X3, OFF...; right = back
+  if ((!prevmouseb) && (mouseb & (MOUSEB_LEFT | MOUSEB_RIGHT)) && (mousex >= RESOCOLUMN) && (mousex < RESOCOLUMN + RESOWIDTH) && (mousey >= 23 + 3 + 9))
+  {
+    if (mouseb & MOUSEB_LEFT) setresomode((resomode >= 3) ? 1 : resomode + 1);
+    else setresomode((resomode <= 1) ? 3 : resomode - 1);
+  }
   // Titlebar actions
   if (!menu)
   {

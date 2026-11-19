@@ -1025,9 +1025,9 @@ static void runchannels(int mask)
 
       // Tick N command
       TICKNEFFECTS:
-      // DOUBLE: the optimizations work once per row of the single speed song,
-      // not on the rows in between (the odd ones), so that it sounds the same
-      if ((!editorInfo.optimizerealtime) || (cptr->tick) || ((doublemode) && (!(cptr->pattptr & 4))))
+      // RESO: the optimizations work once per row of the song without it,
+      // not on the rows in between, so that it sounds the same
+      if ((!editorInfo.optimizerealtime) || (cptr->tick) || ((resomode > 1) && (cptr->playrow % resomode)))
       {
         switch(cptr->command)
         {
@@ -1147,16 +1147,17 @@ static void runchannels(int mask)
       PULSEEXEC:
       if (editorInfo.optimizepulse)
       {
-        if ((songinit != PLAY_STOPPED) && (cptr->tick == cptr->gatetimer) && ((!doublemode) || (!(cptr->pattptr & 4)))) goto GETNEWNOTES;
+        if ((songinit != PLAY_STOPPED) && (cptr->tick == cptr->gatetimer) && ((resomode <= 1) ||
+          ((cptr->pattptr != 0x7fffffff) && (!((cptr->pattptr / 4) % resomode))))) goto GETNEWNOTES;
       }
 
       if (cptr->ptr[PTBL])
       {
-        // Skip pulse when sequencer has been executed (DOUBLE: on the row
-        // before the last one, where the single speed song's last row starts)
+        // Skip pulse when sequencer has been executed (RESO: on the row where
+        // the last row of the song without it starts)
         if (editorInfo.optimizepulse)
         {
-          if ((!cptr->tick) && (cptr->pattptr == (doublemode ? (unsigned)(pattlen[cptr->pattnum] - 1) * 4 : 0))) goto NEXTCHN;
+          if ((!cptr->tick) && (cptr->pattptr == ((resomode > 1) ? (unsigned)(pattlen[cptr->pattnum] - resomode + 1) * 4 : 0))) goto NEXTCHN;
         }
 
         // Pulsetable jump
