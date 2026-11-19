@@ -186,6 +186,33 @@ static int playbackjump(int row)
   return 1;
 }
 
+// DEL (or BACKSPACE, the delete key of a Mac laptop) with rows marked:
+// clears the marked rows' notes and instruments, with SHIFT their commands
+// too. The rows stay marked
+static void patternclearmarked(int commands)
+{
+  int c = editorInfo.epmarkchn;
+  int p, first, last, d;
+
+  if ((c < 0) || (c >= MAX_CHN)) return;
+  p = editorUndoInfo.editorInfo[c].epnum;
+  first = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkstart : editorInfo.epmarkend;
+  last = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkend : editorInfo.epmarkstart;
+  if (last >= pattlen[p]) last = pattlen[p] - 1;
+  if (first < 0) first = 0;
+  for (d = first; d <= last; d++)
+  {
+    pattern[p][d*4] = REST;
+    pattern[p][d*4+1] = 0;
+    if (commands)
+    {
+      pattern[p][d*4+2] = 0;
+      pattern[p][d*4+3] = 0;
+    }
+  }
+  gui_message(commands ? "Marked rows cleared" : "Marked notes cleared (SHIFT+DEL: commands too)");
+}
+
 // INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
 // last row drops off). On the end mark the pattern gets one row longer
 static void patterninsertrow(void)
@@ -310,6 +337,13 @@ static void patternalttranspose(int dir)
 void patterncommands(void)
 {
   int c, scrrep;
+
+  // DEL / BACKSPACE with rows marked clear them (see patternclearmarked())
+  if (((rawkey == KEY_DEL) || ((rawkey == KEY_BACKSPACE) && (!ctrlpressed) && (!altpressed))) && (editorInfo.epmarkchn != -1))
+  {
+    patternclearmarked(shiftpressed);
+    return;
+  }
 
   // [ ] select the pattern. < > select the instrument here too (as in the
   // instrument editor), see generalcommands()

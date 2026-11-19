@@ -1143,6 +1143,9 @@ void docommand(void)
 		// The notes of a MIDI chord go to the other channels' patterns too,
 		// so does a note nudged to the next track (CTRL+LEFT/RIGHT); ALT+UP/
 		// DOWN transposes the marked rows, maybe on another track
+		// DEL / BACKSPACE clear the marked rows, maybe on another track
+		if (((rawkey == KEY_DEL) || (rawkey == KEY_BACKSPACE)) && (editorInfo.epmarkchn != -1))
+			undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[editorInfo.epmarkchn].epnum, UNDO_AREA_DIRTY_CHECK);
 		if (((midinoteon) && (midichord > 1)) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))) ||
 			((altpressed) && ((rawkey == KEY_UP) || (rawkey == KEY_DOWN))))
 		{
