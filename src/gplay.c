@@ -182,11 +182,14 @@ void initsong(int num, int mode)
   if (uiblocked()) return;
 #endif
   sound_suspend();
+  // Not in the middle of a player frame (see stopsong())
+  sound_lockplayer();
   songinit = PLAY_STOPPED;
   psnum = num;
   songinit = mode;
   startpattpos = 0;
   playreturnpoint = 0;
+  sound_unlockplayer();
   sound_flush();
 }
 
@@ -196,11 +199,13 @@ void initsongpos(int num, int mode, int pattpos)
   if (uiblocked()) return;
 #endif
   sound_suspend();
+  sound_lockplayer();
   songinit = PLAY_STOPPED;
   psnum = num;
   songinit = mode;
   startpattpos = pattpos;
   playreturnpoint = 0;
+  sound_unlockplayer();
   sound_flush();
 }
 
@@ -209,10 +214,17 @@ void stopsong(void)
 #ifdef GT_PLUGIN
   if (uiblocked()) return;
 #endif
+  // The sound (the host's audio thread in the plugin) plays the song in
+  // another thread: the player's state changes between its frames, not in
+  // the middle of one (a stopped channel could read a row there while it has
+  // none: a crash). The lock may be held already (stopsong() from the
+  // player)
   if (songinit != PLAY_STOPPED)
   {
     sound_suspend();
+    sound_lockplayer();
     songinit = PLAY_STOP;
+    sound_unlockplayer();
     sound_flush();
   }
 }
@@ -1253,6 +1265,9 @@ static void runchannels(int mask)
 
       // New notes processing
       GETNEWNOTES:
+      // After a pattern's last row there is no row until the next pattern is
+      // taken on tick 0
+      if (cptr->pattptr == 0x7fffffff) goto NEXTCHN;
       {
         unsigned char newnote;
         int row = cptr->pattptr / 4;
