@@ -208,6 +208,8 @@ typedef struct
 {
   unsigned char base[3];                    // the first rows (0 = none)
   int start[3];                             // the tables' byte offsets
+  int haschord;                             // its wave table plays the chord
+  int firstwave;
   unsigned char rowat[3][128];              // per byte offset of a row
 } SWMINSTRMAP;
 
@@ -290,6 +292,17 @@ static void decodepattern(const unsigned char *u, int size, SWMPATT *p, SWMLOST 
   p->rows = r;
 }
 
+// While a pattern is converted: the instrument playing, the envelope it has
+// (for the effects that set one nibble), the chord set (-1 = the
+// instrument's own) and a portamento waiting for the next note
+typedef struct
+{
+  int instr;
+  int ad, sr;
+  int chord;
+  int porta;
+} SWMSTATE;
+
 static void setcmd(unsigned char *row, int cmd, int data, SWMLOST *lost)
 {
   if ((row[2]) || (row[3]))
@@ -308,18 +321,38 @@ static int needentry(int e, SWMLOST *lost)
 }
 
 // Small effects ($2x-$Fx; the instrument column's $4x-$7x are the same)
-static void smallfx(unsigned char *row, int v, SWMLOST *lost)
+static void smallfx(unsigned char *row, int v, SWMSTATE *st, SWMLOST *lost)
 {
   int lo = v & 0x0f;
 
   switch (v >> 4)
   {
+    case 0x2:
+    st->ad = (lo << 4) | (st->ad & 0x0f);
+    setcmd(row, CMD_SETAD, st->ad, lost);
+    break;
+
+    case 0x3:
+    st->ad = (st->ad & 0xf0) | lo;
+    setcmd(row, CMD_SETAD, st->ad, lost);
+    break;
+
     case 0x4:
     setcmd(row, CMD_SETWAVE, (lo << 4) | 0x01, lost);
     break;
 
+    case 0x5:
+    st->sr = (lo << 4) | (st->sr & 0x0f);
+    setcmd(row, CMD_SETSR, st->sr, lost);
+    break;
+
+    case 0x6:
+    st->sr = (st->sr & 0xf0) | lo;
+    setcmd(row, CMD_SETSR, st->sr, lost);
+    break;
+
     case 0x7:
-    lost->chords++;
+    st->chord = lo;
     break;
 
     case 0x8:
@@ -338,7 +371,7 @@ static void smallfx(unsigned char *row, int v, SWMLOST *lost)
 
 // Big effects ($01-$1F with a parameter). instr: the instrument playing (for
 // the table jumps), 0 if not known
-static void bigfx(unsigned char *row, int fx, int p, int instr, const SWMINSTRMAP *maps, SWMLOST *lost)
+static void bigfx(unsigned char *row, int fx, int p, int instr, const SWMINSTRMAP *maps, SWMSTATE *st, SWMLOST *lost)
 {
   switch (fx)
   {
@@ -356,15 +389,17 @@ static void bigfx(unsigned char *row, int fx, int p, int instr, const SWMINSTRMA
     break;
 
     case 0x05:
+    st->ad = p;
     setcmd(row, CMD_SETAD, p, lost);
     break;
 
     case 0x06:
+    st->sr = p;
     setcmd(row, CMD_SETSR, p, lost);
     break;
 
     case 0x07:
-    lost->chords++;
+    st->chord = p & 0x1f;
     break;
 
     case 0x08:
@@ -408,6 +443,9 @@ static void bigfx(unsigned char *row, int fx, int p, int instr, const SWMINSTRMA
 
     case 0x1f:
     setcmd(row, CMD_SETFILTERCTRL, p, lost);
+    break;
+
+    case 0x16:
     break;
 
     default:
@@ -456,16 +494,262 @@ static int arpnote(int v, int shift, SWMLOST *lost)
   return clampint(v, 0x81, 0xdf);
 }
 
+// The chord table: where each chord (1-based) starts in it
+static const unsigned char *chordtab = NULL;
+static int chordtablen = 0;
+static int chordat[32];
+static int nchords = 0;
+
+static void findchords(const unsigned char *tab, int len)
+{
+  int c = 0;
+
+  chordtab = tab;
+  chordtablen = len;
+  nchords = 0;
+  while ((c < len) && (nchords < 31))
+  {
+    chordat[++nchords] = c;
+    while ((c < len) && (tab[c] != 0x7e) && (tab[c] != 0x7f)) c++;
+    c++;
+  }
+}
+
+// A note some halfsteps up or down (and the instrument's octave shift) as
+// GoatTracker's wavetable note column
+static int relnote(int semis, int shift)
+{
+  int v = clampint(semis + shift, -32, 0x5f);
+  return (v < 0) ? 0x80 + v : v;
+}
+
+// A table's rows in GoatTracker's form, before they are placed. A jump's
+// target: the row's index + 1 (-1 = stop, -2 = a SID-Wizard offset not
+// resolved yet, in tl)
+#define SWM_MAXROWS 400
+typedef struct
+{
+  int tl[SWM_MAXROWS], tr[SWM_MAXROWS], tj[SWM_MAXROWS];
+  int nrow;
+  int rowof[128];       // per SID-Wizard row (byte offset): the first row made
+  int firstwave;
+  int haschord;         // the wave table plays the chord
+} SWMTROWS;
+
+static void trow(SWMTROWS *o, int l, int r, int j)
+{
+  if (o->nrow >= SWM_MAXROWS) return;
+  o->tl[o->nrow] = l;
+  o->tr[o->nrow] = r;
+  o->tj[o->nrow] = j;
+  o->nrow++;
+}
+
+// Instrument table t's rows (the wave table playing chord as its chord)
+static void convtable(int t, const unsigned char *ib, int size, int chord, int chans, SWMTROWS *o, SWMLOST *lost)
+{
+  int start = (t == 0) ? SWM_TABLESTART : ib[0x0a + t - 1];
+  int wavespeed = ib[7] & 0x3f;
+  int shift = (signed char)ib[9];
+  int offs[64], n, c, k;
+
+  memset(o, 0, sizeof *o);
+  for (c = 0; c < 128; c++) o->rowof[c] = -1;
+  if ((start < SWM_TABLESTART) || (start > size)) return;
+  n = tablerows(ib, size, start, offs, 64);
+  for (c = 0; c < n; c++)
+  {
+    const unsigned char *r = &ib[offs[c]];
+    int first = o->nrow;
+
+    if (r[0] == 0xfe)
+    {
+      // A jump: to itself (or in the wave table $80 and up) = stop
+      if ((r[1] == offs[c]) || ((t == WTBL) && (r[1] >= 0x80))) trow(o, 0xff, 0, -1);
+      else trow(o, r[1], 0, -2);
+    }
+    else if ((t == WTBL) && (r[1] == 0x7f))
+    {
+      // The chord: its notes one after another (as fast as the table), then
+      // back to its first note or on with the table
+      int at = ((chord >= 1) && (chord <= nchords)) ? chordat[chord] : -1;
+      int chordfirst = o->nrow;
+      int wave = (r[0] > WAVELASTDELAY) && (r[0] < WAVESILENT) ? r[0] : 0;
+      int loop = 0;
+
+      o->haschord = 1;
+      if ((wave) && (!o->firstwave)) o->firstwave = wave;
+      if (at < 0)
+        trow(o, wave, relnote(0, shift), 0);
+      else
+      {
+        for (k = 0; (at + k < chordtablen) && (k < 32); k++)
+        {
+          int v = chordtab[at + k];
+          if ((v == 0x7e) || (v == 0x7f))
+          {
+            loop = (v == 0x7f);
+            break;
+          }
+          trow(o, k ? 0 : wave, relnote((v < 0x80) ? v : v - 0x100, shift), 0);
+          if (wavespeed) trow(o, clampint(wavespeed, 1, WAVELASTDELAY), 0x80, 0);
+        }
+        if (o->nrow == chordfirst) trow(o, wave, relnote(0, shift), 0);
+      }
+      if (loop) trow(o, 0xff, 0, chordfirst + 1);
+    }
+    else if (t == WTBL)
+    {
+      int wave = r[0];
+      int note = arpnote(r[1], shift, lost);
+
+      if (wave >= WAVESILENT)
+      {
+        wave = 0x81;
+        lost->tables++;
+      }
+      if (wave <= WAVELASTDELAY)
+      {
+        // Held for some frames: the note now, then the wait
+        trow(o, 0, note, 0);
+        if (wave) trow(o, wave, 0x80, 0);
+      }
+      else
+      {
+        if (!o->firstwave) o->firstwave = wave;
+        trow(o, wave, note, 0);
+      }
+      // Slower than every frame
+      if (wavespeed) trow(o, clampint(wavespeed, 1, WAVELASTDELAY), 0x80, 0);
+    }
+    else if (t == PTBL)
+    {
+      if (r[0]) trow(o, r[0], r[1], 0);
+    }
+    else
+    {
+      if (r[0] >= 0x80)
+      {
+        int mask = ((r[2] & 0xf0) == 0x80) ? (r[2] & 0x07) : chans;
+        trow(o, 0x80 | (r[0] & 0x70), ((r[0] & 0x0f) << 4) | mask, 0);
+        trow(o, 0x00, r[1], 0);
+      }
+      else if (r[0])
+      {
+        int speed = (signed char)r[1] / 8;
+        if (!speed) speed = ((signed char)r[1] < 0) ? -1 : (r[1] ? 1 : 0);
+        trow(o, r[0], speed & 0xff, 0);
+      }
+    }
+    if ((offs[c] < 128) && (o->nrow > first)) o->rowof[offs[c]] = first;
+  }
+  if (!o->nrow) return;
+  // A table without a jump at its end stops there
+  if ((o->tj[o->nrow - 1] == 0) && (o->tl[o->nrow - 1] != 0xff)) trow(o, 0xff, 0, -1);
+  // The jumps' targets as row indexes
+  for (k = 0; k < o->nrow; k++)
+  {
+    if (o->tj[k] == -2)
+    {
+      int at = (o->tl[k] < 128) ? o->rowof[o->tl[k]] : -1;
+      o->tl[k] = 0xff;
+      o->tj[k] = (at >= 0) ? at + 1 : -1;
+    }
+    else if (o->tj[k] == -1) o->tl[k] = 0xff;
+  }
+}
+
+// Puts rows into GoatTracker table t: shared with equal rows there already
+// (another instrument's), else added (as far as they fit, then a stop).
+// Returns where they start (1-based), 0 if not at all
+static int placetable(int t, SWMTROWS *o, SWMLOST *lost)
+{
+  int nrow = o->nrow, base, k, c;
+
+  if (!nrow) return 0;
+  for (base = 0; base + nrow <= tlen[t]; base++)
+  {
+    for (k = 0; k < nrow; k++)
+    {
+      if (o->tj[k] > 0)
+      {
+        if ((ltable[t][base + k] != 0xff) || (rtable[t][base + k] != base + o->tj[k])) break;
+      }
+      else if (o->tj[k] < 0)
+      {
+        if ((ltable[t][base + k] != 0xff) || (rtable[t][base + k])) break;
+      }
+      else if ((ltable[t][base + k] != o->tl[k]) || (rtable[t][base + k] != o->tr[k])) break;
+    }
+    if (k == nrow) return base + 1;
+  }
+  {
+    int room = MAX_TABLELEN - 1 - tlen[t];
+    if (room < 1)
+    {
+      lost->tables += nrow;
+      return 0;
+    }
+    if (nrow > room)
+    {
+      lost->tables += nrow - room;
+      nrow = room;
+      o->tl[nrow - 1] = 0xff;
+      o->tj[nrow - 1] = -1;
+      for (k = 0; k < nrow; k++)
+      {
+        if (o->tj[k] > nrow) o->tj[k] = -1;
+      }
+      for (c = 0; c < 128; c++)
+      {
+        if (o->rowof[c] >= nrow - 1) o->rowof[c] = -1;
+      }
+      o->nrow = nrow;
+    }
+  }
+  base = tlen[t];
+  for (k = 0; k < nrow; k++)
+  {
+    ltable[t][base + k] = (unsigned char)o->tl[k];
+    rtable[t][base + k] = (unsigned char)((o->tj[k] > 0) ? base + o->tj[k] : (o->tj[k] < 0) ? 0 : o->tr[k]);
+  }
+  tlen[t] += nrow;
+  return base + 1;
+}
+
+// The instruments' bytes and the wave table programs made per chord
+static unsigned char swminstr[SWM_MAXINSTR + 1][256];
+static int swminstrsize[SWM_MAXINSTR + 1];
+static int swminstrchans[SWM_MAXINSTR + 1];
+static int chordprog[SWM_MAXINSTR + 1][32];   // 0 = not made, -1 = none
+
+// The wave table program of instrument num playing chord: its first row
+// (1-based), 0 if it can't be made
+static int chordprogram(int num, int chord, SWMLOST *lost)
+{
+  static SWMTROWS o;
+  int ptr;
+
+  if ((num < 1) || (num > SWM_MAXINSTR) || (chord < 0) || (chord > 31)) return 0;
+  if (chordprog[num][chord]) return (chordprog[num][chord] > 0) ? chordprog[num][chord] : 0;
+  convtable(WTBL, swminstr[num], swminstrsize[num], chord, swminstrchans[num], &o, lost);
+  ptr = placetable(WTBL, &o, lost);
+  chordprog[num][chord] = ptr ? ptr : -1;
+  return ptr;
+}
+
 static void importinstr(int num, const unsigned char *ib, int size, const unsigned char *name, int chans,
   SWMINSTRMAP *map, SWMLOST *lost)
 {
+  static SWMTROWS o;
   INSTR *in = &instr[num];
-  int offs[64], n, c, t;
-  int wavespeed = ib[7] & 0x3f;
-  int shift = (signed char)ib[9];
-  int firstwave = 0;
+  int c, t;
 
   memset(map, 0, sizeof *map);
+  memcpy(swminstr[num], ib, 256);
+  swminstrsize[num] = size;
+  swminstrchans[num] = chans;
+  for (c = 0; c < 32; c++) chordprog[num][c] = 0;
   in->ad = ib[3];
   in->sr = ib[4];
   in->gatetimer = (unsigned char)(ib[0] & 3);
@@ -476,9 +760,8 @@ static void importinstr(int num, const unsigned char *ib, int size, const unsign
     in->ptr[STBL] = (unsigned char)vibentry(ib[5] >> 4, ib[5] & 0x0f);
     if (!in->ptr[STBL]) lost->tables++;
   }
-  if ((ib[0] & 0xf4) != 0x10) lost->instr++;  // staccato, vibrato type, no table reset
+  if ((ib[0] & 0xc4) || ((ib[0] & 0x30) == 0x20) || ((ib[0] & 0x30) == 0x30)) lost->instr++;  // staccato, vibrato up / down, no table reset
   if ((ib[0x0c]) || (ib[0x0d]) || (ib[0x0e])) lost->instr++;
-  if (ib[8] > 1) lost->chords++;
   for (c = 0; c < SWM_NAMELEN; c++)
   {
     char ch = (char)name[c];
@@ -491,153 +774,28 @@ static void importinstr(int num, const unsigned char *ib, int size, const unsign
   for (t = 0; t < 3; t++)
   {
     int start = (t == 0) ? SWM_TABLESTART : ib[0x0a + t - 1];
-    // The rows in GoatTracker's form first. A jump's target: the row's index
-    // (-1 = stop, -2 = a SID-Wizard offset not resolved yet: in tl)
-    int tl[200], tr[200], tj[200], rowof[128];
-    int nrow = 0, base, k;
 
-    for (c = 0; c < 128; c++) rowof[c] = -1;
     if ((start < SWM_TABLESTART) || (start > size)) continue;
     map->start[t] = start;
-    n = tablerows(ib, size, start, offs, 64);
-    for (c = 0; c < n; c++)
+    // The wave table with the instrument's own chord
+    convtable(t, ib, size, (t == WTBL) ? (ib[8] & 0x1f) : 0, chans, &o, lost);
+    if (t == WTBL)
     {
-      const unsigned char *r = &ib[offs[c]];
-      int first = nrow;
-
-#define TROW(l, rr, j) do { if (nrow < 200) { tl[nrow] = (l); tr[nrow] = (rr); tj[nrow] = (j); nrow++; } } while (0)
-      if (r[0] == 0xfe)
-      {
-        // A jump: to itself (or in the wave table $80 and up) = stop
-        if ((r[1] == offs[c]) || ((t == WTBL) && (r[1] >= 0x80))) TROW(0xff, 0, -1);
-        else TROW(r[1], 0, -2);
-      }
-      else if (t == WTBL)
-      {
-        int wave = r[0];
-        int note = arpnote(r[1], shift, lost);
-
-        if (wave >= WAVESILENT)
-        {
-          wave = 0x81;
-          lost->tables++;
-        }
-        if (wave <= WAVELASTDELAY)
-        {
-          // Held for some frames: the note now, then the wait
-          TROW(0, note, 0);
-          if (wave) TROW(wave, 0x80, 0);
-        }
-        else
-        {
-          if (!firstwave) firstwave = wave;
-          TROW(wave, note, 0);
-        }
-        // Slower than every frame
-        if (wavespeed) TROW(clampint(wavespeed, 1, WAVELASTDELAY), 0x80, 0);
-      }
-      else if (t == PTBL)
-      {
-        if (r[0]) TROW(r[0], r[1], 0);
-      }
-      else
-      {
-        if (r[0] >= 0x80)
-        {
-          int mask = ((r[2] & 0xf0) == 0x80) ? (r[2] & 0x07) : chans;
-          TROW(0x80 | (r[0] & 0x70), ((r[0] & 0x0f) << 4) | mask, 0);
-          TROW(0x00, r[1], 0);
-        }
-        else if (r[0])
-        {
-          int speed = (signed char)r[1] / 8;
-          if (!speed) speed = ((signed char)r[1] < 0) ? -1 : (r[1] ? 1 : 0);
-          TROW(r[0], speed & 0xff, 0);
-        }
-      }
-#undef TROW
-      if (offs[c] < 128) rowof[offs[c]] = first;
+      map->haschord = o.haschord;
+      if (o.firstwave) map->firstwave = o.firstwave;
     }
-    if (!nrow) continue;
-    // A table without a jump at its end stops there
-    if ((tj[nrow - 1] == 0) && (nrow < 200))
-    {
-      tl[nrow] = 0xff;
-      tr[nrow] = 0;
-      tj[nrow++] = -1;
-    }
-    // The jumps' targets as row indexes
-    for (k = 0; k < nrow; k++)
-    {
-      if (tj[k] == -2)
-      {
-        int at = (tl[k] < 128) ? rowof[tl[k]] : -1;
-        tl[k] = 0xff;
-        tj[k] = (at >= 0) ? at + 1 : -1;
-      }
-      else if (tj[k] == -1) tl[k] = 0xff;
-    }
-    // Rows equal to ones there already (another instrument's) are shared,
-    // else they are added
-    for (base = 0; base + nrow <= tlen[t]; base++)
-    {
-      for (k = 0; k < nrow; k++)
-      {
-        if (tj[k] > 0)
-        {
-          if ((ltable[t][base + k] != 0xff) || (rtable[t][base + k] != base + tj[k])) break;
-        }
-        else if (tj[k] < 0)
-        {
-          if ((ltable[t][base + k] != 0xff) || (rtable[t][base + k])) break;
-        }
-        else if ((ltable[t][base + k] != tl[k]) || (rtable[t][base + k] != tr[k])) break;
-      }
-      if (k == nrow) break;
-    }
-    if (base + nrow > tlen[t])
-    {
-      int room = MAX_TABLELEN - 1 - tlen[t];
-      if (room < 1)
-      {
-        lost->tables += nrow;
-        continue;
-      }
-      if (nrow > room)
-      {
-        // As far as it fits, then a stop (jumps beyond it stop too)
-        lost->tables += nrow - room;
-        nrow = room;
-        tl[nrow - 1] = 0xff;
-        tj[nrow - 1] = -1;
-        for (k = 0; k < nrow; k++)
-        {
-          if (tj[k] > nrow) tj[k] = -1;
-        }
-        for (c = 0; c < 128; c++)
-        {
-          if (rowof[c] >= nrow - 1) rowof[c] = -1;
-        }
-      }
-      base = tlen[t];
-      for (k = 0; k < nrow; k++)
-      {
-        ltable[t][base + k] = (unsigned char)tl[k];
-        rtable[t][base + k] = (unsigned char)((tj[k] > 0) ? base + tj[k] : (tj[k] < 0) ? 0 : tr[k]);
-      }
-      tlen[t] += nrow;
-    }
+    map->base[t] = (unsigned char)placetable(t, &o, lost);
     for (c = 0; c < 128; c++)
     {
-      if (rowof[c] >= 0) map->rowat[t][c] = (unsigned char)(base + rowof[c] + 1);
+      if ((map->base[t]) && (o.rowof[c] >= 0)) map->rowat[t][c] = (unsigned char)(map->base[t] + o.rowof[c]);
     }
-    map->base[t] = (unsigned char)(base + 1);
     in->ptr[t] = map->base[t];
-    // A table that stops at once (only for the patterns' programs): none
-    if ((ltable[t][in->ptr[t] - 1] == 0xff) && (!rtable[t][in->ptr[t] - 1])) in->ptr[t] = 0;
+    if (t == WTBL) chordprog[num][ib[8] & 0x1f] = map->base[t] ? map->base[t] : -1;
+    // A table that stops at once: none
+    if ((in->ptr[t]) && (ltable[t][in->ptr[t] - 1] == 0xff) && (!rtable[t][in->ptr[t] - 1])) in->ptr[t] = 0;
   }
   if (ib[0] & 0x08) in->firstwave = ib[0x0f] ? ib[0x0f] : 0x09;
-  else in->firstwave = firstwave ? (unsigned char)firstwave : 0x09;
+  else in->firstwave = map->firstwave ? (unsigned char)map->firstwave : 0x09;
 }
 
 int swm_import(const char *path, char *report, int reportsize)
@@ -713,6 +871,8 @@ int swm_import(const char *path, char *report, int reportsize)
   pos -= ntempo;
   if (ntempo) lost.tempo++;
   pos -= nchord;
+  if ((pos >= base + SWM_HEADER) && (pos + nchord <= len)) findchords(d + pos, nchord);
+  else findchords(NULL, 0);
   for (c = ninst; c >= 1; c--)
   {
     int size;
@@ -818,7 +978,6 @@ int swm_import(const char *path, char *report, int reportsize)
     ib[instrsize[c]] = 0xff;
     importinstr(c, ib, instrsize[c], d + instrstart[c] + instrsize[c] + 1, instrchans[c] ? instrchans[c] : 7, &maps[c], &lost);
   }
-  if (nchord) lost.chords++;
 
   // The instrument each pattern starts with (when first played: for its
   // table jumps)
@@ -851,34 +1010,66 @@ int swm_import(const char *path, char *report, int reportsize)
   for (p = 1; p <= npatt; p++)
   {
     SWMPATT *sp = &patts[p];
-    int cur = pattinstr[p], r;
+    SWMSTATE st;
+    int r;
 
+    memset(&st, 0, sizeof st);
+    st.instr = pattinstr[p];
+    st.chord = -1;
+    if ((st.instr >= 1) && (st.instr <= ninst))
+    {
+      st.ad = instr[st.instr].ad;
+      st.sr = instr[st.instr].sr;
+    }
     for (r = 0; r < sp->rows; r++)
     {
       int gp = gtpatt[p][r >= MAX_PATTROWS ? 1 : 0];
       unsigned char *row;
+      int note;
 
       if (gp < 0) break;
       row = &pattern[gp][(r % MAX_PATTROWS) * 4];
       row[0] = sp->note[r];
       row[1] = sp->instr[r];
-      if (sp->instr[r]) cur = sp->instr[r];
+      note = (sp->note[r] >= FIRSTNOTE) && (sp->note[r] <= LASTNOTE);
+      if (sp->instr[r])
+      {
+        st.instr = sp->instr[r];
+        st.ad = instr[st.instr].ad;
+        st.sr = instr[st.instr].sr;
+      }
+      // A portamento into this note
+      if ((note) && (st.porta))
+      {
+        setcmd(row, CMD_TONEPORTA, needentry(slideentry(110), &lost), &lost);
+        st.porta = 0;
+      }
       if (sp->col1[r])
       {
         int v = sp->col1[r];
-        if ((v >= 0x60) && (v <= 0x6f)) smallfx(row, 0x80 | (v & 0x0f), &lost);
+        if ((v >= 0x60) && (v <= 0x6f)) smallfx(row, 0x80 | (v & 0x0f), &st, &lost);
+        else if (v == 0x78) st.porta = 1;
         else lost.fx++;
       }
       if (sp->col2[r])
       {
         int v = sp->col2[r];
         if (v == 0x3f) setcmd(row, CMD_TONEPORTA, 0, &lost);
-        else smallfx(row, v, &lost);
+        else smallfx(row, v, &st, &lost);
       }
       if (sp->hasfx[r])
       {
-        if (sp->fx[r] < 0x20) bigfx(row, sp->fx[r], sp->fxparam[r], cur, maps, &lost);
-        else smallfx(row, sp->fx[r], &lost);
+        if (sp->fx[r] < 0x20) bigfx(row, sp->fx[r], sp->fxparam[r], st.instr, maps, &st, &lost);
+        else smallfx(row, sp->fx[r], &st, &lost);
+      }
+      // A note with a chord other than its instrument's: the instrument's
+      // wave table with that chord
+      if ((note) && (st.chord >= 0) && (st.instr >= 1) && (st.instr <= ninst) && (maps[st.instr].haschord) &&
+        (st.chord != (swminstr[st.instr][8] & 0x1f)))
+      {
+        int ptr = chordprogram(st.instr, st.chord, &lost);
+        if (ptr) setcmd(row, CMD_SETWAVEPTR, ptr, &lost);
+        else lost.chords++;
       }
     }
     for (c = 0; c < 2; c++)

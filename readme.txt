@@ -551,12 +551,15 @@ pulse and filter tables, ADSR, hard restart, vibrato, tempos and most
 effects carry over. SID-Wizard keeps each instrument's tables with it while
 GoatTracker's are shared, so they are copied (on export also the table
 programs the patterns' 8xx-Axx commands start, into the instrument playing
-then); patterns too large for SID-Wizard are cut in pieces. Slide and
-vibrato speeds are close, not exact: the two players compute them
-differently. What has no counterpart (chords, tempo programs, delays, sync /
+then); patterns too large for SID-Wizard are cut in pieces. Imported chords
+become wavetable programs: each instrument's own chord in its wavetable, and
+for the notes that play another one a program of that chord, started with
+8xx. Slide and vibrato speeds are close, not exact: the two players compute
+them differently. What has no counterpart (tempo programs, delays, sync /
 ring / detune columns, gate-off table jumps, orderlist volume and tempo
-bytes, more than 8 subtunes) is left out, and the message after the import or
-export counts what was. Modules for 2 or more SIDs (.sws, .swt) can't be
+bytes, a second command on a row, more than 8 subtunes) is left out, and the
+message after the import or export counts what was. A SID-Wizard instrument
+holds 120 bytes: table programs beyond that are left out of an export. Modules for 2 or more SIDs (.sws, .swt) can't be
 imported.
 
 Notes played (keys or MIDI) start at once, at the moment they come, not
