@@ -39,6 +39,7 @@ extern int midiimportchannel;           // 1-16, 0 = any MIDI channel
 #define GTFILE_MIDI 3
 #define GTFILE_SID 4
 #define GTFILE_PATCH 5    // chipsynth C64 .fermatax
+#define GTFILE_SWM 6      // SID-Wizard module
 int gt_filetype(const char *path);
 
 // All return 1 on success. On failure an explanation is shown to the user.
@@ -57,6 +58,8 @@ int gt_importsid(const char *path);
 // Converts and loads a SID with the dialog's options
 int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt);
 int gt_importpatch(const char *path);
+// A SID-Wizard module (.swm) becomes the song
+int gt_importswm(const char *path);
 // Opens any supported file by its type (a song replaces the current song)
 int gt_openfile(const char *path);
 // The same, but a SID or MIDI file is converted at once with the import

@@ -26,6 +26,7 @@
 #include "bme.h"
 #include "gui/gui.h"
 #include "gmacfile.h"
+#include "gswm.h"
 
 static void mainloopframe(void);
 static void retromainloop(void);
@@ -2318,7 +2319,7 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_OPEN:
-		if (filedialog_open(FOLDER_SONG, "Open a song, or import a SID, MIDI or chipsynth file", "sng;sid;mid;midi;ins;fermatax", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_SONG, "Open a song, or import a SID, MIDI, SID-Wizard or chipsynth file", "sng;sid;mid;midi;swm;ins;fermatax", newpath, MAX_PATHNAME))
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
@@ -2388,6 +2389,30 @@ void runcommand(int cmd, const char *path)
 
 	case GTCMD_IMPORTMIDINOW:
 		if ((path) && (path[0])) gt_importmidi_run(path);
+		break;
+
+	case GTCMD_IMPORTSWM:
+		if (filedialog_open(FOLDER_IMPORT, "Import a SID-Wizard module", "swm", newpath, MAX_PATHNAME))
+			runcommand(GTCMD_OPENFILE, newpath);
+		break;
+
+	case GTCMD_EXPORTSWM:
+		{
+			char suggest[MAX_PATHNAME];
+			char report[256];
+			const char *base = "Untitled";
+
+			if (loadedsongfilename[0]) base = gt_basename(loadedsongfilename);
+			else if (suggestedsongname[0]) base = suggestedsongname;
+			gt_replaceext(base, ".swm", suggest, MAX_PATHNAME);
+			if (!filedialog_save(FOLDER_EXPORT, "Export the song as a SID-Wizard module", "swm", suggest, newpath, MAX_PATHNAME))
+				break;
+			stopsong();
+			if (swm_export(newpath, report, sizeof report))
+				gui_message("Exported %s: %s", gt_basename(newpath), report);
+			else
+				gui_alert("SID-Wizard export failed", report);
+		}
 		break;
 
 	case GTCMD_IMPORTPATCH:

@@ -423,6 +423,7 @@ void gui::drawmenubar(void)
     {
       if (ImGui::MenuItem("SID File...")) cmd_post(GTCMD_IMPORTSID);
       if (ImGui::MenuItem("MIDI File...")) cmd_post(GTCMD_IMPORTMIDI);
+      if (ImGui::MenuItem("SID-Wizard Module (.swm)...")) cmd_post(GTCMD_IMPORTSWM);
       if (ImGui::MenuItem("chipsynth C64 Patch (.fermatax)...")) cmd_post(GTCMD_IMPORTPATCH);
       ImGui::EndMenu();
     }
@@ -431,6 +432,7 @@ void gui::drawmenubar(void)
     if (ImGui::MenuItem("Save Instrument...")) cmd_post(GTCMD_SAVEINSTR);
     ImGui::Separator();
     if (ImGui::MenuItem("Export SID / PRG / BIN...", "F9")) cmd_post(GTCMD_EXPORT);
+    if (ImGui::MenuItem("Export SID-Wizard Module (.swm)...")) cmd_post(GTCMD_EXPORTSWM);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "ALT+F4")) cmd_post(GTCMD_QUIT);
     ImGui::EndMenu();

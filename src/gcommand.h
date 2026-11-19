@@ -104,6 +104,8 @@ enum
   GTCMD_CLEARPATTERNS,    //   the patterns of all channels shown,
   GTCMD_CLEARALL,         //   the whole song (asks first)
   GTCMD_PREFERENCES,      // Preferences: audio output (standalone)
+  GTCMD_IMPORTSWM,        // A SID-Wizard module (.swm) as the song
+  GTCMD_EXPORTSWM,        // The song as a SID-Wizard module
 
   GTCMD_COUNT
 };
