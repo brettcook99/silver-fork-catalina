@@ -67,6 +67,13 @@ int midichordmask = 0;
 // Nonzero when the MIDI note has been played already, as it came (see
 // midinotehook()): the editor only enters it
 int midinoteplayed = 0;
+// Nonzero when the MIDI note is recorded on the row it sounded in, while
+// following the playback (see patternrecording()): the pattern, row and
+// the transpose it plays with there
+int midirecord = 0;
+int midirecpatt = 0;
+int midirecrow = 0;
+int midirectrans = 0;
 static int midinotehook(int type, int channel, int midinote, unsigned time);
 int followplay = 0;
 int followmode = 1;
@@ -1134,6 +1141,20 @@ void docommand(void)
 			for (int i = 0;i < MAX_CHN;i++)
 				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[i].epnum, UNDO_AREA_DIRTY_CHECK);
 		}
+		// Notes recorded while following the playback go to the patterns the
+		// channels play, or the next ones (see patternrecording())
+		if ((patternrecording()) || ((midinoteon) && (midirecord)))
+		{
+			for (int i = 0;i < MAX_CHN;i++)
+			{
+				int p, t;
+				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[i].epnum, UNDO_AREA_DIRTY_CHECK);
+				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, chn[i].playpatt, UNDO_AREA_DIRTY_CHECK);
+				undoAreaSetCheckForChange(UNDO_AREA_PATTERN, chn[i].readpatt, UNDO_AREA_DIRTY_CHECK);
+				if (playnextpattern(i, &p, &t)) undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+			}
+			if ((midinoteon) && (midirecord)) undoAreaSetCheckForChange(UNDO_AREA_PATTERN, midirecpatt, UNDO_AREA_DIRTY_CHECK);
+		}
 
 		patterncommands();
 		break;
@@ -1278,16 +1299,25 @@ static volatile int miditurnchn = -1;
 static volatile int miditurnrow = -1;
 // The editor's: the row of the chord's first note
 static int chordrow = 0;
+// Whether the chord's first note was recorded on the next row (see
+// patternrecordpos())
+static int chordrecnext = 0;
 
 // What the note hook made of a MIDI note (midinoteassign, kept with the
 // event): the channel + 1 (0 = left out of a chord), whether it starts a
 // new row (the cursor moves down after it), the channels of the chord's
-// earlier notes (bits), whether the hook has played it
+// earlier notes (bits), whether the hook has played it, and where it is
+// recorded while following the playback (MIDIASSIGN_REC: pattern, row,
+// transpose + 16)
 #define MIDIASSIGN_CHN 0x03
 #define MIDIASSIGN_FIRST 0x04
 #define MIDIASSIGN_MASKSHIFT 3
 #define MIDIASSIGN_PLAYED 0x80
 #define MIDIASSIGN_VALID 0x100
+#define MIDIASSIGN_REC 0x200
+#define MIDIASSIGN_RECPATTSHIFT 10
+#define MIDIASSIGN_RECROWSHIFT 18
+#define MIDIASSIGN_RECTRANSSHIFT 25
 
 // Sets the number of channels MIDI chords go to (1-3, see midichord). The
 // notes still sounding from the MIDI keyboard are released, and the keys
@@ -1657,7 +1687,7 @@ static int midinotehook(int type, int channel, int midinote, unsigned time)
 {
 	int note = FIRSTNOTE + midinote - 12;
 	int designer = gui_designeractive();
-	int chn, first = 1, mask = 0, played = 0;
+	int chn, first = 1, mask = 0, played = 0, rec = 0;
 
 	if ((note < FIRSTNOTE) || (note > LASTNOTE)) return 0;
 
@@ -1728,8 +1758,22 @@ static int midinotehook(int type, int channel, int midinote, unsigned time)
 		playtestnote(note, editorInfo.einum, chn);
 		played = 1;
 	}
+
+	// In edit mode, following the playback: recorded on the row it sounds
+	// in, a chord's later notes on the row of its first (not at the cursor,
+	// which is on the row the player reads next, where it would sound again)
+	if (played)
+	{
+		int patt, row, trans;
+		int r = patternrecordpos(chn, first ? -1 : chordrecnext, &patt, &row, &trans);
+
+		if (first) chordrecnext = (r == 2);
+		if ((r) && (row >= 0) && (row < MAX_PATTROWS) && ((signed char)trans >= -16) && ((signed char)trans <= 15))
+			rec = MIDIASSIGN_REC | (patt << MIDIASSIGN_RECPATTSHIFT) | (row << MIDIASSIGN_RECROWSHIFT) |
+				(((signed char)trans + 16) << MIDIASSIGN_RECTRANSSHIFT);
+	}
 	return MIDIASSIGN_VALID | (chn + 1) | (first ? MIDIASSIGN_FIRST : 0) | ((mask & 7) << MIDIASSIGN_MASKSHIFT) |
-		(played ? MIDIASSIGN_PLAYED : 0);
+		(played ? MIDIASSIGN_PLAYED : 0) | rec;
 }
 
 // Where the MIDI note-on midinoteon goes, as the note hook decided
@@ -1740,6 +1784,7 @@ static void midichordassign(void)
 	int a = midinoteassign;
 
 	midinoteplayed = 0;
+	midirecord = 0;
 	if ((midinoteon < 0) || (midinoteon > LASTNOTE)) return;
 	if (!(a & MIDIASSIGN_VALID))
 	{
@@ -1754,6 +1799,13 @@ static void midichordassign(void)
 	midichordfirst = (a & MIDIASSIGN_FIRST) != 0;
 	midichordmask = (a >> MIDIASSIGN_MASKSHIFT) & 7;
 	midinoteplayed = (a & MIDIASSIGN_PLAYED) != 0;
+	if (a & MIDIASSIGN_REC)
+	{
+		midirecord = 1;
+		midirecpatt = (a >> MIDIASSIGN_RECPATTSHIFT) & 0xff;
+		midirecrow = (a >> MIDIASSIGN_RECROWSHIFT) & 0x7f;
+		midirectrans = ((a >> MIDIASSIGN_RECTRANSSHIFT) & 0x1f) - 16;
+	}
 	if (midichordfirst) chordrow = editorInfo.eppos;
 	midichordrow = chordrow;
 }

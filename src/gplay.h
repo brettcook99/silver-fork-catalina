@@ -65,8 +65,14 @@ typedef struct
   unsigned char loopsongptr, looptrans, looprepeat;
   unsigned char lastvalid;
   unsigned char lastsongptr, lasttrans, lastrepeat;
-  // A row whose note was played just before the row was read: its note
-  // isn't played again
+  // Where the channel plays, for notes recorded while following the
+  // playback: the row read last (readvalid: it starts on the next tick 0),
+  // the row whose tick 0 came last, the frames since that tick 0 and the
+  // row's length in frames. A row whose note was played just before the row
+  // was read: its note isn't played again (skip)
+  unsigned char readpatt, readrow, readvalid, readtrans;
+  unsigned char playpatt, playrow, playvalid, playtrans;
+  unsigned char rowframe, rowlen;
   unsigned char skippatt, skiprow, skipvalid;
   // A note played at once (see playnow_run()): its state (in its
   // hardrestart, or playing with the channel on its own frame clock), note,
@@ -128,5 +134,19 @@ int playhighlightrows(int *first, int *last);
 // While the song plays, channel c goes to orderlist position n (in the
 // player's next frame), at the same row: playjump(c, n)
 void playjump(int c, int pos);
+// The pattern and transpose a channel plays after its current pattern, from
+// the orderlist. Returns 0 if not known
+int playnextpattern(int c, int *patt, int *trans);
+
+// Where a note played now on channel c is recorded while the song plays:
+// the row playing if the note comes in its first half, else the next row
+// (framefraction: how far the current frame has gone, 0-1). skip = the next
+// row hasn't been read yet: it mustn't play the note again (the note sounds
+// already), see playrecordskip(). Returns 0 if not known (no row started
+// yet), 1 = the row playing, 2 = the next row
+int playrecordrow(int c, double framefraction, int *patt, int *row, int *trans, int *skip);
+// Asks the player (from any thread) not to play the note of the given row
+// of channel c, if that is the row it reads next
+void playrecordskip(int c, int patt, int row);
 
 #endif

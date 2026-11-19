@@ -546,6 +546,14 @@ next row, and a note of the pattern on that row doesn't take the played
 note's place. (With HardSID or CatWeasel output notes still start on the
 player's frames, after one hardrestart frame.)
 
+In edit mode, while the song plays and the editor follows it, a note played
+(keys or MIDI) is recorded on the row it sounds in: the row playing if it
+comes in that row's first half, else the next row, which then doesn't play
+it again this time round. The notes of a chord (MIDI INPUT 2-3 PATTERNS) go
+on the row of the first one. The note is stored as it sounded, so a pattern
+transposed in the orderlist gets it with the transpose taken off; a keyoff
+doesn't replace a recorded note.
+
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and
 splitting will rearrange pattern numbers (for example if you split pattern 00,
