@@ -15,7 +15,7 @@ set(GT_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 find_package(SDL2 CONFIG REQUIRED)
 
 set(GT_CORE_SOURCES
-  goattrk2.c greloc.c gfileio.c gmidifile.c gmidiexport.c gsngwrite.c gsidimport.c cpu6502.c gfermatax.c gpatch.c gretro.c ghelp.c
+  goattrk2.c greloc.c gfileio.c gmidifile.c gmidiexport.c gsngwrite.c gsidimport.c cpu6502.c gfermatax.c gpatch.c gretro.c ghelp.c gswm.c
   goatdata.c gsong.c gorder.c gpattern.c ginstr.c gtable.c gplay.c gdisplay.c gfile.c gsound.c gconsole.c gsid.cpp
   gundo.c gmidi.c gcommand.c)
 set(GT_GUI_SOURCES

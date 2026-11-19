@@ -247,6 +247,7 @@ void macmenu_init(void)
     import = newmenu(@"Import");
     additem(import, @"SID File…", @"i", MOD_CMD | MOD_SHIFT, GTCMD_IMPORTSID);
     additem(import, @"MIDI File…", @"i", MOD_CMD, GTCMD_IMPORTMIDI);
+    additem(import, @"SID-Wizard Module (.swm)…", @"", 0, GTCMD_IMPORTSWM);
     additem(import, @"chipsynth C64 Patch (.fermatax)…", @"", 0, GTCMD_IMPORTPATCH);
     addsubmenu(file, import);
     [file addItem:[NSMenuItem separatorItem]];
@@ -255,6 +256,7 @@ void macmenu_init(void)
     [file addItem:[NSMenuItem separatorItem]];
     additem(file, @"Export SID / PRG / BIN…", @"e", MOD_CMD, GTCMD_EXPORT);
     additem(file, @"Export MIDI File…", @"", 0, GTCMD_EXPORTMIDI);
+    additem(file, @"Export SID-Wizard Module (.swm)…", @"", 0, GTCMD_EXPORTSWM);
     additem(file, @"Export chipsynth C64 Patch (.fermatax)…", @"", 0, GTCMD_EXPORTPATCH);
 
     edit = newmenu(@"Edit");

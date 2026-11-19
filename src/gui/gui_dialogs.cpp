@@ -1335,12 +1335,14 @@ static void filemenu(void)
       case 2:
       fmitem("SID...", NULL, GTCMD_IMPORTSID);
       fmitem("MIDI...", NULL, GTCMD_IMPORTMIDI);
+      fmitem("SID-Wizard (.swm)...", NULL, GTCMD_IMPORTSWM);
       fmitem("Fermatax (chipsynth C64 patch)...", NULL, GTCMD_IMPORTPATCH);
       break;
 
       case 3:
       fmitem("SID...", NULL, GTCMD_EXPORTSID);
       fmitem("MIDI...", NULL, GTCMD_EXPORTMIDI);
+      fmitem("SID-Wizard (.swm)...", NULL, GTCMD_EXPORTSWM);
       fmitem("Fermatax (chipsynth C64 patch)...", NULL, GTCMD_EXPORTPATCH);
       break;
 

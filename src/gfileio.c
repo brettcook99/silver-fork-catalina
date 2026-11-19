@@ -13,6 +13,7 @@
 #include "gmacfile.h"
 #include "gfermatax.h"
 #include "gpatch.h"
+#include "gswm.h"
 
 char currentsongpath[MAX_PATHNAME] = "";
 char suggestedsongname[MAX_PATHNAME] = "";
@@ -95,6 +96,7 @@ int gt_filetype(const char *path)
   if ((hasext(path, "mid")) || (hasext(path, "midi"))) return GTFILE_MIDI;
   if (hasext(path, "sid")) return GTFILE_SID;
   if (hasext(path, "fermatax")) return GTFILE_PATCH;
+  if (hasext(path, "swm")) return GTFILE_SWM;
   return GTFILE_UNKNOWN;
 }
 
@@ -901,6 +903,34 @@ int gt_importpatch(const char *path)
   return 1;
 }
 
+int gt_importswm(const char *path)
+{
+  char report[256];
+
+  if (!swm_import(path, report, sizeof report))
+  {
+    gui_alert("SID-Wizard import failed", report);
+    return 0;
+  }
+  undoInitAllAreas();
+  // Not a song file: named after the module, to be saved as one
+  loadedsongfilename[0] = 0;
+  currentsongpath[0] = 0;
+  {
+    char name[MAX_PATHNAME];
+    gt_replaceext(gt_basename(path), ".sng", name, MAX_PATHNAME);
+    strcpy(suggestedsongname, name);
+    if (strlen(name) < MAX_FILENAME)
+    {
+      strcpy(loadedsongfilename, name);
+      strcpy(songfilename, name);
+    }
+  }
+  gui_addrecentfile(path);
+  gui_message("Imported %s: %s", gt_basename(path), report);
+  return 1;
+}
+
 int gt_openfile(const char *path)
 {
   switch (gt_filetype(path))
@@ -919,6 +949,9 @@ int gt_openfile(const char *path)
 
     case GTFILE_PATCH:
     return gt_importpatch(path);
+
+    case GTFILE_SWM:
+    return gt_importswm(path);
   }
 
   {
