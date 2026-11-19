@@ -121,9 +121,9 @@ extern int windowedxpos;
 extern int windowedypos;
 extern unsigned textsizepercent;
 extern unsigned retrogradient;
-#define DEFAULT_METERBOTTOM 0xffdcf6ffu
-#define DEFAULT_METERMIDDLE 0xff4896ecu
-#define DEFAULT_METERTOP 0xff162ca0u
+#define DEFAULT_METERBOTTOM 0x53190f30u
+#define DEFAULT_METERMIDDLE 0xe65744c3u
+#define DEFAULT_METERTOP 0x21a5a1bcu
 extern unsigned retrometercolors[3];
 #define METERPRESETS 4
 extern unsigned retrometerpresets[METERPRESETS][3];
