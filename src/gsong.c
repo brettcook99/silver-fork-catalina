@@ -1324,7 +1324,17 @@ void clearsong(int cs, int cp, int ci, int ct, int cn)
     editorInfo.eicolumn = 0;
     editorInfo.einum = 1;
   }
-  if (ct == 1)
+  // The tables. Instruments kept keep their entries (an instrument's sound
+  // is mostly in them): only the entries nothing uses go then
+  if ((ct == 1) && (!ci))
+  {
+    for (c = MAX_TABLES-1; c >= 0; c--)
+    {
+      optimizetable(c);
+      settableview(c, 0);
+    }
+  }
+  else if (ct == 1)
   {
     for (c = MAX_TABLES-1; c >= 0; c--)
     {

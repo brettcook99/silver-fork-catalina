@@ -275,7 +275,7 @@ static void cleardialog(void)
       ImGui::SliderInt("##plen", &plen, 1, MAX_PATTROWS, "new length %d rows");
     }
     ImGui::Checkbox("Instruments", &ci);
-    ImGui::Checkbox("Tables", &ct);
+    ImGui::Checkbox(ci ? "Tables##tables" : "Tables (the instruments kept keep theirs)##tables", &ct);
     ImGui::Checkbox("Song name, author & copyright", &cn);
     r = buttons(labels, 3, 1);
     if (r == 0)
