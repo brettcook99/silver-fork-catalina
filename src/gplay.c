@@ -66,6 +66,11 @@ int playnowon = 0;
 #define NOWMAIL_NOTE 0x10000
 #define NOWMAIL_RELEASE 0x20000
 static SDL_atomic_t nowmail[MAX_CHN];
+// A recorded note's row that the player mustn't play again (see
+// playrecordskip()): RECSKIP_VALID | pattern << 8 | row, per channel. It
+// counts for the next row read only
+#define RECSKIP_VALID 0x10000
+static SDL_atomic_t recskip[MAX_CHN];
 // The states of a note played at once (CHN nowstate): in its hardrestart,
 // then playing with the channel on its own frame clock
 #define NOW_HR 1
@@ -458,6 +463,11 @@ static void runplayer(void)
       // hardrestart still starts)
       if (cptr->nowstate == NOW_OWN) cptr->nowstate = 0;
       cptr->nowlead = 0;
+      // No row of this playback has been read or started yet
+      cptr->readvalid = 0;
+      cptr->playvalid = 0;
+      cptr->skipvalid = 0;
+      SDL_AtomicSet(&recskip[c], 0);
       jumpto[c] = -1;
       if (editorInfo.multiplier)
         cptr->tick = 6* editorInfo.multiplier-1;
@@ -1259,6 +1269,12 @@ static void runchannels(int mask)
           cptr->skipvalid = 0;
           if (newnote <= LASTNOTE) newnote = REST;
         }
+        {
+          int m = SDL_AtomicSet(&recskip[c], 0);
+
+          if ((m & RECSKIP_VALID) && (((m >> 8) & 0xff) == cptr->pattnum) && ((m & 0xff) == row) && (newnote <= LASTNOTE))
+            newnote = REST;
+        }
         if (pattern[cptr->pattnum][cptr->pattptr+1])
           cptr->instr = pattern[cptr->pattnum][cptr->pattptr+1];
         cptr->newcommand = pattern[cptr->pattnum][cptr->pattptr+2];
@@ -1816,4 +1832,58 @@ int playnextpattern(int c, int *patt, int *trans)
   *patt = ol[sp];
   *trans = tr;
   return 1;
+}
+
+int playrecordrow(int c, double framefraction, int *patt, int *row, int *trans, int *skip)
+{
+  CHN *cp;
+  double pos;
+
+  *skip = 0;
+  if ((c < 0) || (c >= MAX_CHN) || (songinit == PLAY_STOPPED)) return 0;
+  cp = &chn[c];
+  if (!cp->playvalid) return 0;
+  pos = (cp->rowframe + framefraction) / (cp->rowlen ? cp->rowlen : 1);
+  if (pos < 0.5)
+  {
+    *patt = cp->playpatt;
+    *row = cp->playrow;
+    *trans = cp->playtrans;
+    return 1;
+  }
+  // The next row: read already (it isn't played again this time), or later
+  if (cp->readvalid)
+  {
+    *patt = cp->readpatt;
+    *row = cp->readrow;
+    *trans = cp->readtrans;
+    return 2;
+  }
+  // The row the player reads next. (On a pattern's last row the next
+  // pattern has been taken from the orderlist already, at that row's tick 0)
+  if ((cp->pattptr != 0x7fffffff) && (cp->pattnum < MAX_PATT) && (cp->pattptr / 4 < (unsigned)pattlen[cp->pattnum]))
+  {
+    *patt = cp->pattnum;
+    *row = cp->pattptr / 4;
+    *trans = cp->trans;
+    *skip = 1;
+    return 2;
+  }
+  if (playnextpattern(c, patt, trans))
+  {
+    *row = 0;
+    *skip = 1;
+    return 2;
+  }
+  // Unknown: the row playing
+  *patt = cp->playpatt;
+  *row = cp->playrow;
+  *trans = cp->playtrans;
+  return 1;
+}
+
+void playrecordskip(int c, int patt, int row)
+{
+  if ((c < 0) || (c >= MAX_CHN) || (patt < 0) || (patt >= MAX_PATT) || (row < 0) || (row > 0xff)) return;
+  SDL_AtomicSet(&recskip[c], RECSKIP_VALID | (patt << 8) | row);
 }

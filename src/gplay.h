@@ -168,4 +168,15 @@ void playerstartsong(int num);
 // the orderlist. Returns 0 if not known
 int playnextpattern(int c, int *patt, int *trans);
 
+// Where a note played now on channel c is recorded while the song plays:
+// the row playing if the note comes in its first half, else the next row
+// (framefraction: how far the current frame has gone, 0-1). skip = the next
+// row hasn't been read yet: it mustn't play the note again (the note sounds
+// already), see playrecordskip(). Returns 0 if not known (no row started
+// yet), 1 = the row playing, 2 = the next row
+int playrecordrow(int c, double framefraction, int *patt, int *row, int *trans, int *skip);
+// Asks the player (from any thread) not to play the note of the given row
+// of channel c, if that is the row it reads next
+void playrecordskip(int c, int patt, int row);
+
 #endif

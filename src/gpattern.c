@@ -96,35 +96,80 @@ static void noteadvance(void)
   if (editorInfo.eppos > len) editorInfo.eppos %= len + 1;
 }
 
+int patternrecording(void)
+{
+  return (recordmode) && (editorInfo.editmode == EDIT_PATTERN) && (isplaying()) && (!playstarting()) &&
+    (followplay) && (!followsuspended);
+}
+
+int patternrecordpos(int c, int next, int *patt, int *row, int *trans)
+{
+  // The current frame's middle (when the note comes in it isn't known), or
+  // the row playing / the next row
+  double fraction = (next < 0) ? 0.5 : (next ? 1000.0 : -1000.0);
+  int skip, r;
+
+  if (!patternrecording()) return 0;
+  r = playrecordrow(c, fraction, patt, row, trans, &skip);
+  if ((r) && (skip)) playrecordskip(c, *patt, *row);
+  return r;
+}
+
+// A note (or keyoff) recorded while following the playback, on the row it
+// sounded in (see patternrecordpos()): as it sounded, so the pattern's
+// transpose is taken off. A keyoff doesn't replace a note
+static void recordnoteat(int patt, int row, int trans, int note, int ins)
+{
+  unsigned char *p;
+
+  if ((patt < 0) || (patt >= MAX_PATT) || (row < 0) || (row >= pattlen[patt])) return;
+  p = &pattern[patt][row * 4];
+  if (note == KEYOFF)
+  {
+    if (p[0] == REST) p[0] = KEYOFF;
+    return;
+  }
+  if ((note < FIRSTNOTE) || (note > LASTNOTE)) return;
+  note -= (signed char)trans;
+  if (note < FIRSTNOTE) note = FIRSTNOTE;
+  if (note > LASTNOTE) note = LASTNOTE;
+  p[0] = (unsigned char)note;
+  p[1] = (unsigned char)ins;
+}
+
 // A MIDI note when the notes go to 2-3 channels (see midichord): in edit
 // mode it is entered on its channel and row, and it is played on that
 // channel. A note that starts a row moves the cursor down. A note struck
 // together with earlier ones (a chord) isn't entered over one of them when
 // two of the chord's channels show the same pattern. Keys left out of a
-// chord do nothing
+// chord do nothing. While following the playback the note goes on the row
+// it sounded in (midirecord, see patternrecording())
 static void midipolynote(int note)
 {
   int c = midichordchn;
-  int p, c2;
+  int p, c2, row;
 
   if ((c < 0) || (c >= MAX_CHN)) return;
-  p = editorUndoInfo.editorInfo[c].epnum;
-  if ((recordmode) && (midichordrow >= 0) && (midichordrow < pattlen[p]))
+  p = midirecord ? midirecpatt : editorUndoInfo.editorInfo[c].epnum;
+  row = midirecord ? midirecrow : midichordrow;
+  if ((recordmode) && (row >= 0) && (row < pattlen[p]))
   {
     int shared = -1;
     for (c2 = 0; c2 < MAX_CHN; c2++)
     {
       if ((c2 != c) && (midichordmask & (1 << c2)) && (editorUndoInfo.editorInfo[c2].epnum == p)) shared = c2;
     }
-    if (shared < 0)
-    {
-      pattern[p][midichordrow*4] = note;
-      pattern[p][midichordrow*4+1] = midinoteinstr();
-    }
-    else
+    if (shared >= 0)
       gui_message("Chord note not entered: channels %d and %d show the same pattern", shared + 1, c + 1);
+    else if (midirecord)
+      recordnoteat(p, row, midirectrans, note, midinoteinstr());
+    else
+    {
+      pattern[p][row*4] = note;
+      pattern[p][row*4+1] = midinoteinstr();
+    }
   }
-  if ((recordmode) && (midichordfirst) && (autoadvance < 2)) noteadvance();
+  if ((recordmode) && (midichordfirst) && (autoadvance < 2) && (!midirecord)) noteadvance();
   if (!midinoteplayed) playtestnote(note, midinoteinstr(), c);
 }
 
@@ -270,6 +315,9 @@ void patterncommands(void)
     int newinstr = editorInfo.einum;
     // A MIDI note has been played already, as it came (midinotehook())
     int midiplayed = 0;
+    // While following the playback: where the note is recorded (see
+    // patternrecording())
+    int rec = 0, recpatt = 0, recrow = 0, rectrans = 0;
     if (key)
     {
       switch (keypreset)
@@ -330,6 +378,13 @@ void patterncommands(void)
         newnote = midinoteon;
         newinstr = midinoteinstr();
         midiplayed = midinoteplayed;
+        if (midirecord)
+        {
+          rec = 1;
+          recpatt = midirecpatt;
+          recrow = midirecrow;
+          rectrans = midirectrans;
+        }
       }
       else midipolynote(midinoteon);
     }
@@ -532,7 +587,23 @@ void patterncommands(void)
       }
     }
 
-    if (newnote >= 0)
+    // A note or keyoff from the keyboard while following the playback: on
+    // the row it sounds in (a keyoff doesn't stop the next row's note)
+    if ((!midinoteon) && (newnote >= FIRSTNOTE) && (newnote <= LASTNOTE))
+      rec = patternrecordpos(editorInfo.epchn, -1, &recpatt, &recrow, &rectrans) != 0;
+    if ((!midinoteon) && (newnote == KEYOFF) && (patternrecording()))
+    {
+      int skip;
+      rec = playrecordrow(editorInfo.epchn, 0.5, &recpatt, &recrow, &rectrans, &skip) != 0;
+    }
+
+    if ((newnote >= 0) && (rec) && (recordmode) && (((newnote >= FIRSTNOTE) && (newnote <= LASTNOTE)) || (newnote == KEYOFF)))
+    {
+      // (The cursor follows the playback)
+      recordnoteat(recpatt, recrow, rectrans, newnote, newinstr);
+      if ((!midiplayed) || (newnote != midinoteon)) playtestnote(newnote, newinstr, editorInfo.epchn);
+    }
+    else if (newnote >= 0)
     {
       if ((recordmode) && (editorInfo.eppos < pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]))
       {

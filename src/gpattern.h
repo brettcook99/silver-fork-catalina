@@ -95,6 +95,17 @@ void patternscroll(int steps);
 // Transposes the marked rows' notes (nothing marked: the cursor channel's
 // pattern) by steps halfsteps. Returns the pattern number
 int patterntranspose(int steps);
+// Edit mode, following the playback in the pattern editor: a note played is
+// recorded on the row it sounds in, not at the cursor (which is on the next
+// row the player reads: a note entered there sounded twice, at once and
+// again when its row came). Called from the MIDI thread too
+int patternrecording(void);
+// Where a note played now on channel c is recorded while patternrecording()
+// (next: -1 = the row it comes nearest, 0 = the row playing, 1 = the next
+// row, for a chord's later notes). The player won't play it again on that
+// row. Returns 0 when it isn't recorded so, 1 = on the row playing, 2 = on
+// the next row
+int patternrecordpos(int c, int next, int *patt, int *row, int *trans);
 void nextpattern(void);
 void prevpattern(void);
 void patternup(void);
