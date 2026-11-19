@@ -488,19 +488,26 @@ are skipped after a note is entered, 0-16: with 1 the cursor moves from row
 00 to 02, with 2 from 00 to 03 and so on. It works for the note keys and the
 MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
 
-DOUBLE (next to STEPS on the retro screen) gives twice as many rows per beat,
-so that notes played in land twice as finely, for example tuplets. Click it to
-switch it on or off. The music keeps its speed and the plugin stays in time
-with the host: each pattern gets twice the rows (up to 128, also for new
-patterns), the notes move to the even rows and every tempo is halved. The song
-remembers it: instrument $3F is named DOUBLE and holds the tempo the song
-starts with. Switching is one undo step.
+RESO (resolution, next to STEPS on the retro screen) gives two (X2) or three
+(X3) times as many rows per beat, so that notes played in land more finely,
+for example tuplets. Click it for OFF, X2, X3 and OFF again (right-click goes
+back). The music keeps its speed and the plugin stays in time with the host:
+each pattern gets two or three times the rows, the notes move to every second
+or third row, every tempo is divided by two or three and STEPS counts the
+finer rows. New patterns get 128 rows with X2 and 96 with X3 (two bars of 12
+rows a beat). The song remembers it: instrument $3F is named RESO X2 or RESO
+X3 (songs made with the earlier DOUBLE button open as X2) and holds the tempo
+the song starts with. Each change is one undo step.
 
-DOUBLE doesn't switch on if a pattern in use is longer than 64 rows, if a tempo
-is odd or below 6, if the song uses funktempo, if instrument $3F is in use or if
-an instrument's gate timer is too long for the faster rows. It doesn't switch
-off while odd rows have notes, because they would be lost. A message tells
-which pattern or instrument is the reason.
+X2 and X3 don't switch on if a pattern in use would get more than 128 rows
+(more than 64 rows for X2, 42 for X3), if a tempo would give rows shorter than
+3 frames (X2 needs a tempo of 6, 8, 10..., X3 one of 9, 12, 15...: the player
+has no shorter rows), if the song uses funktempo, if instrument $3F is in use
+or if an instrument's gate timer is too long for the faster rows. A message
+tells which pattern, tempo or instrument is the reason. With an empty song
+the patterns just get the new length. Going to fewer rows always works: notes
+in between move to the nearest row, and if one meets another note there it
+is lost; the message counts both, and CTRL+Z brings them back.
 
 MIDI controllers: in the SID Designer knobs sending CC73, CC75, CC70 (or
 CC76 or CC20) and CC72 set attack, decay, sustain and release of the

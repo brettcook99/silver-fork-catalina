@@ -39,7 +39,7 @@ static int chooseinterface(void);
 static void presskey(int newrawkey, int newkey, int shift);
 static void startplay(int mode);
 static void midichordassign(void);
-static void doublesync(void);
+static void resosync(void);
 
 int menu = 0;
 //int editorInfo.editmode = EDIT_PATTERN;
@@ -60,8 +60,8 @@ int midichord = 1;
 // STEPS (0-16): rows skipped after a note is entered, so that the cursor
 // moves down 1 + editstep rows
 int editstep = 0;
-// DOUBLE: twice as many rows per beat (see setdoublemode())
-int doublemode = 0;
+// RESO: the rows per beat times 1 (off), 2 (X2) or 3 (X3), see setresomode()
+int resomode = 1;
 // Where the current MIDI note-on goes (set by midichordassign()): the
 // channel (-1 = left out), the row, whether it starts a new row (the
 // cursor moves down after it) and the channels of the chord's earlier notes
@@ -770,7 +770,7 @@ int main(int argc, char **argv)
 			zeropageadr,
 			playerversion,
 			keypreset,
-			doublemode ? stepsize / 2 : stepsize,
+			stepsize / resomode,
 			editorInfo.multiplier,
 			catweasel,
 			editorInfo.adparam,
@@ -847,7 +847,7 @@ static void mainloopframe(void)
 		textscreenactive = 0;
 	}
 	cursorflashdelay += win_getspeed(50);
-	doublesync();
+	resosync();
 	displayupdate();
 	followplayback();
 	gui_frame(0);
@@ -940,7 +940,7 @@ static void retromainloop(void)
 		retroatmainscreen = 1;
 		for (;;)
 		{
-			doublesync();
+			resosync();
 			followplayback();
 			displayupdate();
 			getkey();
@@ -1410,51 +1410,73 @@ void seteditstep(int steps)
 	editstep = steps;
 }
 
-// DOUBLE: twice as many rows per beat, so that notes played in can land twice
-// as finely (tuplets). The music stays as it is: every pattern gets twice the
-// rows (its rows on the even ones), every tempo is halved, and a beat is twice
-// the rows (stepsize), which also keeps the plugin in time with the host. New
-// patterns get 128 rows.
+// RESO (resolution): two (X2) or three (X3) times as many rows per beat, so
+// that notes played in can land more finely (tuplets). The music stays as it
+// is: every pattern gets that many times the rows (its rows on every second
+// or third one), every tempo is divided and a beat is that many times the
+// rows (stepsize), which also keeps the plugin in time with the host. New
+// patterns get 128 rows (X2) or 96 rows (X3: two bars of 12 rows a beat).
 //
-// The song itself tells that it is doubled, so that it stays so when saved and
-// loaded, and so that undo and redo work: instrument $3F is named DOUBLE, and
-// its attack/decay is the tempo the song starts with (the player's and the
-// packer's "tempo instrument")
-#define DOUBLEINSTR (MAX_INSTR - 1)
-#define DOUBLELONGEST (MAX_PATTROWS / 2)
-#define DOUBLELOWEST 6
+// The song itself tells its RESO, so that it stays when saved and loaded, and
+// so that undo and redo work: instrument $3F is named RESO X2 or RESO X3 (or
+// DOUBLE, as songs made with the DOUBLE button are), and its attack/decay is
+// the tempo the song starts with (the player's and the packer's "tempo
+// instrument")
+#define RESOINSTR (MAX_INSTR - 1)
+#define RESOMAX 3
+// The player's shortest row (tempo 3; lower values are funktempo)
+#define RESOLOWEST 3
 
+static int resooldlength = 64;
+
+static const char *const resoname[RESOMAX + 1] = { "", "", "RESO X2", "RESO X3" };
 static const char doublename[] = "DOUBLE";
-static int doubleoldlength = 64;
+
+// New patterns' rows with RESO X2 / X3
+static int resopatternlength(int k)
+{
+	return (k == 3) ? 96 : MAX_PATTROWS;
+}
 
 // Frames per row the song starts with when nothing else says so
-static int doubledefaulttempo(void)
+static int resodefaulttempo(void)
 {
 	return editorInfo.multiplier ? 6 * editorInfo.multiplier : 6;
 }
 
-// Nonzero if the song is a doubled one
-static int doublemarked(void)
+// The song's RESO (1 = off)
+static int resomarked(void)
 {
-	INSTR *in = &instr[DOUBLEINSTR];
+	INSTR *in = &instr[RESOINSTR];
+	int k;
 
-	return (in->ad >= 2) && (!in->ptr[WTBL]) && (!strncmp(in->name, doublename, MAX_INSTRNAMELEN));
+	if ((in->ad < 2) || (in->ptr[WTBL])) return 1;
+	if (!strncmp(in->name, doublename, MAX_INSTRNAMELEN)) return 2;
+	for (k = 2; k <= RESOMAX; k++)
+	{
+		if (!strncmp(in->name, resoname[k], MAX_INSTRNAMELEN)) return k;
+	}
+	return 1;
 }
 
-// Makes the song a doubled one that starts at half the default tempo
-static void doublemark(void)
+// Marks the song as one with RESO k, starting at the default tempo
+static void resomark(int k)
 {
-	INSTR *in = &instr[DOUBLEINSTR];
+	INSTR *in = &instr[RESOINSTR];
 
-	clearinstr(DOUBLEINSTR);
-	in->ad = doubledefaulttempo() / 2;
-	strcpy(in->name, doublename);
+	clearinstr(RESOINSTR);
+	in->ad = resodefaulttempo() / k;
+	strcpy(in->name, resoname[k]);
 }
 
-// A tempo can be halved if the half is a whole number of frames, at least 3
-static int doublehalves(int tempo)
+// A tempo of the song with RESO from becomes this with RESO to (0 if it
+// can't: not a whole number of frames, or shorter than the player's rows)
+static int resotempo(int tempo, int from, int to)
 {
-	return (tempo >= DOUBLELOWEST) && (!(tempo & 1));
+	if ((tempo * from) % to) return 0;
+	tempo = tempo * from / to;
+	if (tempo < RESOLOWEST) return 0;
+	return (tempo > 0x7f) ? 0x7f : tempo;
 }
 
 static int rowempty(const unsigned char *row)
@@ -1473,48 +1495,71 @@ static int patternempty(int p)
 	return 1;
 }
 
-// Slides and vibrato last for one row: on the doubled song the row in between
-// goes on with the same command
-static int doublecontinues(int command)
+static int songempty(void)
+{
+	int c;
+
+	for (c = 0; c < MAX_PATT; c++)
+	{
+		if (!patternempty(c)) return 0;
+	}
+	return 1;
+}
+
+// Slides and vibrato last for one row: on the finer song the rows in between
+// go on with the same command
+static int resocontinues(int command)
 {
 	return (command >= CMD_PORTAUP) && (command <= CMD_VIBRATO);
 }
 
-// Nothing is lost without this row in between (the row before it is given)
-static int doublerowspare(const unsigned char *row, const unsigned char *before)
+// A pattern's rows with RESO to instead of from
+static int resolength(int len, int from, int to)
 {
-	if (rowempty(row)) return 1;
-	return (row[0] == REST) && (!row[1]) && (doublecontinues(row[2])) && (row[2] == before[2]) && (row[3] == before[3]);
+	return (len * to + from - 1) / from;
 }
 
-// Whether the song can be doubled. If not, the message says why
-static int doublecanstart(void)
+// The tempo the song starts with
+static int resostarttempo(void)
 {
-	INSTR *in = &instr[DOUBLEINSTR];
-	unsigned char used[MAX_INSTR];
-	int start, fastest, c, d;
+	INSTR *in = &instr[RESOINSTR];
 
-	if ((in->name[0]) || (in->ptr[WTBL]) || (in->ptr[PTBL]) || (in->ptr[FTBL]) || (in->ptr[STBL]))
+	return ((in->ad >= 2) && (!in->ptr[WTBL])) ? in->ad : resodefaulttempo();
+}
+
+// Whether the song can go from RESO from to RESO to. If not, the message says
+// why. Off always works (notes in between move to the nearest row)
+static int resocanchange(int from, int to)
+{
+	INSTR *in = &instr[RESOINSTR];
+	unsigned char used[MAX_INSTR];
+	int start, fastest, empty, c, d;
+	const char *what = resoname[to];
+
+	if (to == 1) return 1;
+	if ((from == 1) && ((in->name[0]) || (in->ptr[WTBL]) || (in->ptr[PTBL]) || (in->ptr[FTBL]) || (in->ptr[STBL])))
 	{
-		gui_message("DOUBLE needs instrument 3F, which is in use");
+		gui_message("%s needs instrument 3F, which is in use", what);
 		return 0;
 	}
-	start = ((in->ad >= 2) && (!in->ptr[WTBL])) ? in->ad : doubledefaulttempo();
-	if (!doublehalves(start))
+	start = resostarttempo();
+	fastest = resotempo(start, from, to);
+	if (!fastest)
 	{
-		gui_message("DOUBLE: the song's tempo %02X can't be halved", start);
+		gui_message("%s: tempo %02X can't be divided (%s needs %02X, %02X, %02X...)", what, start * from, what + 5,
+			RESOLOWEST * to, (RESOLOWEST + 1) * to, (RESOLOWEST + 2) * to);
 		return 0;
 	}
-	fastest = start / 2;
 
 	findusedpatterns();
+	empty = songempty();
 	memset(used, 0, sizeof used);
 	used[1] = 1;  // Every channel starts on instrument 1
 	for (c = 0; c < MAX_PATT; c++)
 	{
-		if ((pattlen[c] > DOUBLELONGEST) && ((pattused[c]) || (!patternempty(c))))
+		if ((!empty) && (to > from) && (resolength(pattlen[c], from, to) > MAX_PATTROWS) && ((pattused[c]) || (!patternempty(c))))
 		{
-			gui_message("DOUBLE: pattern %02X is longer than %d rows", c, DOUBLELONGEST);
+			gui_message("%s: pattern %02X is longer than %d rows", what, c, MAX_PATTROWS * from / to);
 			return 0;
 		}
 		for (d = 0; d < pattlen[c]; d++)
@@ -1524,95 +1569,120 @@ static int doublecanstart(void)
 			if (row[1] < MAX_INSTR) used[row[1]] = 1;
 			if ((row[2] == CMD_FUNKTEMPO) || ((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) < 2)))
 			{
-				gui_message("DOUBLE: the funktempo in pattern %02X can't be halved", c);
+				gui_message("%s: the funktempo in pattern %02X can't be divided", what, c);
 				return 0;
 			}
 			if (row[2] == CMD_SETTEMPO)
 			{
-				int tempo = row[3] & 0x7f;
+				int tempo = resotempo(row[3] & 0x7f, from, to);
 
-				if (!doublehalves(tempo))
+				if (!tempo)
 				{
-					gui_message("DOUBLE: tempo %02X in pattern %02X can't be halved", tempo, c);
+					gui_message("%s: tempo %02X in pattern %02X can't be divided", what, row[3] & 0x7f, c);
 					return 0;
 				}
-				if (tempo / 2 < fastest) fastest = tempo / 2;
+				if (tempo < fastest) fastest = tempo;
 			}
 		}
 	}
-	// The player reads the next row this many frames before it starts
-	for (c = 1; c < DOUBLEINSTR; c++)
+	// The player reads the next row this many frames before it starts (rows
+	// get shorter only with more of them)
+	for (c = 1; (to > from) && (c < RESOINSTR); c++)
 	{
 		if ((used[c]) && ((instr[c].gatetimer & 0x3f) >= fastest))
 		{
-			gui_message("DOUBLE: instrument %02X's gate timer must be below %02X", c, fastest);
+			gui_message("%s: instrument %02X's gate timer must be below %02X", what, c, fastest);
 			return 0;
 		}
 	}
 	return 1;
 }
 
-// Whether the song can go back to single speed without losing anything
-static int doublecanstop(void)
-{
-	int c, d;
-
-	findusedpatterns();
-	for (c = 0; c < MAX_PATT; c++)
-	{
-		if ((pattlen[c] & 1) && ((pattused[c]) || (!patternempty(c))))
-		{
-			gui_message("DOUBLE stays on: pattern %02X has an odd number of rows", c);
-			return 0;
-		}
-		for (d = 1; d < pattlen[c]; d += 2)
-		{
-			if (!doublerowspare(&pattern[c][d*4], &pattern[c][(d-1)*4]))
-			{
-				gui_message("DOUBLE stays on: pattern %02X has notes on odd rows", c);
-				return 0;
-			}
-		}
-	}
-	return 1;
-}
-
-// Pattern p with twice the rows or, going back, half of them
-static void doublepattern(int p, int on)
+// Pattern p with RESO to instead of from: each row goes to the row nearest
+// its time (an exact one if there is one). Going to fewer rows, a note that
+// meets another one on its new row is lost (counted in lost), one that moves
+// is counted in moved. With an empty song (empty) the pattern just gets the
+// new patterns' length
+static void resopattern(int p, int from, int to, int empty, int *moved, int *lost)
 {
 	unsigned char old[MAX_PATTROWS*4+4];
+	unsigned char filled[MAX_PATTROWS];
 	int oldlen = pattlen[p];
-	int newlen = on ? oldlen * 2 : (oldlen + 1) / 2;
-	int d;
+	int newlen = empty ? ((to > 1) ? resopatternlength(to) : resooldlength) : resolength(oldlen, from, to);
+	int pass, d;
 
 	if (newlen > MAX_PATTROWS) newlen = MAX_PATTROWS;
+	if (newlen < 1) newlen = 1;
 	memcpy(old, pattern[p], sizeof old);
 	memset(pattern[p], 0, sizeof old);
-	for (d = 0; d < newlen; d++)
-	{
-		int from = on ? d / 2 : d * 2;
+	memset(filled, 0, sizeof filled);
+	for (d = 0; d < newlen; d++) pattern[p][d*4] = REST;
 
-		if ((on) && (d & 1))
+	// The rows that fall exactly on a new row first, then the others
+	for (pass = 0; pass < 2; pass++)
+	{
+		for (d = 0; d < oldlen; d++)
 		{
-			pattern[p][d*4] = REST;
-			if (doublecontinues(old[from*4+2]))
+			unsigned char *src = &old[d*4];
+			unsigned char *dest;
+			int exact = !((d * to) % from);
+			int t = (2 * d * to + from - 1) / (2 * from);
+
+			if (exact != (pass == 0)) continue;
+			if (rowempty(src)) continue;
+			if (t >= newlen) t = newlen - 1;
+			dest = &pattern[p][t*4];
+			if ((src[0] != REST) || (src[1]))
 			{
-				pattern[p][d*4+2] = old[from*4+2];
-				pattern[p][d*4+3] = old[from*4+3];
+				if ((dest[0] == REST) && (!dest[1]))
+				{
+					dest[0] = src[0];
+					dest[1] = src[1];
+					if ((!exact) && (src[0] != REST)) (*moved)++;
+				}
+				else if ((src[0] <= LASTNOTE) && ((src[0] != dest[0]) || (src[1] != dest[1]))) (*lost)++;
+			}
+			// A command: on the new row if it has none. A slide or vibrato
+			// repeated on the rows in between is no loss
+			if ((src[2]) && (!dest[2]))
+			{
+				dest[2] = src[2];
+				dest[3] = src[3];
+			}
+			filled[t] = 1;
+		}
+	}
+
+	// Going to more rows: the rows in between go on with a slide or vibrato
+	if (to > from)
+	{
+		for (d = 1; d < newlen; d++)
+		{
+			unsigned char *row = &pattern[p][d*4];
+			unsigned char *before = &pattern[p][(d-1)*4];
+
+			if ((!filled[d]) && (rowempty(row)) && (resocontinues(before[2])))
+			{
+				row[2] = before[2];
+				row[3] = before[3];
 			}
 		}
-		else memcpy(&pattern[p][d*4], &old[from*4], 4);
+	}
 
-		// The tempo commands
+	// The tempo commands
+	for (d = 0; d < newlen; d++)
+	{
 		if (pattern[p][d*4+2] == CMD_SETTEMPO)
 		{
 			int tempo = pattern[p][d*4+3] & 0x7f;
 
 			if (tempo >= 2)
 			{
-				tempo = on ? tempo / 2 : tempo * 2;
-				if (tempo > 0x7f) tempo = 0x7f;
-				pattern[p][d*4+3] = (pattern[p][d*4+3] & 0x80) | tempo;
+				int t = (tempo * from) / to;
+
+				if (t > 0x7f) t = 0x7f;
+				if (t < RESOLOWEST) t = RESOLOWEST;
+				pattern[p][d*4+3] = (pattern[p][d*4+3] & 0x80) | t;
 			}
 		}
 	}
@@ -1620,33 +1690,31 @@ static void doublepattern(int p, int on)
 	pattlen[p] = newlen;
 }
 
-// What goes with the song being doubled: a beat's rows and new patterns' rows
-static void doubleapply(int on)
+// What goes with the song's RESO: a beat's rows and new patterns' rows
+static void resoapply(int k)
 {
-	if (on)
-	{
-		doubleoldlength = defaultpatternlength;
-		defaultpatternlength = MAX_PATTROWS;
-		stepsize = (stepsize * 2 > MAX_PATTROWS) ? MAX_PATTROWS : stepsize * 2;
-	}
-	else
-	{
-		defaultpatternlength = doubleoldlength;
-		stepsize = (stepsize / 2 < 2) ? 2 : stepsize / 2;
-	}
-	doublemode = on;
+	int base = stepsize / resomode;
+
+	if (base < 1) base = 1;
+	if ((resomode == 1) && (k > 1)) resooldlength = defaultpatternlength;
+	if (k > 1) defaultpatternlength = resopatternlength(k);
+	else if (resomode > 1) defaultpatternlength = resooldlength;
+	stepsize = base * k;
+	if (stepsize > MAX_PATTROWS) stepsize = MAX_PATTROWS;
+	if (stepsize < 2) stepsize = 2;
+	resomode = k;
 }
 
 // The plugin's audio thread doesn't play the song while it changes, and
 // follows the host's position again after it
-static void doublelock(void)
+static void resolock(void)
 {
 #ifdef GT_PLUGIN
 	gtplugin_lockengine();
 #endif
 }
 
-static void doubleunlock(void)
+static void resounlock(void)
 {
 #ifdef GT_PLUGIN
 	gtplugin_unlockengine();
@@ -1654,16 +1722,20 @@ static void doubleunlock(void)
 #endif
 }
 
-// Sets DOUBLE (one undo step). Stays as it is if the song can't be changed
-void setdoublemode(int on)
+// Sets RESO (1 = off, 2 = X2, 3 = X3; one undo step). Stays as it is if the
+// song can't be changed
+void setresomode(int k)
 {
-	INSTR *in = &instr[DOUBLEINSTR];
+	INSTR *in = &instr[RESOINSTR];
 	GTUNDO_OBJECT *undo;
-	int c;
+	int from = resomode;
+	int moved = 0, lost = 0;
+	int empty, start, c;
 
-	on = on ? 1 : 0;
-	if (on == doublemode) return;
-	if (!(on ? doublecanstart() : doublecanstop())) return;
+	if (k < 1) k = 1;
+	if (k > RESOMAX) k = RESOMAX;
+	if (k == from) return;
+	if (!resocanchange(from, k)) return;
 
 	// While following the host the plugin goes on playing
 #ifdef GT_PLUGIN
@@ -1671,65 +1743,75 @@ void setdoublemode(int on)
 #else
 	stopsong();
 #endif
-	doublelock();
+	resolock();
 	undo = undoCreateEditorInfo();
 	for (c = 0; c < MAX_PATT; c++)
 		undoAreaSetCheckForChange(UNDO_AREA_PATTERN, c, UNDO_AREA_DIRTY_CHECK);
 	undoAreaSetCheckForChange(UNDO_AREA_PATTERN_LEN, 0, UNDO_AREA_DIRTY_CHECK);
-	undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, DOUBLEINSTR, UNDO_AREA_DIRTY_CHECK);
+	undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, RESOINSTR, UNDO_AREA_DIRTY_CHECK);
 
-	for (c = 0; c < MAX_PATT; c++) doublepattern(c, on);
-	if (on)
+	empty = songempty();
+	start = resostarttempo();
+	for (c = 0; c < MAX_PATT; c++) resopattern(c, from, k, empty, &moved, &lost);
+	start = start * from / k;
+	if (start > 0xff) start = 0xff;
+	if (k > 1)
 	{
-		int start = (in->ad >= 2) ? in->ad : doubledefaulttempo();
-
-		doublemark();
-		in->ad = start / 2;
+		resomark(k);
+		in->ad = start;
 	}
 	else
 	{
-		int start = in->ad * 2;
-
-		clearinstr(DOUBLEINSTR);
+		clearinstr(RESOINSTR);
 		// A tempo of its own stays; the default one needs no instrument
-		if (start != doubledefaulttempo()) in->ad = (start > 0xff) ? 0xff : start;
+		if (start != resodefaulttempo()) in->ad = start;
 	}
-	doubleapply(on);
+	resoapply(k);
 
 	// The cursor stays on the same music
-	editorInfo.eppos = on ? editorInfo.eppos * 2 : editorInfo.eppos / 2;
+	editorInfo.eppos = (2 * editorInfo.eppos * k + from - 1) / (2 * from);
+	if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
+		editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
 	editorInfo.epview = editorInfo.eppos - VISIBLEPATTROWS / 2;
 	editorInfo.epmarkchn = -1;
 
 	if (undoValidateUndoAreas(undo) == 0) undoFreeUndoObject(undo);
-	doubleunlock();
-	gui_message(on ? "DOUBLE on: twice the rows per beat, patterns of 128 rows" : "DOUBLE off");
+	resounlock();
+	if ((lost) && (moved))
+		gui_message("RESO %s: %d note%s moved to the nearest row, %d lost (CTRL+Z undoes)", (k > 1) ? resoname[k] + 5 : "OFF",
+			moved, (moved == 1) ? "" : "s", lost);
+	else if (lost)
+		gui_message("RESO %s: %d note%s lost, meeting another on its row (CTRL+Z undoes)", (k > 1) ? resoname[k] + 5 : "OFF",
+			lost, (lost == 1) ? "" : "s");
+	else if (moved)
+		gui_message("RESO %s: %d note%s moved to the nearest row", (k > 1) ? resoname[k] + 5 : "OFF", moved, (moved == 1) ? "" : "s");
+	else if (k > 1)
+		gui_message("RESO %s: %d times the rows per beat, new patterns %d rows", resoname[k] + 5, k, resopatternlength(k));
+	else
+		gui_message("RESO OFF");
 }
 
-// The song has changed by itself (loaded, undo, redo): DOUBLE follows it
-static void doublesync(void)
+// The song has changed by itself (loaded, undo, redo): RESO follows it
+static void resosync(void)
 {
-	int on = doublemarked();
+	int k = resomarked();
 
-	if (on == doublemode) return;
-	doublelock();
-	doubleapply(on);
-	doubleunlock();
+	if (k == resomode) return;
+	resolock();
+	resoapply(k);
+	resounlock();
 }
 
 // The plugin's project has been restored, with the rows per beat it was saved
-// with: only DOUBLE itself follows the song
-void doublerestored(void)
+// with: only RESO itself follows the song
+void resorestored(void)
 {
-	int on = doublemarked();
+	int k = resomarked();
 
-	if ((on) && (!doublemode))
-	{
-		doubleoldlength = defaultpatternlength;
-		defaultpatternlength = MAX_PATTROWS;
-	}
-	if ((!on) && (doublemode)) defaultpatternlength = doubleoldlength;
-	doublemode = on;
+	if ((k > 1) && (resomode == 1)) resooldlength = defaultpatternlength;
+	if (k > 1) defaultpatternlength = resopatternlength(k);
+	if ((k == 1) && (resomode > 1)) defaultpatternlength = resooldlength;
+	resomode = k;
 }
 
 // The note hook (see gmidi.h): a MIDI note as it comes, in the MIDI input's
@@ -2219,7 +2301,7 @@ static void newsong(void)
 
 	stopsong();
 	clearsong(1, 1, 1, 1, 1);
-	if (doublemode) doublemark();
+	if (resomode > 1) resomark(resomode);
 	for (c = 0; c < MAX_CHN; c++)
 	{
 		editorUndoInfo.editorInfo[c].epnum = c;
@@ -2761,8 +2843,8 @@ void clearsongparts(int optimize, int cs, int cp, int ci, int ct, int cn, int pa
 	if (cs | cp | ci | ct | cn)
 	{
 		clearsong(cs, cp, ci, ct, cn);
-		// DOUBLE stays on when the instruments go
-		if ((ci) && (doublemode)) doublemark();
+		// RESO stays when the instruments go
+		if ((ci) && (resomode > 1)) resomark(resomode);
 		undoInitAllAreas();
 		gui_message("Song cleared");
 	}
