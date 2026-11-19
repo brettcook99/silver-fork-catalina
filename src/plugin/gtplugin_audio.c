@@ -374,53 +374,6 @@ static void chase(double target)
  * MIDI from the host
  */
 
-// The row of channel c that a note played now goes to: the row playing, or
-// the next one if more than half of this one has gone. Returns 0 if not
-// known
-static int recordrow(int c, double framefraction, int *patt, int *row, int *trans, int *skip)
-{
-  CHN *cp = &chn[c];
-  double pos;
-
-  *skip = 0;
-  if (!cp->playvalid) return 0;
-  pos = (cp->rowframe + framefraction) / (cp->rowlen ? cp->rowlen : 1);
-  if (pos < 0.5)
-  {
-    *patt = cp->playpatt;
-    *row = cp->playrow;
-    *trans = cp->playtrans;
-    return 1;
-  }
-  // The next row: read already (it isn't played again this time), or later
-  if (cp->readvalid)
-  {
-    *patt = cp->readpatt;
-    *row = cp->readrow;
-    *trans = cp->readtrans;
-    return 1;
-  }
-  if (cp->playrow + 1 < pattlen[cp->playpatt])
-  {
-    *patt = cp->playpatt;
-    *row = cp->playrow + 1;
-    *trans = cp->playtrans;
-    *skip = 1;
-    return 1;
-  }
-  if (playnextpattern(c, patt, trans))
-  {
-    *row = 0;
-    *skip = 1;
-    return 1;
-  }
-  // Unknown: the row playing
-  *patt = cp->playpatt;
-  *row = cp->playrow;
-  *trans = cp->playtrans;
-  return 1;
-}
-
 // Whether a note (or keyoff) played now on a voice is recorded: in edit
 // mode while the song plays
 static int recordstate(int playing)
@@ -442,7 +395,8 @@ static void recordnote(int c, int note, int instr, double framefraction, int sta
   int patt, row, trans, skip;
 
   if (!state) return;
-  if (!recordrow(c, framefraction, &patt, &row, &trans, &skip)) return;
+  // The row playing, or the next one if more than half of this one has gone
+  if (!playrecordrow(c, framefraction, &patt, &row, &trans, &skip)) return;
   memset(&rn, 0, sizeof rn);
   rn.voice = c;
   rn.patt = patt;
