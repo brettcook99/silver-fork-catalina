@@ -89,7 +89,7 @@ int eamode = 0;
 
 unsigned keypreset = KEY_TRACKER;
 unsigned playerversion = 0;
-int fileformat = FORMAT_PRG;
+int fileformat = FORMAT_SID;
 int zeropageadr = 0xfc;
 int playeradr = 0x1000;
 //unsigned editorInfo.sidmodel = 0;
@@ -107,20 +107,20 @@ unsigned b = DEFAULTBUF;
 unsigned mr = DEFAULTMIXRATE;
 // The audio output chosen in the preferences: the buffer length in samples
 // (0 = b milliseconds) and the device's name ("" = the system's default)
-unsigned audiobuffer = 0;
+unsigned audiobuffer = 32;
 char audiodevice[MAX_PATHNAME] = "";
 // Lines of the config file that only the plugin uses (see the end of it)
 static char pluginfolders[4][MAX_PATHNAME];
 unsigned writer = 0;
 unsigned hardsid = 0;
 unsigned catweasel = 0;
-unsigned interpolate = 3;
+unsigned interpolate = 0;
 unsigned residdelay = 0;
 unsigned hardsidbufinteractive = 20;
 unsigned hardsidbufplayback = 400;
 unsigned uimode = UI_RETRO;  // Interface in use: modern or retro
 static int uiarg = -1;       // -u on the command line (-1 = not given)
-float basepitch = 0.0f;
+float basepitch = 434.03f;
 float equaldivisionsperoctave = 12.0f;
 int tuningcount = 0;
 double tuning[96];
@@ -221,7 +221,10 @@ int main(int argc, char **argv)
 
 	startfile[0] = 0;
 
-	// DEFAULT SETTINGS
+	// DEFAULT SETTINGS (those that differ from GoatTracker's are Scott's:
+	// 6581, no pulse and realtime skipping, 48 kHz, no interpolation, SID
+	// files from the packer, A-4 at 434.03 Hz, the gradient background and
+	// his meter colors)
 	editorInfo.adparam = 0x0f00;
 	editorInfo.editmode = EDIT_PATTERN;
 	editorInfo.esmarkchn = -1;
@@ -231,10 +234,10 @@ int main(int argc, char **argv)
 	editorInfo.etlock = 1;
 	editorInfo.ntsc = 0;
 	editorInfo.multiplier = 1;
-	editorInfo.sidmodel = 1;
+	editorInfo.sidmodel = 0;
 	editorInfo.finevibrato = 1;
-	editorInfo.optimizepulse = 1;
-	editorInfo.optimizerealtime = 1;
+	editorInfo.optimizepulse = 0;
+	editorInfo.optimizerealtime = 0;
 
 	programname += sizeof "$VER:";
 	// Open datafile
@@ -254,6 +257,11 @@ int main(int argc, char **argv)
 #endif
 	specialnotenames[0] = 0;
 	scalatuningfilepath[0] = 0;
+#if defined(__APPLE__) && !defined(GT_PLUGIN)
+	// Scott's folders next to the program, used when they are there
+	strcpy(configfolder[FOLDER_IMPORT], "/Applications/GoatTracker Ultimate/SID Music/");
+	strcpy(browserfolder, "/Applications/GoatTracker Ultimate/Instruments/");
+#endif
 	configfile = fopen(filename, "rt");
 	if (configfile)
 	{

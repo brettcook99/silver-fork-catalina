@@ -60,13 +60,18 @@ unsigned windowposset = 0;        // Where it was last (not fullscreen or
 int windowedxpos = 0;             // maximized; windowposset 0 = not known:
 int windowedypos = 0;             // centered)
 unsigned textsizepercent = 100;   // Text size (CTRL/CMD + and -)
-unsigned retrogradient = 0;       // Retro screen background: 0 = black,
+unsigned retrogradient = 1;       // Retro screen background: 0 = black,
                                   // 1 = gradient (View menu)
 // Retro level meter colors at the bottom, middle and top, 0xAARRGGBB (AA =
 // opacity: 00 clear, FF solid). View > Meter Colors
 unsigned retrometercolors[3] = { DEFAULT_METERBOTTOM, DEFAULT_METERMIDDLE, DEFAULT_METERTOP };
-// The user's own meter color presets (bottom, middle, top), all 0 = empty
-unsigned retrometerpresets[METERPRESETS][3];
+// The user's own meter color presets (bottom, middle, top), all 0 = empty.
+// The first two are Scott's
+unsigned retrometerpresets[METERPRESETS][3] =
+{
+  { 0x53190f30u, 0xe65744c3u, 0x21a5a1bcu },
+  { 0x53190f30u, 0xe6bc44c3u, 0x2183818au },
+};
 
 /*
  * Key event queue

@@ -18,16 +18,16 @@
 #define MAXMIXRATE 48000
 #define MINBUF 5
 #define MAXBUF 2000
-// 15 ms = 662 samples at 44.1 kHz. On macOS (Core Audio, through SDL) two
-// such buffers are queued, 30 ms; shorter ones would make SDL queue more of
-// them. The old defaults: 100 ms (4096 samples: notes played from the
-// keyboard or MIDI were heard up to 0.2 s late), then 25 ms (1024 samples,
-// rounded down to a power of two: 46 ms queued)
-#define DEFAULTBUF 15
+// 32 ms at 48 kHz, as in Scott's settings (the output buffer itself is 32
+// samples by default, see audiobuffer in goattrk2.c). The old defaults:
+// 100 ms (4096 samples: notes played from the keyboard or MIDI were heard up
+// to 0.2 s late), then 25 ms (1024 samples), then 15 ms. On macOS (Core
+// Audio, through SDL) at least two 15 ms buffers are queued whatever is set
+#define DEFAULTBUF 32
 // The defaults before, still in old config files
 #define OLDDEFAULTBUF 100
 #define PREVDEFAULTBUF 25
-#define DEFAULTMIXRATE 44100
+#define DEFAULTMIXRATE 48000
 
 #define PALFRAMERATE 50
 #define PALCLOCKRATE 985248
