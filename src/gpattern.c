@@ -173,6 +173,22 @@ static void midipolynote(int note)
   if (!midinoteplayed) playtestnote(note, midinoteinstr(), c);
 }
 
+// While the song plays and the editor follows it, HOME / END / PGUP / PGDN
+// move the playback there (as the numpad's row jumps do), within the
+// patterns shown: the cursor alone would be taken back by the playback.
+// With SHIFT (marking rows) they move the cursor as always. Returns nonzero
+// if the playback moved
+static int playbackjump(int row)
+{
+  int len = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+
+  if ((!isplaying()) || (!followplay) || (followsuspended) || (shiftpressed) || (len < 1)) return 0;
+  if (row < 0) row = 0;
+  if (row > len - 1) row = len - 1;
+  patternjump(row);
+  return 1;
+}
+
 // INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
 // last row drops off). On the end mark the pattern gets one row longer
 static void patterninsertrow(void)
@@ -1224,19 +1240,23 @@ void patterncommands(void)
     break;
 
     case KEY_HOME:
+    if (playbackjump(0)) break;
     while (editorInfo.eppos != 0) patternup();
     break;
 
     case KEY_END:
+    if (playbackjump(pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum] - 1)) break;
     while (editorInfo.eppos != pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum]) patterndown();
     break;
 
     case KEY_PGUP:
+    if (playbackjump(editorInfo.eppos - PGUPDNREPEAT)) break;
     for (scrrep = PGUPDNREPEAT; scrrep; scrrep--)
       patternup();
     break;
 
     case KEY_PGDN:
+    if (playbackjump(editorInfo.eppos + PGUPDNREPEAT)) break;
     for (scrrep = PGUPDNREPEAT; scrrep; scrrep--)
       patterndown();
     break;
