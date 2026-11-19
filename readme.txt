@@ -431,8 +431,9 @@ ALT+SHIFT+RET. Convert portamento/vibrato/funktempo old style parameter to a
             speedtable entry (when cursor is over the command; OPTION on
             macOS)
 DEL         Clear: on the note a rest, on the instrument or command that
-            (the cursor moves down)
-SHIFT+DEL   Insert rest and clear commands
+            (the cursor moves down). With rows marked: their notes and
+            instruments (BACKSPACE too, the delete key of a Mac laptop)
+SHIFT+DEL   Insert rest and clear commands (rows marked: their commands too)
 BACKSPACE   Delete row (on the end mark: shorten the pattern). DEL used to
             do this; it shifted the rest of the pattern out of step with
             the other channels too easily
