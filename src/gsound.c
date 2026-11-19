@@ -355,6 +355,17 @@ void sound_suspend(void)
   #endif
 }
 
+// The sound callback waits meanwhile
+void sound_lockplayer(void)
+{
+  snd_lock();
+}
+
+void sound_unlockplayer(void)
+{
+  snd_unlock();
+}
+
 // Closes the audio output, so that the next sound_init() opens it again
 // with the settings then (the preferences: device, rate, buffer)
 void sound_closeoutput(void)

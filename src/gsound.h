@@ -39,6 +39,10 @@
 int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsigned m, unsigned ntsc, unsigned multiplier, unsigned catweasel, unsigned interpolate, unsigned customclockrate);
 void sound_uninit(void);
 void sound_suspend(void);
+// Keeps the sound from calling the player between the two (the player's
+// state changes, see stopsong())
+void sound_lockplayer(void);
+void sound_unlockplayer(void);
 #ifndef GT_PLUGIN
 void sound_closeoutput(void);
 #endif
