@@ -486,8 +486,12 @@ static int tbsyncx = -1;
 // click on the title bar shows LOAD, SAVE, IMPORT, EXPORT, EDIT and CLEAR there
 // instead, each a dropdown. Then, as in a system's menu bar, the mouse over
 // an item opens its dropdown (no click needed), and moving along the bar
-// opens the others. The bar goes when the dropdown closes (something chosen
-// in it, a click elsewhere) or, with no dropdown open, at a click elsewhere.
+// opens the others. Letting go of the right button after holding it or
+// moving chooses the dropdown's entry under the mouse, or with none there
+// puts the title bar back (as a system's context menu does). A quick right
+// click without moving leaves the bar shown, to be clicked: then it goes
+// when the dropdown closes (something chosen in it, a click elsewhere) or,
+// with no dropdown open, at a click elsewhere.
 // A host's editor window may not report a left click while the right button
 // is down, so the standalone program's way (hold the right button, click
 // with the left) isn't needed
@@ -499,6 +503,9 @@ static int tbmenuheld = 0;        // the right button that showed it is still do
 static int tbmenupressx = 0;      // where it was pressed
 static int tbmenumoved = 0;       // the mouse has moved since
 static int tbmenudrop = -1;       // the item whose dropdown is open, -1 none
+static Uint32 tbmenupresstime = 0; // when the right button was pressed
+// A right click shorter than this (without moving) leaves the menu bar shown
+#define TBMENUCLICKMS 400
 
 // The menu at column x of the menu bar, -1 if none
 static int tbmenuat(int x)
@@ -552,13 +559,29 @@ static void tbmenuupdate(void)
       tbmenuopen = 1;
       tbmenuheld = 1;
       tbmenupressx = mousex;
+      tbmenupresstime = SDL_GetTicks();
       tbmenumoved = 0;
       tbmenudrop = -1;
     }
     return;
   }
   if ((mousey != 0) || (mousex != tbmenupressx)) tbmenumoved = 1;
-  if ((tbmenuheld) && (!(mouseb & MOUSEB_RIGHT))) tbmenuheld = 0;
+  // (The dropdown has the mouse buttons: the right one as held now)
+  if ((tbmenuheld) && (!(gui_mousebuttonsheld() & MOUSEB_RIGHT)))
+  {
+    tbmenuheld = 0;
+    // Let go after holding or moving: the entry under the mouse is chosen;
+    // nothing chosen, the title bar comes back
+    if ((tbmenumoved) || (SDL_GetTicks() - tbmenupresstime >= TBMENUCLICKMS))
+    {
+      int cmd = (tbmenudrop >= 0) ? gui_filemenuhovered() : -1;
+
+      if (cmd >= 0) cmd_post(cmd);
+      gui_closefilemenu();
+      tbmenuclose();
+      return;
+    }
+  }
   m = (mousey == 0) ? tbmenuat(mousex) : -1;
 
   // A dropdown is open (the mouse buttons go to it): the mouse over another

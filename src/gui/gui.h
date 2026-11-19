@@ -40,6 +40,8 @@ void gui_frame(int textscreen);
 
 // Mouse state over the classic text screen (buttons as MOUSEB_xxx bits)
 int gui_textscreenmousebuttons(void);
+// The buttons held now, also while a dialog or menu has the mouse
+int gui_mousebuttonsheld(void);
 int gui_textscreenmousewheel(void);
 
 void gui_changetextsize(int dir);
@@ -64,6 +66,10 @@ void gui_openfilemenu(int which, int column);
 // The plugin's title bar menu whose dropdown is open (or about to open), -1
 // if none
 int gui_filemenushown(void);
+// The command of the dropdown entry under the mouse (-1 none), and closing
+// the dropdown: the menu bar's right-button release (gretro.c)
+int gui_filemenuhovered(void);
+void gui_closefilemenu(void);
 void gui_designermidi(int noteon, int noteoff);
 // A MIDI control change (knob) while the SID designer is shown: attack
 // (CC 73), decay (75), sustain (70, 76 or 20), release (72), filter cutoff

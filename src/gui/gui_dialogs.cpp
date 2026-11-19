@@ -1235,6 +1235,8 @@ static int wantfilemenu = -1;
 static int filemenuwhich = 0;
 static int filemenucolumn = 0;
 static int filemenushown = -1;
+static int filemenuhover = -1;     // the command of the entry under the mouse
+static bool filemenuclose = false; // closing asked for
 
 extern "C" void gui_openfilemenu(int which, int column)
 {
@@ -1245,6 +1247,37 @@ extern "C" void gui_openfilemenu(int which, int column)
 extern "C" int gui_filemenushown(void)
 {
   return (wantfilemenu >= 0) ? wantfilemenu : filemenushown;
+}
+
+extern "C" int gui_filemenuhovered(void)
+{
+  return (filemenushown >= 0) ? filemenuhover : -1;
+}
+
+extern "C" void gui_closefilemenu(void)
+{
+  filemenuclose = true;
+  wantfilemenu = -1;
+}
+
+// An entry: chosen with a (left) click, or with the right button let go over
+// it (gui_filemenuhovered())
+static void fmitem(const char *label, const char *shortcut, int cmd, bool enabled = true)
+{
+  if (ImGui::MenuItem(label, shortcut, false, enabled)) cmd_post(cmd);
+  // (By its place: while the right button is held from the title bar ImGui
+  // doesn't count the entry as hovered)
+  if ((enabled) && (ImGui::IsMouseHoveringRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), false)))
+  {
+    filemenuhover = cmd;
+    // Shown as hovered there too
+    if (!ImGui::IsItemHovered())
+    {
+      ImVec4 c = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+      c.w *= 0.6f;
+      ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImGui::GetColorU32(c));
+    }
+  }
 }
 
 static void filemenu(void)
@@ -1271,46 +1304,56 @@ static void filemenu(void)
   bool open = ImGui::BeginPopup(id);
   ImGui::PopFont();
   filemenushown = open ? filemenuwhich : -1;
+  filemenuhover = -1;
+  if (!open) filemenuclose = false;
   if (open)
   {
+    if (filemenuclose)
+    {
+      filemenuclose = false;
+      filemenushown = -1;
+      ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
+      return;
+    }
     ImGui::PushFont(NULL, size);
     switch (filemenuwhich)
     {
       case 0:
-      if (ImGui::MenuItem("Song...", "F10")) cmd_post(GTCMD_OPEN);
-      if (ImGui::MenuItem("Instrument...")) cmd_post(GTCMD_LOADINSTR);
+      fmitem("Song...", "F10", GTCMD_OPEN);
+      fmitem("Instrument...", NULL, GTCMD_LOADINSTR);
       ImGui::Separator();
-      if (ImGui::MenuItem("Merge Song...")) cmd_post(GTCMD_MERGE);
+      fmitem("Merge Song...", NULL, GTCMD_MERGE);
       break;
 
       case 1:
-      if (ImGui::MenuItem("Song", "F11")) cmd_post(GTCMD_SAVE);
-      if (ImGui::MenuItem("Song As...")) cmd_post(GTCMD_SAVEAS);
-      if (ImGui::MenuItem("Instrument...")) cmd_post(GTCMD_SAVEINSTR);
+      fmitem("Song", "F11", GTCMD_SAVE);
+      fmitem("Song As...", NULL, GTCMD_SAVEAS);
+      fmitem("Instrument...", NULL, GTCMD_SAVEINSTR);
       break;
 
       case 2:
-      if (ImGui::MenuItem("SID...")) cmd_post(GTCMD_IMPORTSID);
-      if (ImGui::MenuItem("MIDI...")) cmd_post(GTCMD_IMPORTMIDI);
-      if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_IMPORTPATCH);
+      fmitem("SID...", NULL, GTCMD_IMPORTSID);
+      fmitem("MIDI...", NULL, GTCMD_IMPORTMIDI);
+      fmitem("Fermatax (chipsynth C64 patch)...", NULL, GTCMD_IMPORTPATCH);
       break;
 
       case 3:
-      if (ImGui::MenuItem("SID...")) cmd_post(GTCMD_EXPORTSID);
-      if (ImGui::MenuItem("MIDI...")) cmd_post(GTCMD_EXPORTMIDI);
-      if (ImGui::MenuItem("Fermatax (chipsynth C64 patch)...")) cmd_post(GTCMD_EXPORTPATCH);
+      fmitem("SID...", NULL, GTCMD_EXPORTSID);
+      fmitem("MIDI...", NULL, GTCMD_EXPORTMIDI);
+      fmitem("Fermatax (chipsynth C64 patch)...", NULL, GTCMD_EXPORTPATCH);
       break;
 
       case 4:
-      if (ImGui::MenuItem("Undo", MENUCMD "+Z", false, undoCanUndo() != 0)) cmd_post(GTCMD_UNDO);
-      if (ImGui::MenuItem("Redo", MENUCMD "+SHIFT+Z", false, undoCanRedo() != 0)) cmd_post(GTCMD_REDO);
+      fmitem("Undo", MENUCMD "+Z", GTCMD_UNDO, undoCanUndo() != 0);
+      fmitem("Redo", MENUCMD "+SHIFT+Z", GTCMD_REDO, undoCanRedo() != 0);
       break;
 
       default:
-      if (ImGui::MenuItem("Clear Track")) cmd_post(GTCMD_CLEARTRACK);
-      if (ImGui::MenuItem("Clear Pattern")) cmd_post(GTCMD_CLEARPATTERNS);
+      fmitem("Clear Track", NULL, GTCMD_CLEARTRACK);
+      fmitem("Clear Pattern", NULL, GTCMD_CLEARPATTERNS);
       ImGui::Separator();
-      if (ImGui::MenuItem("Clear All...")) cmd_post(GTCMD_CLEARALL);
+      fmitem("Clear All...", NULL, GTCMD_CLEARALL);
       break;
     }
     ImGui::PopFont();

@@ -1375,6 +1375,18 @@ extern "C" int gui_textscreenmousebuttons(void)
   return tsmousebuttons;
 }
 
+extern "C" int gui_mousebuttonsheld(void)
+{
+  ImGuiIO &io = ImGui::GetIO();
+  int b = 0;
+
+  if (!initted) return 0;
+  if (io.MouseDown[0]) b |= MOUSEB_LEFT;
+  if (io.MouseDown[1]) b |= MOUSEB_RIGHT;
+  if (io.MouseDown[2]) b |= MOUSEB_MIDDLE;
+  return b;
+}
+
 extern "C" int gui_textscreenmousewheel(void)
 {
   return tsmousewheel;
