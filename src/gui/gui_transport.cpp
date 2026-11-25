@@ -433,6 +433,7 @@ void gui::drawmenubar(void)
     ImGui::Separator();
     if (ImGui::MenuItem("Export SID / PRG / BIN...", "F9")) cmd_post(GTCMD_EXPORT);
     if (ImGui::MenuItem("Export SID-Wizard Module (.swm)...")) cmd_post(GTCMD_EXPORTSWM);
+    if (ImGui::MenuItem("Export MIDI File...")) cmd_post(GTCMD_EXPORTMIDI);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "ALT+F4")) cmd_post(GTCMD_QUIT);
     ImGui::EndMenu();

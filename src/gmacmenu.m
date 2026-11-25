@@ -256,6 +256,7 @@ void macmenu_init(void)
     [file addItem:[NSMenuItem separatorItem]];
     additem(file, @"Export SID / PRG / BIN…", @"e", MOD_CMD, GTCMD_EXPORT);
     additem(file, @"Export SID-Wizard Module (.swm)…", @"", 0, GTCMD_EXPORTSWM);
+    additem(file, @"Export MIDI File…", @"", 0, GTCMD_EXPORTMIDI);
 
     edit = newmenu(@"Edit");
     additem(edit, @"Undo", @"z", MOD_CMD, GTCMD_UNDO);

@@ -106,6 +106,7 @@ enum
   GTCMD_PREFERENCES,      // Preferences: audio output (standalone)
   GTCMD_IMPORTSWM,        // A SID-Wizard module (.swm) as the song
   GTCMD_EXPORTSWM,        // The song as a SID-Wizard module
+  GTCMD_EXPORTMIDI,       // Save the song as a MIDI file
 
   GTCMD_COUNT
 };

@@ -542,6 +542,13 @@ When all the notes are on one MIDI channel in several tracks of the file (as
 many sequencers save them), the tracks are read as channels 1, 2, 3. A MIDI
 file opened from the Finder or the command line becomes a new song.
 
+File > Export MIDI File writes the current subtune as a MIDI file: the song
+is played (without sound) once through every track's orderlist, so the notes
+come out as they sound, with transposes, repeats and tempo changes. Tracks
+1-3 go to MIDI channels 1-3; one pattern row is 1/stepsize beat (the
+highlighting step), and when the rows get longer or shorter the MIDI tempo
+changes, so the rows stay on the DAW's beat grid.
+
 SID-Wizard modules (.swm, made by SID-Wizard 1.x for one SID): File > Import
 > SID-Wizard Module (or opening a .swm file) makes the module the song, and
 File > Export SID-Wizard Module saves the song as one (in the plugin: IMPORT

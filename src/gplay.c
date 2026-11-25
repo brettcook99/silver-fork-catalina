@@ -59,7 +59,7 @@ int songinit = 0;
 
 // Notes played from the keyboard or MIDI start at once when the sound code
 // starts them (see gplay.h, playnow_run()): playnowon. The editor's thread
-// asks for them by mail: per channel the note |
+// (or the plugin's MIDI) asks for them by mail: per channel the note |
 // instrument << 8 | NOWMAIL_NOTE, and / or NOWMAIL_RELEASE (let go, after
 // the note if it comes with one)
 int playnowon = 0;
@@ -98,6 +98,28 @@ int startpattpos = 0;
 int playloop = 0;
 // Positions channels jump to (playjump()), -1 = none
 static volatile int jumpto[MAX_CHN] = { -1, -1, -1 };
+
+// Running the song without sound (playoffline()): the hook told about the
+// notes, the frame being run, and the frame at which each channel came to
+// the end of its orderlist (-1 = not yet). While it runs, playroutine()
+// called from the sound does nothing
+static void (*offlinehook)(int c, int note, unsigned frame, void *user) = NULL;
+static void *offlineuser = NULL;
+static unsigned offlineframe = 0;
+static int offlineloopframe[MAX_CHN] = { -1, -1, -1 };
+static volatile int offlinerun = 0;
+static void runplayer(void);
+
+// A note event of channel c goes to the hook: until the channel has come to
+// the end of its orderlist (the last row's note starts in that frame)
+#define OFFLINENOTE(c, n) do { if ((offlinehook) && ((offlineloopframe[c] < 0) || (offlineloopframe[c] == (int)offlineframe))) \
+  offlinehook((c), (n), offlineframe, offlineuser); } while (0)
+
+int playofflineloop(int c)
+{
+  if ((c < 0) || (c >= MAX_CHN)) return -1;
+  return offlineloopframe[c];
+}
 
 void sequencer(int c, CHN *cptr);
 
@@ -142,8 +164,23 @@ void initchannels(void)
   }
 }
 
+#ifdef GT_PLUGIN
+#include "plugin/gtplugin.h"
+// While the playback follows the host's transport the play commands of the
+// user interface do nothing
+static int uiblocked(void)
+{
+  if (!gtsync_uiblocked()) return 0;
+  gui_message("Following the DAW's transport: start and stop it there");
+  return 1;
+}
+#endif
+
 void initsong(int num, int mode)
 {
+#ifdef GT_PLUGIN
+  if (uiblocked()) return;
+#endif
   sound_suspend();
   // Not in the middle of a player frame (see stopsong())
   sound_lockplayer();
@@ -158,6 +195,9 @@ void initsong(int num, int mode)
 
 void initsongpos(int num, int mode, int pattpos)
 {
+#ifdef GT_PLUGIN
+  if (uiblocked()) return;
+#endif
   sound_suspend();
   sound_lockplayer();
   songinit = PLAY_STOPPED;
@@ -171,6 +211,9 @@ void initsongpos(int num, int mode, int pattpos)
 
 void stopsong(void)
 {
+#ifdef GT_PLUGIN
+  if (uiblocked()) return;
+#endif
   // The sound (the host's audio thread in the plugin) plays the song in
   // another thread: the player's state changes between its frames, not in
   // the middle of one (a stopped channel could read a row there while it has
@@ -273,6 +316,18 @@ void playtestnote(int note, int ins, int chnnum)
   playnoteframes(note, ins, chnnum);
 }
 
+void playtestnoterow(int note, int ins, int chnnum)
+{
+  if ((note == REST) || (note == KEYOFF) || (note == KEYON)) return;
+  if ((chnnum < 0) || (chnnum >= MAX_CHN)) return;
+  if ((ins < 0) || (ins >= MAX_INSTR)) ins = 1;
+  SDL_AtomicSet(&nowmail[chnnum], 0);
+  nowtogrid(chnnum);
+  playnoteframes(note, ins, chnnum);
+  if ((songinit != PLAY_STOPPED) && (chn[chnnum].tick > 0) && (chn[chnnum].tick < 0x80))
+    chn[chnnum].jamtime = chn[chnnum].tick;
+}
+
 void releasenote(int chnnum)
 {
   if ((chnnum < 0) || (chnnum >= MAX_CHN)) return;
@@ -316,6 +371,7 @@ int playstarting(void)
 static void startnewnote(int c, CHN *cptr, INSTR *iptr, int toneporta)
 {
   cptr->note = cptr->newnote-FIRSTNOTE;
+  OFFLINENOTE(c, cptr->note);
   cptr->command = 0;
   cptr->vibdelay = iptr->vibdelay;
   cptr->cmddata = iptr->ptr[STBL];
@@ -366,6 +422,12 @@ static void startnewnote(int c, CHN *cptr, INSTR *iptr, int toneporta)
 }
 
 void playroutine(void)
+{
+  if (offlinerun) return;
+  runplayer();
+}
+
+static void runplayer(void)
 {
   CHN *cptr = &chn[0];
   int c;
@@ -1217,7 +1279,7 @@ static void runchannels(int mask)
         cptr->readrow = row;
         cptr->readtrans = cptr->trans;
         cptr->readvalid = 1;
-        // A note played just before the row was read: it isn't played again
+        // A recorded note that has been played already
         if ((cptr->skipvalid) && (cptr->skippatt == cptr->pattnum) && (cptr->skiprow == row))
         {
           cptr->skipvalid = 0;
@@ -1243,7 +1305,10 @@ static void runchannels(int mask)
           cptr->pattptr = first * 4;
 
         if (newnote == KEYOFF)
+        {
           cptr->gate = 0xfe;
+          OFFLINENOTE(c, -1);
+        }
         if (newnote == KEYON)
           cptr->gate = 0xff;
         if (newnote <= LASTNOTE)
@@ -1446,6 +1511,7 @@ int playnow_run(int maxsamples, double spf, double rate)
   int c;
 
   if (n < 1) n = 1;
+  if (offlinerun) return n;
   if (spf < 1.0) spf = 1.0;
   for (c = 0; c < MAX_CHN; c++)
   {
@@ -1578,6 +1644,7 @@ void sequencer(int c, CHN *cptr)
     // Song loop
     if (songorder[psnum][c][cptr->songptr] == LOOPSONG)
     {
+      if (offlineloopframe[c] < 0) offlineloopframe[c] = (int)offlineframe;
       cptr->songptr = songorder[psnum][c][cptr->songptr+1];
       if (cptr->songptr >= songlen[psnum][c])
       {
@@ -1619,6 +1686,141 @@ void sequencer(int c, CHN *cptr)
       cptr->songptr = editorUndoInfo.editorInfo[c].espos;
   }
   SEQDONE: {}
+}
+
+double playframesperrow(void)
+{
+  if (chn[0].tempo >= 2) return chn[0].tempo + 1;
+  return (funktable[0] + 1 + funktable[1] + 1) / 2.0;
+}
+
+int playstartframes(void)
+{
+  return editorInfo.multiplier ? 6 * editorInfo.multiplier - 1 : 6 - 1;
+}
+
+void playerreset(void)
+{
+  unsigned char mute[MAX_CHN];
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++) mute[c] = chn[c].mute;
+  initchannels();
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    chn[c].mute = mute[c];
+    jumpto[c] = -1;
+  }
+  filterctrl = 0;
+  filtertype = 0;
+  filtercutoff = 0;
+  filtertime = 0;
+  filterptr = 0;
+  masterfader = 0x0f;
+  memset(sidreg, 0, NUMSIDREGS);
+  songinit = PLAY_STOPPED;
+  startpattpos = 0;
+}
+
+// Runs subtune num from its start without sound, frame by frame (see
+// gplay.h). The player's state is put back afterwards
+unsigned playoffline(int num, unsigned maxframes, void (*hook)(int c, int note, unsigned frame, void *user), void *user, int *loopframe)
+{
+  CHN savechn[MAX_CHN];
+  unsigned char savesidreg[NUMSIDREGS];
+  unsigned char savefunk[2];
+  int savesonginit, savelastsonginit, savepsnum, savestartpattpos, saveplayloop, savefollowplay;
+  int savereturn;
+  unsigned char savefctrl, saveftype, savefcutoff, saveftime, savefptr, savefader;
+  int savemin = timemin, savesec = timesec, saveframe = timeframe;
+  int savejump[MAX_CHN];
+  unsigned frame;
+  int c;
+
+  sound_lockplayer();
+  offlinerun = 1;
+  memcpy(savechn, chn, sizeof chn);
+  memcpy(savesidreg, sidreg, NUMSIDREGS);
+  memcpy(savefunk, funktable, sizeof funktable);
+  savesonginit = songinit;
+  savelastsonginit = lastsonginit;
+  savepsnum = psnum;
+  savestartpattpos = startpattpos;
+  saveplayloop = playloop;
+  savefollowplay = followplay;
+  savereturn = playreturnpoint;
+  savefctrl = filterctrl;
+  saveftype = filtertype;
+  savefcutoff = filtercutoff;
+  saveftime = filtertime;
+  savefptr = filterptr;
+  savefader = masterfader;
+  for (c = 0; c < MAX_CHN; c++) savejump[c] = jumpto[c];
+
+  playerreset();
+  playloop = 0;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    chn[c].mute = 0;
+    offlineloopframe[c] = -1;
+  }
+  offlinehook = hook;
+  offlineuser = user;
+  playerstartsong(num);
+  for (frame = 0; frame < maxframes; frame++)
+  {
+    int done = 1;
+
+    offlineframe = frame;
+    runplayer();
+    // The frame has been run: whether a row of channel 1 started in it
+    hook(-1, (chn[0].playvalid) && (!chn[0].rowframe), frame, user);
+    for (c = 0; c < MAX_CHN; c++)
+    {
+      if (offlineloopframe[c] < 0) done = 0;
+    }
+    if ((done) || (songinit == PLAY_STOPPED) || (songinit == PLAY_STOP)) break;
+  }
+  if (frame >= maxframes) frame = maxframes;
+  else frame++;
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    if (loopframe) loopframe[c] = offlineloopframe[c];
+    offlineloopframe[c] = -1;
+  }
+  offlinehook = NULL;
+  offlineuser = NULL;
+
+  memcpy(chn, savechn, sizeof chn);
+  memcpy(sidreg, savesidreg, NUMSIDREGS);
+  memcpy(funktable, savefunk, sizeof funktable);
+  songinit = savesonginit;
+  lastsonginit = savelastsonginit;
+  psnum = savepsnum;
+  startpattpos = savestartpattpos;
+  playloop = saveplayloop;
+  followplay = savefollowplay;
+  playreturnpoint = savereturn;
+  filterctrl = savefctrl;
+  filtertype = saveftype;
+  filtercutoff = savefcutoff;
+  filtertime = saveftime;
+  filterptr = savefptr;
+  masterfader = savefader;
+  for (c = 0; c < MAX_CHN; c++) jumpto[c] = savejump[c];
+  timemin = savemin;
+  timesec = savesec;
+  timeframe = saveframe;
+  offlinerun = 0;
+  sound_unlockplayer();
+  return frame;
+}
+
+void playerstartsong(int num)
+{
+  psnum = num;
+  startpattpos = 0;
+  songinit = PLAY_BEGINNING;
 }
 
 int playnextpattern(int c, int *patt, int *trans)

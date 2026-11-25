@@ -65,11 +65,11 @@ typedef struct
   unsigned char loopsongptr, looptrans, looprepeat;
   unsigned char lastvalid;
   unsigned char lastsongptr, lasttrans, lastrepeat;
-  // Where the channel plays, for notes recorded while following the
-  // playback: the row read last (readvalid: it starts on the next tick 0),
+  // Where the channel plays, for notes recorded from a host's MIDI tracks
+  // (plugin): the row read last (readvalid: it starts on the next tick 0),
   // the row whose tick 0 came last, the frames since that tick 0 and the
-  // row's length in frames. A row whose note was played just before the row
-  // was read: its note isn't played again (skip)
+  // row's length in frames. A row whose note was recorded (and played)
+  // just before the row was read: its note isn't played again (skip)
   unsigned char readpatt, readrow, readvalid, readtrans;
   unsigned char playpatt, playrow, playvalid, playtrans;
   unsigned char rowframe, rowlen;
@@ -101,6 +101,9 @@ void stopsong(void);
 void rewindsong(void);
 void playtestnote(int note, int ins, int chnnum);
 void releasenote(int chnnum);
+// A note that starts on the channel's next row (tick 0) while the song
+// plays, after the hardrestart frames as a pattern's note
+void playtestnoterow(int note, int ins, int chnnum);
 
 // Notes played from the keyboard or MIDI (playtestnote(), releasenote())
 // start and stop at once, at the sample they come at, when the sound code
@@ -121,6 +124,20 @@ int playstarting(void);
 int playfilterptr(void);
 void playroutine(void);
 
+// Runs subtune num from its start without sound (MIDI export), until every
+// channel has come to the end of its orderlist, the song stops or maxframes
+// frames have run. hook is called for each note started (note 0-95 from
+// C-0, transposed, as the player plays it; tone portamento too) and each
+// keyoff read (note -1), with the frame number. loopframe (3 values) gets
+// the frame at which each channel reached its end (-1 = not reached).
+// After each frame hook is called with c = -1 and note = 1 if a row of
+// channel 1 started in that frame (its tick 0), else 0. The playback and
+// the player's state are as before afterwards. Returns the frames run
+unsigned playoffline(int num, unsigned maxframes, void (*hook)(int c, int note, unsigned frame, void *user), void *user, int *loopframe);
+// While playoffline() runs: the frame at which channel c came to the end of
+// its orderlist, -1 if it hasn't
+int playofflineloop(int c);
+
 // LOOP on the retro screen: while the song plays, each channel plays its
 // next playloop patterns again and again, from the one playing when the
 // loop was set (or the first one, set before playing). 0 = no loop.
@@ -134,6 +151,19 @@ int playhighlightrows(int *first, int *last);
 // While the song plays, channel c goes to orderlist position n (in the
 // player's next frame), at the same row: playjump(c, n)
 void playjump(int c, int pos);
+
+// For following a host's tempo and position (plugin builds):
+// Player frames per row of channel 1 (the average of the two values with
+// funktempo)
+double playframesperrow(void);
+// Frames from the start of playback to the first row's tick 0
+int playstartframes(void);
+// Stops and clears the player and the SID registers (the channels' mutes
+// stay)
+void playerreset(void);
+// Starts the song (subtune num) from its beginning on the next frame, like
+// initsong(), also while the user interface's play commands are blocked
+void playerstartsong(int num);
 // The pattern and transpose a channel plays after its current pattern, from
 // the orderlist. Returns 0 if not known
 int playnextpattern(int c, int *patt, int *trans);

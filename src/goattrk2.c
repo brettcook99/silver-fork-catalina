@@ -27,6 +27,7 @@
 #include "gui/gui.h"
 #include "gmacfile.h"
 #include "gswm.h"
+#include "gmidiexport.h"
 
 static void mainloopframe(void);
 static void retromainloop(void);
@@ -2412,6 +2413,24 @@ void runcommand(int cmd, const char *path)
 				gui_message("Exported %s: %s", gt_basename(newpath), report);
 			else
 				gui_alert("SID-Wizard export failed", report);
+		}
+		break;
+
+	case GTCMD_EXPORTMIDI:
+		{
+			char suggest[MAX_PATHNAME];
+			char report[256];
+			const char *base = "Untitled";
+
+			if (loadedsongfilename[0]) base = gt_basename(loadedsongfilename);
+			else if (suggestedsongname[0]) base = suggestedsongname;
+			gt_replaceext(base, ".mid", suggest, MAX_PATHNAME);
+			if (!filedialog_save(FOLDER_EXPORT, "Export the song as a MIDI file", "mid", suggest, newpath, MAX_PATHNAME))
+				break;
+			if (midiexport(newpath, report, sizeof report))
+				gui_message("%s", report);
+			else
+				gui_alert("MIDI export failed", report);
 		}
 		break;
 
