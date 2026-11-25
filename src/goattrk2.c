@@ -44,16 +44,33 @@ int menu = 0;
 // program starts in jam mode
 int recordmode = 0;
 
-// MIDI input (MIDI INPUT 1-3 PATTERNS). With 2 or 3 the MIDI notes go to
-// that many channels, from the cursor's channel on (after channel 3 comes
-// channel 1), so that they can ring on together:
+// MIDI input (MIDI INPUT at the bottom of the screen), midiinputsel:
+// - 0 = MIDI CURSOR: the notes of every MIDI channel go to the cursor's
+//   channel, or with 2-3 PATTERNS (midichord) to that many channels from
+//   the cursor's on (after channel 3 comes channel 1)
+// - 1-3 = MIDI INPUT 1-3: MIDI channels 1, 2 and 3 go to channels (tracks)
+//   1, 2 and 3, each with its own 1-3 PATTERNS (midichncount): with 2-3 to
+//   its own channel and the next ones (or the ones before, at the right
+//   edge: MIDI channel 3 on 2 patterns plays channels 3 and 2). All three
+//   work at once; the setting chosen only picks which one the screen shows
+//   and changes. Other MIDI channels go to the cursor as with MIDI CURSOR
+// On 2-3 channels the notes are shared out so that they can ring on
+// together:
 // - a note played on its own goes to the next of these channels in turn
 //   (ping-pong), on the cursor's row, and the cursor moves down
 // - keys struck together (a chord) go to the next channels too, all on the
 //   row of the first one; keys beyond the last channel are left out
-// The turn starts again at the cursor's channel when the cursor has been
-// moved. 1 = the usual input: every note goes to the cursor's channel
+// The turn starts again at the first channel when the cursor has been
+// moved. MIDI CURSOR on 1 pattern is the usual input: every note goes to the
+// cursor's channel. The plugin starts with MIDI INPUT 1 (channels 1-3 play
+// voices 1-3), the standalone program with MIDI CURSOR
+#ifdef GT_PLUGIN
+int midiinputsel = 1;
+#else
+int midiinputsel = 0;
+#endif
 int midichord = 1;
+int midichncount[MAX_CHN] = {1, 1, 1};
 // STEPS (0-16): rows skipped after a note is entered, so that the cursor
 // moves down 1 + editstep rows
 int editstep = 0;
@@ -67,6 +84,9 @@ int midichordchn = 0;
 int midichordrow = 0;
 int midichordfirst = 1;
 int midichordmask = 0;
+// Nonzero while the MIDI note goes to a channel of its own (MIDI INPUT 1-3,
+// see midiinputsel): entered there, not at the cursor's channel
+int midinoterouted = 0;
 // Nonzero when the MIDI note has been played already, as it came (see
 // midinotehook()): the editor only enters it
 int midinoteplayed = 0;
@@ -1152,7 +1172,7 @@ void docommand(void)
 		// (ALT+DEL marks the patterns it changes itself)
 		if (((rawkey == KEY_DEL) || (rawkey == KEY_BACKSPACE)) && (editorInfo.epmarkchn != -1))
 			undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[editorInfo.epmarkchn].epnum, UNDO_AREA_DIRTY_CHECK);
-		if (((midinoteon) && (midichord > 1)) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))) ||
+		if (((midinoteon) && ((midichord > 1) || (midinoterouted))) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))) ||
 			((altpressed) && ((rawkey == KEY_UP) || (rawkey == KEY_DOWN))))
 		{
 			for (int i = 0;i < MAX_CHN;i++)
@@ -1309,9 +1329,11 @@ static unsigned chordtime = 0;
 // held, make a chord. A later key is a note of its own, even if the earlier
 // ones are still held (legato playing)
 #define MIDICHORDTIME 60
-// The next channel in turn (0 = the cursor's) for MIDI input on 2-3
-// channels, and (the editor's) where the cursor was after the last note
-static int midinextslot = 0;
+// For each group of channels (see midigroupof()): the next channel in turn
+// (0 = the group's first), and the chord's notes in the group so far. And
+// (the editor's) where the cursor was after the last note
+static int midinextslot[MAX_CHN + 1];
+static int chordgroupnotes[MAX_CHN + 1];
 static volatile int miditurnchn = -1;
 static volatile int miditurnrow = -1;
 // The editor's: the row of the chord's first note
@@ -1329,6 +1351,7 @@ static int chordrecnext = 0;
 #define MIDIASSIGN_CHN 0x03
 #define MIDIASSIGN_FIRST 0x04
 #define MIDIASSIGN_MASKSHIFT 3
+#define MIDIASSIGN_ROUTED 0x40
 #define MIDIASSIGN_PLAYED 0x80
 #define MIDIASSIGN_VALID 0x100
 #define MIDIASSIGN_REC 0x200
@@ -1336,16 +1359,47 @@ static int chordrecnext = 0;
 #define MIDIASSIGN_RECROWSHIFT 18
 #define MIDIASSIGN_RECTRANSSHIFT 25
 
-// Sets the number of channels MIDI chords go to (1-3, see midichord). The
-// notes still sounding from the MIDI keyboard are released, and the keys
-// still held forgotten (so that a lost note-off can't block chords for good)
-void setmidichord(int channels)
+// Where a note from MIDI channel `channel` (0-15) may go: the group (0 =
+// the cursor's: MIDI CURSOR, or a MIDI channel past 3; 1-3 = MIDI channel
+// 1-3 with MIDI INPUT 1-3), see midiinputsel
+int midigroupof(int channel)
+{
+	if ((midiinputsel >= 1) && (channel >= 0) && (channel < MAX_CHN)) return channel + 1;
+	return 0;
+}
+
+// The group's channels (the one a note on its own goes to first, then the
+// others in turn) into voices[]; returns how many (1-3)
+int midigroupvoices(int channel, int *voices)
+{
+	int g = midigroupof(channel);
+	int n, start, k;
+
+	if (!g)
+	{
+		int cur = editorInfo.epchn;
+		n = midichord;
+		if (n < 1) n = 1;
+		if (n > MAX_CHN) n = MAX_CHN;
+		if ((cur < 0) || (cur >= MAX_CHN)) cur = 0;
+		for (k = 0; k < n; k++) voices[k] = (cur + k) % MAX_CHN;
+		return n;
+	}
+	n = midichncount[g - 1];
+	if (n < 1) n = 1;
+	if (n > MAX_CHN) n = MAX_CHN;
+	start = g - 1;
+	if (start > MAX_CHN - n) start = MAX_CHN - n;
+	for (k = 0; k < n; k++) voices[k] = start + ((g - 1 - start) + k) % n;
+	return n;
+}
+
+// The notes still sounding from the MIDI keyboard are released, and the
+// keys still held forgotten (so that a lost note-off can't block chords for
+// good)
+static void midiinputreset(void)
 {
 	int c;
-
-	if (channels < 1) channels = 1;
-	if (channels > MAX_CHN) channels = MAX_CHN;
-	midichord = channels;
 
 	midi_lock();
 	for (c = 0; c < MAX_CHN; c++)
@@ -1356,13 +1410,76 @@ void setmidichord(int channels)
 	memset(midiheldchn, 0, sizeof midiheldchn);
 	midiheldcount = 0;
 	chordnotes = 0;
-	midinextslot = 0;
+	memset(midinextslot, 0, sizeof midinextslot);
+	memset(chordgroupnotes, 0, sizeof chordgroupnotes);
 	midi_unlock();
+}
 
+// The patterns (channels) of the MIDI INPUT setting shown (see midiinputsel)
+int midiinputcount(void)
+{
+	if ((midiinputsel >= 1) && (midiinputsel <= MAX_CHN)) return midichncount[midiinputsel - 1];
+	return midichord;
+}
+
+static void midiinputmessage(void)
+{
+	int voices[MAX_CHN];
+	int n, lo, hi, k;
+
+	if (!midiinputsel)
+	{
+		if (midichord > 1)
+			gui_message("MIDI CURSOR: any MIDI channel to %d channels from the cursor's, in turn", midichord);
+		else
+			gui_message("MIDI CURSOR: any MIDI channel to the cursor's channel");
+		return;
+	}
+	n = midigroupvoices(midiinputsel - 1, voices);
+	lo = hi = voices[0];
+	for (k = 1; k < n; k++)
+	{
+		if (voices[k] < lo) lo = voices[k];
+		if (voices[k] > hi) hi = voices[k];
+	}
+	if (n > 1)
+		gui_message("MIDI channel %d plays channels %d-%d in turn (MIDI channels 1-3 all at once)", midiinputsel, lo + 1, hi + 1);
+	else
+		gui_message("MIDI channel %d plays channel %d (MIDI channels 1-3 all at once)", midiinputsel, lo + 1);
+}
+
+// Sets the patterns (1-3 channels) of the MIDI INPUT setting shown
+void setmidiinputcount(int channels)
+{
+	if (channels < 1) channels = 1;
+	if (channels > MAX_CHN) channels = MAX_CHN;
+	if ((midiinputsel >= 1) && (midiinputsel <= MAX_CHN)) midichncount[midiinputsel - 1] = channels;
+	else midichord = channels;
+	midiinputreset();
+	midiinputmessage();
+}
+
+// MIDI CURSOR's patterns (the modern screen's CHORD button)
+void setmidichord(int channels)
+{
+	if (channels < 1) channels = 1;
+	if (channels > MAX_CHN) channels = MAX_CHN;
+	midichord = channels;
+	midiinputreset();
 	if (midichord > 1)
 		gui_message("MIDI input: notes go to %d channels in turn, chords to %d channels", midichord, midichord);
 	else
 		gui_message("MIDI input: notes go to the cursor's channel");
+}
+
+// Chooses the MIDI INPUT setting: 0 = MIDI CURSOR, 1-3 = MIDI INPUT 1-3
+void setmidiinput(int input)
+{
+	if (input < 0) input = MAX_CHN;
+	if (input > MAX_CHN) input = 0;
+	midiinputsel = input;
+	midiinputreset();
+	midiinputmessage();
 }
 
 // Sets STEPS (0-16): rows skipped after a note is entered
@@ -1786,7 +1903,7 @@ static int midinotehook(int type, int channel, int midinote, unsigned time)
 {
 	int note = FIRSTNOTE + midinote - 12;
 	int designer = gui_designeractive();
-	int chn, first = 1, mask = 0, played = 0, rec = 0;
+	int chn, first = 1, mask = 0, routed = 0, played = 0, rec = 0;
 
 	if ((note < FIRSTNOTE) || (note > LASTNOTE)) return 0;
 
@@ -1810,38 +1927,54 @@ static int midinotehook(int type, int channel, int midinote, unsigned time)
 		return MIDIASSIGN_VALID;
 	}
 
-	if (midichord <= 1)
 	{
-		// Every note to the cursor, like a note key
-		chn = editorInfo.epchn;
-		chordnotes = 0;
-	}
-	else if ((midiheldcount) && (chordnotes) && (time - chordtime <= MIDICHORDTIME))
-	{
-		// Struck together with the chord's first key: the next channel, on the
-		// chord's row
-		first = 0;
-		mask = chordmask;
-		if (chordnotes < midichord)
+		// Where the note goes (see midiinputsel): its group's channels. A note
+		// struck with the chord's first one, while that is held, goes on the
+		// chord's row (also across the groups); keys beyond a group's last
+		// channel are left out (a group on one channel takes every key)
+		int voices[MAX_CHN];
+		int g = midigroupof(channel);
+		int n = midigroupvoices(channel, voices);
+		int inchord = (midiheldcount) && (chordnotes) && (time - chordtime <= MIDICHORDTIME);
+
+		if ((!g) && (n <= 1))
 		{
-			chn = (editorInfo.epchn + midinextslot) % MAX_CHN;
-			midinextslot = (midinextslot + 1) % midichord;
-			chordmask |= 1 << chn;
-			chordnotes++;
+			// Every note to the cursor, like a note key
+			chn = editorInfo.epchn;
 		}
-		else chn = -1;
-	}
-	else
-	{
-		// A note of its own (or the first of a chord): the next channel in
-		// turn, on the cursor's row. If the cursor has been moved, the turn
-		// starts again at its channel
-		if ((editorInfo.epchn != miditurnchn) || (editorInfo.eppos != miditurnrow)) midinextslot = 0;
-		chn = (editorInfo.epchn + midinextslot) % MAX_CHN;
-		midinextslot = (midinextslot + 1) % midichord;
-		chordmask = 1 << chn;
-		chordnotes = 1;
-		chordtime = time;
+		else
+		{
+			// Its own channel(s), on the cursor's row
+			if (g) routed = 1;
+			if (inchord)
+			{
+				first = 0;
+				mask = chordmask;
+			}
+			else
+			{
+				chordmask = 0;
+				chordnotes = 0;
+				chordtime = time;
+				memset(chordgroupnotes, 0, sizeof chordgroupnotes);
+				// If the cursor has been moved, the turns start again
+				if ((editorInfo.epchn != miditurnchn) || (editorInfo.eppos != miditurnrow))
+					memset(midinextslot, 0, sizeof midinextslot);
+			}
+			if (n <= 1) chn = voices[0];
+			else if (chordgroupnotes[g] < n)
+			{
+				chn = voices[midinextslot[g] % n];
+				midinextslot[g] = (midinextslot[g] + 1) % n;
+				chordgroupnotes[g]++;
+			}
+			else chn = -1;
+			if (chn >= 0)
+			{
+				chordmask |= 1 << chn;
+				chordnotes++;
+			}
+		}
 	}
 	if ((chn < 0) || (chn >= MAX_CHN)) chn = -1;
 
@@ -1872,7 +2005,7 @@ static int midinotehook(int type, int channel, int midinote, unsigned time)
 				(((signed char)trans + 16) << MIDIASSIGN_RECTRANSSHIFT);
 	}
 	return MIDIASSIGN_VALID | (chn + 1) | (first ? MIDIASSIGN_FIRST : 0) | ((mask & 7) << MIDIASSIGN_MASKSHIFT) |
-		(played ? MIDIASSIGN_PLAYED : 0) | rec;
+		(routed ? MIDIASSIGN_ROUTED : 0) | (played ? MIDIASSIGN_PLAYED : 0) | rec;
 }
 
 // Where the MIDI note-on midinoteon goes, as the note hook decided
@@ -1882,6 +2015,7 @@ static void midichordassign(void)
 {
 	int a = midinoteassign;
 
+	midinoterouted = 0;
 	midinoteplayed = 0;
 	midirecord = 0;
 	if ((midinoteon < 0) || (midinoteon > LASTNOTE)) return;
@@ -1897,6 +2031,7 @@ static void midichordassign(void)
 	midichordchn = (a & MIDIASSIGN_CHN) - 1;
 	midichordfirst = (a & MIDIASSIGN_FIRST) != 0;
 	midichordmask = (a >> MIDIASSIGN_MASKSHIFT) & 7;
+	midinoterouted = (a & MIDIASSIGN_ROUTED) != 0;
 	midinoteplayed = (a & MIDIASSIGN_PLAYED) != 0;
 	if (a & MIDIASSIGN_REC)
 	{

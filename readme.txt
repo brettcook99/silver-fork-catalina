@@ -407,7 +407,8 @@ SPACE     Play from the cursor / stop, in every editor except the songname
 CTRL+SHIFT+mouse wheel Select the instrument, with the pointer anywhere
 CTRL+NUMPAD 1,2,3 Put the cursor on track (channel) 1, 2 or 3 in the pattern
           editor
-ALT+NUMPAD 1,2,3 MIDI INPUT 1, 2 or 3 PATTERNS (OPTION on macOS)
+ALT+NUMPAD 1,2,3 1, 2 or 3 PATTERNS for the MIDI INPUT setting shown
+          (OPTION on macOS)
 
 2.3.2 Pattern edit mode
 -----------------------
@@ -473,18 +474,33 @@ NUMPAD 1-8  Go to row 0, 8, 16, 24, 32, 40, 48 or 56
 Mouse wheel Scroll the pattern
 
 A MIDI keyboard enters notes like the note keys. MIDI INPUT (at the bottom
-of the retro screen; CHORD in the control bar of the modern interface) sets
-how many channels the MIDI notes go to: click it (right-click: back), use the
-mouse wheel over it or ALT/OPTION + numpad 1, 2 or 3. With 1 PATTERN every
-note goes to the cursor's channel. With 2 or 3 PATTERNS the notes go to that
-many channels, from the cursor's channel on, so that they can ring on
+of the retro screen) sets which channels (tracks) the MIDI notes go to. Its
+title chooses MIDI INPUT 1, MIDI INPUT 2, MIDI INPUT 3 or MIDI CURSOR (click
+it, right-click: back, or the mouse wheel over it), its value how many
+patterns (channels) that one plays, 1-3 (click, wheel or ALT/OPTION + numpad
+1, 2 or 3):
+- MIDI CURSOR: the notes of every MIDI channel go to the cursor's channel,
+  with 2 or 3 PATTERNS to that many channels from the cursor's channel on
+  (after channel 3 comes channel 1). The modern interface has only this (its
+  CHORD button in the control bar).
+- MIDI INPUT 1, 2, 3: MIDI channel 1 plays channel 1 (the left track), MIDI
+  channel 2 channel 2 (the middle one), MIDI channel 3 channel 3 (the right
+  one), all three at once and each with its own number of patterns: MIDI
+  INPUT 1 on 2 PATTERNS sends MIDI channel 1 to channels 1 and 2, while MIDI
+  INPUT 3 on 1 PATTERN keeps MIDI channel 3 on channel 3. On the right edge
+  the channels before are taken (MIDI channel 3 on 2 PATTERNS: channels 3 and
+  2). Choosing MIDI INPUT 1, 2 or 3 only picks which channel's setting is
+  shown and changed. Other MIDI channels (4-16) go to the cursor as with
+  MIDI CURSOR. The notes are entered on the cursor's row.
+On 2 or 3 PATTERNS the notes are shared out so that they can ring on
 together:
 - notes played one by one go to the next channel in turn (ping-pong), each
   on the cursor's row, and the cursor moves down after each note
 - keys struck together (within about 60 ms, a chord) go to the next channels
   too, all on one row; keys beyond the last channel are left out
-The turn starts again at the cursor's channel when you move the cursor. This
-works in jam mode too: the notes then only play, on their channels.
+The turn starts again at the first channel when you move the cursor. This
+works in jam mode too: the notes then only play, on their channels. The
+standalone program starts with MIDI CURSOR, the plugin with MIDI INPUT 1.
 
 STEPS (next to MIDI INPUT; STEP in the modern control bar) sets how many rows
 are skipped after a note is entered, 0-16: with 1 the cursor moves from row

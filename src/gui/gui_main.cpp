@@ -720,12 +720,12 @@ static void handlekeydown(const SDL_KeyboardEvent &k, int textscreen)
     return;
   }
 
-  // ALT/OPTION + numpad 1-3: MIDI INPUT 1-3 PATTERNS (by scancode: works
-  // with NumLock on and off)
+  // ALT/OPTION + numpad 1-3: 1-3 PATTERNS for the MIDI INPUT setting shown
+  // (by scancode: works with NumLock on and off)
   if ((k.keysym.scancode >= SDL_SCANCODE_KP_1) && (k.keysym.scancode <= SDL_SCANCODE_KP_3) &&
     (mod & KMOD_ALT) && (!(mod & (KMOD_CTRL | KMOD_GUI))))
   {
-    if ((!k.repeat) && (!textscreen)) setmidichord(k.keysym.scancode - SDL_SCANCODE_KP_1 + 1);
+    if ((!k.repeat) && (!textscreen)) setmidiinputcount(k.keysym.scancode - SDL_SCANCODE_KP_1 + 1);
     return;
   }
 
