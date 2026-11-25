@@ -26,7 +26,6 @@ extern int followsuspended;
 
 int gtsync_enabled = 1;
 int gtsync_startbar = 1;
-int gtsync_route = 1;
 int gtsync_recordoff = 1;
 
 static double samplerate = 44100.0;
@@ -89,9 +88,10 @@ static int syncing = 0;           // following the host is possible (DAW SYNC)
 // its song position in beats
 static double eventclock = 0.0;
 static double eventbeat = 0.0;
-// MIDI INPUT 2-3 (midichord): the next voice in turn, and when each voice's
-// note started (to take the oldest when all are playing)
-static int spreadturn = 0;
+// MIDI INPUT on 2-3 patterns (see midiinputsel): each group's next voice in
+// turn, and when each voice's note started (to take the oldest when all are
+// playing)
+static int spreadturn[MAX_CHN + 1];
 static unsigned spreadage[MAX_CHN];
 static unsigned spreadclock = 0;
 // The sustain pedal / footswitch (CC 64) is down: down = edit mode (the
@@ -492,33 +492,24 @@ static void recordnote(int c, int note, int instr, double framefraction, int sta
   recordpush(&rn);
 }
 
-// MIDI INPUT 2-3 PATTERNS: the voice a note-on plays on. The voices are the
-// cursor's channel and the next 1-2; the next one in turn that is free, or
-// if all are playing the one that started longest ago
-static int spreadvoices(int *base)
+// The voice a note-on from MIDI channel ch plays on (see midiinputsel): its
+// group's voices (midigroupvoices()); with 2-3 the next one in turn that is
+// free, or if all are playing the one that started longest ago
+static int spreadvoice(int ch)
 {
-  int n = midichord;
-
-  if (n > MAX_CHN) n = MAX_CHN;
-  if (n < 1) n = 1;
-  *base = editorInfo.epchn;
-  if ((*base < 0) || (*base >= MAX_CHN)) *base = 0;
-  return n;
-}
-
-static int spreadvoice(void)
-{
-  int base;
-  int n = spreadvoices(&base);
+  int voices[MAX_CHN];
+  int n = midigroupvoices(ch, voices);
+  int g = midigroupof(ch);
   int k, v = -1, slot = 0;
 
-  if (spreadturn >= n) spreadturn = 0;
+  if (n <= 1) return voices[0];
+  if (spreadturn[g] >= n) spreadturn[g] = 0;
   for (k = 0; k < n; k++)
   {
-    slot = (spreadturn + k) % n;
-    if (!routednote[(base + slot) % MAX_CHN])
+    slot = (spreadturn[g] + k) % n;
+    if (!routednote[voices[slot]])
     {
-      v = (base + slot) % MAX_CHN;
+      v = voices[slot];
       break;
     }
   }
@@ -527,7 +518,7 @@ static int spreadvoice(void)
     unsigned oldest = 0xffffffff;
     for (k = 0; k < n; k++)
     {
-      int c = (base + k) % MAX_CHN;
+      int c = voices[k];
       if (spreadage[c] <= oldest)
       {
         oldest = spreadage[c];
@@ -536,22 +527,21 @@ static int spreadvoice(void)
       }
     }
   }
-  spreadturn = (slot + 1) % n;
+  spreadturn[g] = (slot + 1) % n;
   spreadage[v] = ++spreadclock;
   return v;
 }
 
-// The voice playing a note (of the spread voices), -1 if none
-static int spreadfind(int note)
+// The voice playing a note from MIDI channel ch (of its group's), -1 if none
+static int spreadfind(int ch, int note)
 {
-  int base;
-  int n = spreadvoices(&base);
+  int voices[MAX_CHN];
+  int n = midigroupvoices(ch, voices);
   int k;
 
   for (k = 0; k < n; k++)
   {
-    int c = (base + k) % MAX_CHN;
-    if (routednote[c] == note) return c;
+    if (routednote[voices[k]] == note) return voices[k];
   }
   return -1;
 }
@@ -636,7 +626,7 @@ static void routednoteon(int ch, int note, double framefraction)
 {
   int playing = (songinit != PLAY_STOPPED);
   int ins = programinstr(ch);
-  int c = (midichord > 1) ? spreadvoice() : ch;
+  int c = spreadvoice(ch);
 
   // Before the song's first row: close to it (half a row) it belongs to the
   // first row
@@ -654,7 +644,7 @@ static void routednoteon(int ch, int note, double framefraction)
 static void routednoteoff(int ch, int note, double framefraction)
 {
   int playing = (songinit != PLAY_STOPPED);
-  int c = (midichord > 1) ? spreadfind(note) : ch;
+  int c = spreadfind(ch, note);
 
   if ((c < 0) || (routednote[c] != note)) return;
   routednote[c] = 0;
@@ -784,15 +774,20 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
   else if (type == 0xb0) ev = MIDI_CONTROL;
   else return;
 
-  // MIDI channels 1-3 play (and record) voices 1-3 here, in time with the
-  // player. With MIDI INPUT 2-3 PATTERNS (midichord) the channel doesn't
-  // matter: the notes of every channel are shared out to 2-3 voices, so that
-  // one DAW track can play chords and overlapping notes. In edit mode
-  // without playback (the host stopped) they are entered at the cursor like
-  // notes from a MIDI keyboard, a moment later (see holdevent()); so they
-  // are in the SID designer
-  spread = (midichord > 1);
-  if ((!gui_designeractive()) && ((spread) || ((gtsync_route) && (ch < MAX_CHN))))
+  // With MIDI INPUT 1-3 (see midiinputsel) MIDI channels 1-3 play (and record)
+  // voices 1-3 here, in time with the player, each on its 1-3 PATTERNS: on
+  // 2-3 the channel's notes are shared out to its voices, so that one DAW
+  // track can play chords and overlapping notes. Other MIDI channels (and
+  // every one with MIDI CURSOR) go to the cursor's voice, or on 2-3 PATTERNS
+  // are shared out from it, the same way. In edit mode without playback
+  // (the host stopped) they are entered at the cursor's row like notes from
+  // a MIDI keyboard, a moment later (see holdevent()); so they are in the
+  // SID designer
+  {
+    int voices[MAX_CHN];
+    spread = (midigroupof(ch)) || (midigroupvoices(ch, voices) > 1);
+  }
+  if ((!gui_designeractive()) && (spread))
   {
     int playing = (songinit != PLAY_STOPPED);
 

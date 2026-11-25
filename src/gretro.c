@@ -406,8 +406,9 @@ void retro_fxknob(int value)
 // channel 3's command column. The message area is at the right, under the
 // song info (from the C of COPYR.), the table view lock "U" in the corner
 #define PLAYCENTER 14
-#define INPUTCOLUMN 20
-#define INPUTWIDTH 10
+// (MIDI INPUT a column left of where it was: "MIDI INPUT 1" is longer)
+#define INPUTCOLUMN 19
+#define INPUTWIDTH 12
 #define STEPSCENTER 35
 #define STEPSCOLUMN (STEPSCENTER - 3)
 #define STEPSWIDTH 6
@@ -1328,13 +1329,19 @@ void retro_printstatus(void)
   printblankc(PLAYCENTER - 4, 35, CNORMAL, 9);
   printtextcentered(PLAYCENTER, 35, CTITLE, isplaying() ? "PLAYING" : "STOPPED");
 
-  // MIDI input: how many patterns (channels) the notes played on the MIDI
-  // keyboard go to. Click or wheel to change
-  printtext(INPUTCOLUMN, 35, CTITLE, "MIDI INPUT");
-  if (midichord > 1)
-    sprintf(textbuffer, "%d PATTERNS", midichord);
+  // MIDI input (see midiinputsel): MIDI INPUT 1-3 (MIDI channels 1-3 to their
+  // tracks) or MIDI CURSOR (any channel to the cursor's track), and how many
+  // patterns (channels) that one's notes go to. Click or wheel the title to
+  // choose, the value to change
+  printblankc(INPUTCOLUMN, 35, CNORMAL, INPUTWIDTH);
+  printblankc(INPUTCOLUMN, 36, CNORMAL, INPUTWIDTH);
+  if (midiinputsel) sprintf(textbuffer, "MIDI INPUT %d", midiinputsel);
+  else sprintf(textbuffer, "MIDI CURSOR");
+  printtext(INPUTCOLUMN, 35, CTITLE, textbuffer);
+  if (midiinputcount() > 1)
+    sprintf(textbuffer, "%d PATTERNS", midiinputcount());
   else
-    sprintf(textbuffer, "%d PATTERN ", midichord);
+    sprintf(textbuffer, "%d PATTERN", midiinputcount());
   printtext(INPUTCOLUMN, 36, CEDIT, textbuffer);
 
   // STEPS: rows skipped after a note is entered. Click or wheel to change
@@ -1533,6 +1540,22 @@ static int retrotablewheel(int d)
 // input, steps), the instrument parameters, the table values, the song
 // position ("POS xx"; while playing, the playback goes there too) and the
 // pattern numbers in the orderlist, and the effects panel's value. Returns
+// The MIDI INPUT setting d steps on, in the order MIDI INPUT 1, 2, 3, MIDI
+// CURSOR (round)
+static int nextmidiinput(int d)
+{
+  static const int order[MAX_CHN + 1] = {1, 2, 3, 0};
+  int k;
+
+  for (k = 0; k <= MAX_CHN; k++)
+  {
+    if (order[k] == midiinputsel) break;
+  }
+  if (k > MAX_CHN) k = 0;
+  k = ((k + d) % (MAX_CHN + 1) + (MAX_CHN + 1)) % (MAX_CHN + 1);
+  return order[k];
+}
+
 // nonzero if the wheel was over one of them
 static int retrowheel(void)
 {
@@ -1678,10 +1701,16 @@ static int retrowheel(void)
     return 1;
   }
 
-  // MIDI input (notes on 1-3 patterns)
-  if ((mousey >= 35) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH))
+  // MIDI input: the title chooses MIDI INPUT 1-3 / MIDI CURSOR, the value
+  // sets its patterns (1-3)
+  if ((mousey == 35) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH))
   {
-    setmidichord(clampvalue(midichord + d, 1, MAX_CHN));
+    setmidiinput(nextmidiinput(d));
+    return 1;
+  }
+  if ((mousey >= 36) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH))
+  {
+    setmidiinputcount(clampvalue(midiinputcount() + d, 1, MAX_CHN));
     return 1;
   }
 
@@ -1973,11 +2002,19 @@ void retro_mousecommands(void)
   {
     recordmode ^= 1;
   }
-  // MIDI input (notes on 1-3 patterns): left button = more, right = fewer
-  if ((!prevmouseb) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH) && (mousey >= 23 + 3 + 9))
+  // MIDI input: the title chooses MIDI INPUT 1, 2, 3, MIDI CURSOR (left
+  // button = next, right = previous), the value sets its patterns (left
+  // button = more, right = fewer)
+  if ((!prevmouseb) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH) && (mousey == 23 + 3 + 9))
   {
-    if (mouseb & MOUSEB_LEFT) setmidichord(midichord < MAX_CHN ? midichord + 1 : 1);
-    if (mouseb & MOUSEB_RIGHT) setmidichord(midichord > 1 ? midichord - 1 : MAX_CHN);
+    if (mouseb & MOUSEB_LEFT) setmidiinput(nextmidiinput(1));
+    if (mouseb & MOUSEB_RIGHT) setmidiinput(nextmidiinput(-1));
+  }
+  if ((!prevmouseb) && (mousex >= INPUTCOLUMN) && (mousex < INPUTCOLUMN + INPUTWIDTH) && (mousey >= 24 + 3 + 9))
+  {
+    int n = midiinputcount();
+    if (mouseb & MOUSEB_LEFT) setmidiinputcount(n < MAX_CHN ? n + 1 : 1);
+    if (mouseb & MOUSEB_RIGHT) setmidiinputcount(n > 1 ? n - 1 : MAX_CHN);
   }
   // STEPS: left button = more, right = fewer (held down: repeats)
   if (((!prevmouseb) || (mouseheld > HOLDDELAY)) && (mousex >= STEPSCOLUMN) && (mousex < STEPSCOLUMN + STEPSWIDTH) && (mousey >= 23 + 3 + 9))

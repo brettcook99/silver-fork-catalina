@@ -1577,7 +1577,6 @@ static void dawsyncdialog(void)
   {
     const char *labels[] = { "Close" };
     bool sync = gtsync_enabled != 0;
-    bool route = gtsync_route != 0;
     bool recordoff = gtsync_recordoff != 0;
     int startbar = gtsync_startbar;
     double hostbpm = gtsync_hostbpm();
@@ -1597,12 +1596,13 @@ static void dawsyncdialog(void)
       gtsync_startbar = startbar;
     }
     ImGui::Spacing();
-    if (ImGui::Checkbox("MIDI channels 1, 2, 3 play voices 1, 2, 3", &route)) gtsync_route = route ? 1 : 0;
-    body("In edit mode the notes are recorded into the patterns while the DAW plays; stopped they are entered at "
-      "the cursor. In jam mode they are only played. The sustain pedal / footswitch (CC 64) switches: down = edit "
-      "mode, up = jam mode (the middle mouse button and NUMPAD . switch too). Other MIDI channels work as a MIDI "
-      "keyboard does. With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the channel doesn't matter: the notes "
-      "are shared out to 2 or 3 voices, so one DAW track can play chords.");
+    body("MIDI INPUT (bottom of the screen): with MIDI INPUT 1, 2 or 3, MIDI channels 1, 2 and 3 play voices 1, 2 "
+      "and 3, all three at once, each on 1-3 PATTERNS of its own (on 2 or 3 its notes are shared out to the next "
+      "voices too, so one DAW track can play chords); other MIDI channels go to the cursor's voice. MIDI CURSOR "
+      "sends every MIDI channel to the cursor's voice (or 2-3 from it). In edit mode the notes are recorded into the "
+      "patterns while the DAW plays; stopped they are entered at the cursor's row. In jam mode they are only played. "
+      "The sustain pedal / footswitch (CC 64) switches: down = edit mode, up = jam mode (the middle mouse button "
+      "and NUMPAD . switch too).");
     if (ImGui::Checkbox("Record note-offs (as ---)", &recordoff)) gtsync_recordoff = recordoff ? 1 : 0;
     ImGui::Spacing();
     if (hostbpm > 0.0)

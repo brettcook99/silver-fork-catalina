@@ -656,14 +656,15 @@ static int settingstext(char *out, int outsize)
   ADD("stepsize=%d\n", stepsize);
   ADD("recordmode=%d\n", recordmode);
   ADD("followmode=%d\n", followmode);
+  ADD("midiinput=%d\n", midiinputsel);
   ADD("midichord=%d\n", midichord);
+  ADD("midichncount=%d,%d,%d\n", midichncount[0], midichncount[1], midichncount[2]);
   ADD("editstep=%d\n", editstep);
   ADD("octave=%d\n", editorInfo.epoctave);
   ADD("instrument=%d\n", editorInfo.einum);
   ADD("subtune=%d\n", editorInfo.esnum);
   ADD("sync=%d\n", gtsync_enabled);
   ADD("startbar=%d\n", gtsync_startbar);
-  ADD("route=%d\n", gtsync_route);
   ADD("recordoff=%d\n", gtsync_recordoff);
   // The instruments chosen by MIDI program changes, channels 1-16
   ADD("programs=");
@@ -929,13 +930,29 @@ static void applystate(const unsigned char *data, int size)
     // switch to edit mode)
     SETINT("followmode", followmode);
     SETINT("midichord", midichord);
+    // MIDI INPUT 1-3 / MIDI CURSOR (see midiinputsel). Projects from before it
+    // had "route" (MIDI channels 1-3 to voices 1-3) and MIDI INPUT 2-3
+    // PATTERNS (midichord) shared every channel's notes out from the cursor
+    {
+      int route = 1, input = -1;
+      char counts[64];
+      SETINT("route", route);
+      SETINT("midiinput", input);
+      if (input < 0) input = ((route) && (midichord <= 1)) ? 1 : 0;
+      midiinputsel = (input > MAX_CHN) ? 0 : input;
+      if (settingstring(text, "midichncount", counts, sizeof counts))
+        sscanf(counts, "%d,%d,%d", &midichncount[0], &midichncount[1], &midichncount[2]);
+      for (c = 0; c < MAX_CHN; c++)
+      {
+        if ((midichncount[c] < 1) || (midichncount[c] > MAX_CHN)) midichncount[c] = 1;
+      }
+    }
     SETINT("editstep", editstep);
     SETINT("octave", editorInfo.epoctave);
     SETINT("instrument", editorInfo.einum);
     SETINT("subtune", editorInfo.esnum);
     SETINT("sync", gtsync_enabled);
     SETINT("startbar", gtsync_startbar);
-    SETINT("route", gtsync_route);
     SETINT("recordoff", gtsync_recordoff);
     // SPEED was kept here before it became the speed table's row 01: an
     // X2 song without one gets it
@@ -1003,17 +1020,16 @@ static void programmessage(int changed)
   {
     int ins = gtsync_programinstr[ch];
     if ((!(changed & (1 << ch))) || (!ins) || (len >= (int)sizeof text - 32)) continue;
-    // Channels 1-3 play voices 1-3 (not with MIDI INPUT 2-3: then the
-    // channel's notes are shared out)
+    // MIDI INPUT 1-3: channels 1-3 play voices 1-3 (on 1 pattern)
     len += snprintf(text + len, sizeof text - len, "%s%s %d = %02X", len ? ", " : "",
-      ((gtsync_route) && (midichord <= 1) && (ch < MAX_CHN)) ? "voice" : "channel", ch + 1, ins);
+      ((midigroupof(ch)) && (midichncount[ch] <= 1)) ? "voice" : "channel", ch + 1, ins);
     count++;
     last = ch;
   }
   if (count == 1)
   {
     int ins = gtsync_programinstr[last];
-    if ((gtsync_route) && (midichord <= 1) && (last < MAX_CHN))
+    if ((midigroupof(last)) && (midichncount[last] <= 1))
       gui_message("Voice %d plays instrument %02X (MIDI program change)", last + 1, ins);
     else
       gui_message("MIDI channel %d plays instrument %02X (program change)", last + 1, ins);

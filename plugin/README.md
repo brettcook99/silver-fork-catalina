@@ -53,7 +53,8 @@ terms cover the "VST" name; the plugin is free software and isn't sold.
   in-between rows. Turn the mouse wheel over SPEED (SHIFT: 16 at a time), or
   a knob sending MIDI CC 90 while the mouse is over it, also while playing;
   typing in the speed table changes it too. It is saved with the song.
-- **MIDI**: channels 1, 2 and 3 play voices 1, 2 and 3. The plugin starts in
+- **MIDI**: with **MIDI INPUT 1, 2 or 3** (bottom of the screen, the default)
+  MIDI channels 1, 2 and 3 play voices 1, 2 and 3. The plugin starts in
   jam mode. The **sustain pedal / footswitch (CC 64)** switches: pressed =
   edit mode, released = jam mode (ESC, the middle mouse button and NUMPAD . switch
   too, and the mode stays until one of them switches again; the DAW's own
@@ -62,9 +63,13 @@ terms cover the "VST" name; the plugin is free software and isn't sold.
   one playback pass is one undo step), so three MIDI tracks on channels 1-3
   record three voices at once; with the song stopped they are entered at the
   cursor. (The DAW sends a track's live MIDI only while the track is armed or
-  selected.) With MIDI INPUT 2 or 3 PATTERNS (bottom of the screen) the MIDI
-  channel doesn't matter: the notes are shared out to 2 or 3 voices from the
-  cursor's (the next free one in turn), so one DAW track can play chords.
+  selected.) Each of MIDI channels 1-3 has its own 1-3 PATTERNS: click MIDI
+  INPUT's title to choose MIDI INPUT 1, 2 or 3, its value to set that
+  channel's patterns. On 2 or 3 the channel's notes are shared out to its
+  voice and the next (the next free one in turn), so one DAW track can play
+  chords: MIDI INPUT 1 on 2 PATTERNS plays voices 1 and 2 while channel 3
+  keeps voice 3. **MIDI CURSOR** instead sends every MIDI channel to the
+  cursor's voice, or with 2-3 PATTERNS shares them out from it.
   CTRL+SHIFT+RETURN (CMD+SHIFT+RETURN on macOS) enters a keyoff. Other
   channels and the CC knobs work as a MIDI keyboard does in the standalone
   program (CC 60 chooses the instrument, CC 90 sets the value of the effect

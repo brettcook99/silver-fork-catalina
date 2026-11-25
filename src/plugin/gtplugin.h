@@ -76,7 +76,6 @@ void gtplugin_sounduninit(void);
 // DAW SYNC settings (saved with the project)
 extern int gtsync_enabled;        // follow the host's tempo & position
 extern int gtsync_startbar;       // the song starts at this bar (1 = first)
-extern int gtsync_route;          // MIDI channels 1-3 play / record voices 1-3
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
 // The sustain pedal (CC 64) switched the mode: 1 = edit, 2 = jam (for the
 // message)
