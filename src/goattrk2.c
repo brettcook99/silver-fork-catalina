@@ -312,8 +312,12 @@ int main(int argc, char **argv)
 		getparam(configfile, &midiinput);
 		getparam(configfile, (unsigned *)&followmode);
 		getparam(configfile, &textsizepercent);
-		getparam(configfile, &uimode);
-		for (c = 0; c < FOLDER_KINDS; c++)
+		// Older config files have the interface used last (1 or 2) here: a
+		// folder line is never just that, so such a line is skipped
+		getpathparam(configfile, configfolder[0]);
+		if ((!strcmp(configfolder[0], "1")) || (!strcmp(configfolder[0], "2")))
+			getpathparam(configfile, configfolder[0]);
+		for (c = 1; c < FOLDER_KINDS; c++)
 			getpathparam(configfile, configfolder[c]);
 		getparam(configfile, &retrogradient);
 		for (c = 0; c < 3; c++)
@@ -717,7 +721,6 @@ int main(int argc, char **argv)
 			";MIDI keyboard input (0 = off, 1 = on)\n%d\n\n"
 			";Follow playback in the pattern editor (0 = off, 1 = on)\n%d\n\n"
 			";Text size in percent (100 = default)\n%d\n\n"
-			";Interface used last (1 = modern, 2 = retro; the program always starts retro)\n%d\n\n"
 			";Folder of the song file dialogs (0 = none)\n%s\n\n"
 			";Folder of the instrument file dialogs (0 = none)\n%s\n\n"
 			";Folder of the import dialogs: SID, MIDI, chipsynth (0 = none)\n%s\n\n"
@@ -771,7 +774,6 @@ int main(int argc, char **argv)
 			midiinput,
 			followmode,
 			textsizepercent,
-			uimode,
 			songpath[0] ? songpath : "0",
 			instrpath[0] ? instrpath : "0",
 			importpath[0] ? importpath : "0",
