@@ -120,8 +120,9 @@ void onlinehelp(int standalone,int context)
     "RESO (bottom): X2 = twice the rows",
     "  per beat (click: OFF / X2)",
 #ifdef GT_PLUGIN
-    "SPEED (X2, under CHN3): where the",
-    "  in-between rows fall in DAW SYNC",
+    "SPEED (X2, under CHN3): SPEEDTBL 01",
+    "  right value, where the in-between",
+    "  rows fall, as E01 would place them",
     "  (wheel or MIDI CC 90 over it)",
 #else
     "BPM (X2, under CHN3): the wheel",

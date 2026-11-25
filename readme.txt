@@ -509,19 +509,28 @@ with the highlight step 4: 125, 93.8, 75, 62.5... BPM; three frames a row is
 the fastest). The song starts with the new tempo too: its tempo command on
 the first row, or else the tempo of instrument $3F.
 
-In the plugin it is SPEED (default 32): while following the DAW (DAW SYNC)
-the two rows of each pair (the beat's row from before X2 and the one put in
-between) are no longer equally long. The in-between row starts where the
-funktempo command E01 with speed table values 00 / SPEED would start it: the
-first row lasts 256 frames' worth and the second SPEED (00 = 256): SPEED 32
-puts it at 84% of the pair, 80 at 67% (triplet swing), 00 and FF in the
-middle (even). Notes recorded from the DAW go to the nearest row of that
-grid, so off-beat and shuffled playing lands on the in-between rows. The
-song's own tempo and its instruments' tables aren't changed (no E command or
-speed table entry is needed), and without DAW SYNC the rows are even. Turn
-the mouse wheel over SPEED (SHIFT: 16 at a time) or a MIDI knob sending
-CC 90 (0-127 over 00-FF) while the mouse is over it; the plugin keeps the
-value with the project.
+In the plugin it is SPEED: the right value of the speed table's row 01
+(SPEEDTBL 01), which X2 sets to 00 32 when the row is empty. If the song
+uses row 01 itself (an instrument's vibrato or a portamento / vibrato
+command), X2 first moves the song's speed table down one row, the
+instruments and commands with it, so it sounds the same. With X2 the
+row works as the funktempo command E01 would, without E01 in a pattern: the
+two rows of each pair (the beat's row from before X2 and the one put in
+between) are no longer equally long. The first lasts the left value's frames
+and the second the right value's (00 = 256), so the in-between row starts at
+left / (left + right) of the pair: 00 32 puts it at 84%, 00 80 at 67%
+(triplet swing), 00 00 in the middle (even). While following the DAW (DAW
+SYNC) the pair keeps the DAW's beat; otherwise it keeps the song's own
+tempo. Notes recorded go to the nearest row of that grid, so off-beat and
+shuffled playing lands on the in-between rows. The song's instruments'
+tables run at their own speed. Turn the mouse wheel over SPEED (SHIFT: 16 at
+a time) or a MIDI knob sending CC 90 (0-127 over 00-FF) while the mouse is
+over it, also while the song plays; the table's cursor goes to row 01.
+Typing in the speed table changes SPEED too, and the value is saved with
+the song. A song that comes with X2 and uses row 01 itself shows SPEED --
+and plays its rows evenly; turning the wheel over SPEED then moves its speed
+table down as X2 does (CTRL+Z undoes). E01 in a pattern still works as
+always.
 
 X2 doesn't switch on if a pattern in use would get more than 128 rows (more
 than 64 rows), if a tempo would give rows shorter than 3 frames (X2 needs a

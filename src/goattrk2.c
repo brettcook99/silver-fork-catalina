@@ -1747,6 +1747,9 @@ void setresomode(int k)
 	int from = resomode;
 	int moved = 0, lost = 0;
 	int empty, start, c;
+#ifdef GT_PLUGIN
+	int speedclaim = 1;
+#endif
 
 	if (k < 1) k = 1;
 	if (k > RESOMAX) k = RESOMAX;
@@ -1765,6 +1768,11 @@ void setresomode(int k)
 		undoAreaSetCheckForChange(UNDO_AREA_PATTERN, c, UNDO_AREA_DIRTY_CHECK);
 	undoAreaSetCheckForChange(UNDO_AREA_PATTERN_LEN, 0, UNDO_AREA_DIRTY_CHECK);
 	undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, RESOINSTR, UNDO_AREA_DIRTY_CHECK);
+#ifdef GT_PLUGIN
+	// SPEED is the speed table's row 01 (see gtplugin_audio.c): 00 32 if it
+	// is empty; if the song uses the row itself its speed table moves down
+	if (k == 2) speedclaim = gtsync_claimspeedrow();
+#endif
 
 	empty = songempty();
 	start = resostarttempo();
@@ -1801,6 +1809,12 @@ void setresomode(int k)
 			lost, (lost == 1) ? "" : "s");
 	else if (moved)
 		gui_message("RESO %s: %d note%s moved to the nearest row", (k > 1) ? resoname[k] + 5 : "OFF", moved, (moved == 1) ? "" : "s");
+#ifdef GT_PLUGIN
+	else if ((k == 2) && (speedclaim == 2))
+		gui_message("RESO X2: SPEED is SPEEDTBL 01 (00 32), the song's speed table moved down a row");
+	else if ((k == 2) && (speedclaim == 0))
+		gui_message("RESO X2: SPEED needs SPEEDTBL 01, the song uses it and the table is full");
+#endif
 	else if (k > 1)
 		gui_message("RESO %s: %d times the rows per beat, new patterns %d rows", resoname[k] + 5, k, resopatternlength(k));
 	else
@@ -1812,6 +1826,9 @@ static void resosync(void)
 {
 	int k = resomarked();
 
+#ifdef GT_PLUGIN
+	gtsync_updatespeedrow();
+#endif
 	if (k == resomode) return;
 	resolock();
 	resoapply(k);

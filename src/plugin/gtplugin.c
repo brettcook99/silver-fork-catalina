@@ -516,6 +516,76 @@ const char *gtplugin_getclipboard(void)
 
 SDL_mutex *gtplugin_enginemutex = NULL;
 
+/*
+ * SPEED's row (the speed table's row 01, see gtplugin_audio.c)
+ */
+
+volatile int gtsync_speedrowused = 0;
+
+// Does the song use the speed table's row 01 itself: an instrument's
+// vibrato, or a portamento / vibrato command (1-4) in a pattern or the wave
+// table? (Funktempo E01 is what SPEED stands for, so it doesn't count)
+int gtsync_speedrowreferenced(void)
+{
+  int c, d;
+
+  for (c = 1; c < MAX_INSTR; c++)
+  {
+    if (instr[c].ptr[STBL] == 1) return 1;
+  }
+  for (c = 0; c < MAX_TABLELEN; c++)
+  {
+    if ((ltable[WTBL][c] >= WAVECMD) && (ltable[WTBL][c] <= WAVELASTCMD))
+    {
+      int cmd = ltable[WTBL][c] & 0xf;
+      if ((cmd >= CMD_PORTAUP) && (cmd <= CMD_VIBRATO) && (rtable[WTBL][c] == 1)) return 1;
+    }
+  }
+  for (c = 0; c < MAX_PATT; c++)
+  {
+    for (d = 0; d < MAX_PATTROWS; d++)
+    {
+      const unsigned char *p = &pattern[c][d * 4];
+      if (p[0] == ENDPATT) break;
+      if ((p[3] == 1) && (p[2] >= CMD_PORTAUP) && (p[2] <= CMD_VIBRATO)) return 1;
+    }
+  }
+  return 0;
+}
+
+void gtsync_updatespeedrow(void)
+{
+  gtsync_speedrowused = (resomode == 2) && (gtsync_speedrowreferenced());
+}
+
+int gtsync_claimspeedrow(void)
+{
+  int c;
+
+  if (!gtsync_speedrowreferenced())
+  {
+    if ((!ltable[STBL][0]) && (!rtable[STBL][0]))
+    {
+      undoAreaSetCheckForChange(UNDO_AREA_TABLES + STBL, 1, UNDO_AREA_DIRTY_CHECK);
+      rtable[STBL][0] = 0x32;
+    }
+    gtsync_speedrowused = 0;
+    return 1;
+  }
+  if (gettablelen(STBL) >= MAX_TABLELEN) return 0;
+  undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, UNDO_ALL_SUBINDEXES, UNDO_AREA_DIRTY_CHECK);
+  for (c = 0; c < MAX_PATT; c++)
+    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, c, UNDO_AREA_DIRTY_CHECK);
+  undoAreaSetCheckForChange(UNDO_AREA_TABLES + WTBL, 1, UNDO_AREA_DIRTY_CHECK);
+  undoAreaSetCheckForChange(UNDO_AREA_TABLES + STBL, 0, UNDO_AREA_DIRTY_CHECK);
+  undoAreaSetCheckForChange(UNDO_AREA_TABLES + STBL, 1, UNDO_AREA_DIRTY_CHECK);
+  inserttable(STBL, 0, 0);
+  ltable[STBL][0] = 0;
+  rtable[STBL][0] = 0x32;
+  gtsync_speedrowused = 0;
+  return 2;
+}
+
 void gtplugin_lockengine(void)
 {
   SDL_LockMutex(gtplugin_enginemutex);
@@ -595,7 +665,6 @@ static int settingstext(char *out, int outsize)
   ADD("startbar=%d\n", gtsync_startbar);
   ADD("route=%d\n", gtsync_route);
   ADD("recordoff=%d\n", gtsync_recordoff);
-  ADD("speed=%d\n", gtsync_speed);
   // The instruments chosen by MIDI program changes, channels 1-16
   ADD("programs=");
   for (c = 0; c < 16; c++) ADD("%d%s", gtsync_programinstr[c], (c < 15) ? "," : "\n");
@@ -868,8 +937,14 @@ static void applystate(const unsigned char *data, int size)
     SETINT("startbar", gtsync_startbar);
     SETINT("route", gtsync_route);
     SETINT("recordoff", gtsync_recordoff);
-    SETINT("speed", gtsync_speed);
-    gtsync_speed &= 0xff;
+    // SPEED was kept here before it became the speed table's row 01: an
+    // X2 song without one gets it
+    {
+      int speed = -1;
+      SETINT("speed", speed);
+      if ((speed >= 0) && (resomode == 2) && (!ltable[STBL][0]) && (!rtable[STBL][0]))
+        rtable[STBL][0] = speed & 0xff;
+    }
     {
       char programs[128];
       if (settingstring(text, "programs", programs, sizeof programs))

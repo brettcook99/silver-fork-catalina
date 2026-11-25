@@ -414,9 +414,9 @@ void retro_fxknob(int value)
 #define RESOCENTER 42
 #define RESOCOLUMN (RESOCENTER - 2)
 #define RESOWIDTH 5
-// Under CHN3, with RESO X2 only: SPEED in the plugin (where the in-between
-// rows fall while following the DAW, see gtplugin_audio.c), BPM in the
-// standalone program (the tempo; the wheel changes it)
+// Under CHN3, with RESO X2 only: SPEED in the plugin (the speed table's row
+// 01, right value: where the in-between rows fall, see gtplugin_audio.c),
+// BPM in the standalone program (the tempo; the wheel changes it)
 #define SPDCOLUMN (FXCENTER - 4)
 #define SPDWIDTH 9
 #define MSGCOLUMN RX
@@ -637,16 +637,40 @@ static int overspeed(void)
 }
 
 #ifdef GT_PLUGIN
-// SPEED (RESO X2, while following the DAW): the place of the in-between row
-// in each pair, as the funktempo command E01 with speed table values $00 /
-// SPEED would make the rows (256 and SPEED frames, 00 = 256)
+// SPEED (RESO X2): the speed table's row 01, right value. The row makes the
+// two rows of each pair as the funktempo command E01 would (left and right
+// frames, 00 = 256), without E01 in a pattern: see gtplugin_audio.c. The
+// table's cursor goes to the row, so it shows what changes
 static void setspeed(int v)
 {
-  int s;
+  int l, r;
 
-  gtsync_speed = clampvalue(v, 0, 0xff);
-  s = gtsync_speed ? gtsync_speed : 256;
-  gui_message("SPEED %02X: row 2 of each pair at %d%% (DAW SYNC)", gtsync_speed, (int)(25600.0 / (256 + s) + 0.5));
+  if (gtsync_speedrowused)
+  {
+    int claim;
+    gtplugin_lockengine();
+    claim = gtsync_claimspeedrow();
+    gtplugin_unlockengine();
+    if (!claim)
+    {
+      gui_message("SPEED needs SPEEDTBL 01: the song uses it and the table is full");
+      return;
+    }
+    editorInfo.etnum = STBL;
+    editorInfo.etpos = 0;
+    editorInfo.etcolumn = 2;
+    gui_message("SPEED is SPEEDTBL 01 (00 32): the song's speed table moved down a row (CTRL+Z undoes)");
+    return;
+  }
+  rtable[STBL][0] = (unsigned char)clampvalue(v, 0, 0xff);
+  undoAreaSetCheckForChange(UNDO_AREA_TABLES + STBL, 1, UNDO_AREA_DIRTY_CHECK);
+  editorInfo.etnum = STBL;
+  editorInfo.etpos = 0;
+  editorInfo.etcolumn = 2;
+  l = ltable[STBL][0] ? ltable[STBL][0] : 256;
+  r = rtable[STBL][0] ? rtable[STBL][0] : 256;
+  gui_message("SPEED %02X (SPEEDTBL 01: %02X %02X): row 2 of each pair at %d%%", rtable[STBL][0], ltable[STBL][0],
+    rtable[STBL][0], (int)(100.0 * l / (l + r) + 0.5));
 }
 #else
 // The tempo (frames per row) the song starts with, where starttempo() finds
@@ -1334,7 +1358,9 @@ void retro_printstatus(void)
   {
 #ifdef GT_PLUGIN
     printtextcentered(FXCENTER, 35, CTITLE, "SPEED");
-    sprintf(textbuffer, "%02X", gtsync_speed & 0xff);
+    // -- while the song uses the speed table's row 01 itself
+    if (gtsync_speedrowused) sprintf(textbuffer, "--");
+    else sprintf(textbuffer, "%02X", rtable[STBL][0]);
 #else
     double bpm = currentbpm();
     int whole = (int)(bpm + 0.5);
@@ -1517,7 +1543,7 @@ static int retrowheel(void)
   if (overspeed())
   {
 #ifdef GT_PLUGIN
-    setspeed(gtsync_speed + d * (shiftpressed ? 16 : 1));
+    setspeed(rtable[STBL][0] + d * (shiftpressed ? 16 : 1));
 #else
     bpmwheel(ctrlpressed ? d * 2 : d);
 #endif

@@ -25,7 +25,6 @@ extern int psnum;
 extern int followsuspended;
 
 int gtsync_enabled = 1;
-int gtsync_speed = 0x32;
 int gtsync_startbar = 1;
 int gtsync_route = 1;
 int gtsync_recordoff = 1;
@@ -262,22 +261,43 @@ static double framerate(int sync)
   return ownframerate();
 }
 
-// SPEED (RESO X2 while following the host): the rows come in pairs, a beat's
-// row from before X2 and the row X2 put in between. As the funktempo command
-// E01 with speed table values $00 / SPEED makes them (256 and SPEED frames;
-// SPEED 00 = 256 frames), the in-between row starts at 256 / (256 + SPEED)
-// of the pair. The song itself runs at its own frames per row, so its
-// instruments' tables keep their speed: the host's beats are mapped to the
-// song's instead, warp() from the host's to the song's, unwarp() back. They
-// are the same at each pair's start, before the song's start and with an
-// even pair (0.5)
+// SPEED (RESO X2): the rows come in pairs, a beat's row from before X2 and
+// the row X2 put in between. The speed table's row 01 makes them as the
+// funktempo command E01 would, without E01 in a pattern: the left value is
+// the first row's frames and the right one (SPEED) the second's (00 = 256),
+// so the in-between row starts at left / (left + right) of the pair (00 32:
+// 84%). While following the host the song runs at its own frames per row,
+// so its instruments' tables keep their speed: the host's beats are mapped
+// to the song's instead, warp() from the host's to the song's, unwarp()
+// back. They are the same at each pair's start, before the song's start and
+// with an even pair (0.5). Without the host the frames come at a different
+// rate on the pair's two rows (ownswing()). While the song uses row 01
+// itself (gtsync_speedrowused) the rows are even
 static double swingpoint(void)
 {
-  int s = gtsync_speed & 0xff;
+  int l = ltable[STBL][0];
+  int r = rtable[STBL][0];
 
-  if (resomode != 2) return 0.5;
-  if (!s) s = 256;
-  return 256.0 / (256.0 + s);
+  if ((resomode != 2) || (gtsync_speedrowused)) return 0.5;
+  if (!l) l = 256;
+  if (!r) r = 256;
+  return (double)l / (double)(l + r);
+}
+
+static int evenpair(double a)
+{
+  return fabs(a - 0.5) < 1e-9;
+}
+
+// Without the host: how much longer than usual the frames of the row playing
+// last (the first row of a pair 2a, the second 2(1 - a); 1 when the song
+// isn't playing)
+static double ownswing(void)
+{
+  double a = swingpoint();
+
+  if ((evenpair(a)) || (songinit == PLAY_STOPPED) || (!chn[0].playvalid)) return 1.0;
+  return (chn[0].playrow & 1) ? 2.0 * (1.0 - a) : 2.0 * a;
 }
 
 static double rowbeats(void);
@@ -287,7 +307,7 @@ static double warp(double b)
   double a = swingpoint();
   double p, k, x;
 
-  if ((a <= 0.5) || (b <= 0.0)) return b;
+  if ((evenpair(a)) || (b <= 0.0)) return b;
   p = 2.0 * rowbeats();
   k = floor(b / p);
   x = b - k * p;
@@ -301,7 +321,7 @@ static double unwarp(double y)
   double a = swingpoint();
   double p, k, r;
 
-  if ((a <= 0.5) || (y <= 0.0)) return y;
+  if ((evenpair(a)) || (y <= 0.0)) return y;
   p = 2.0 * rowbeats();
   k = floor(y / p);
   r = y - k * p;
@@ -916,7 +936,7 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
       }
       else
       {
-        double spf = samplerate / framerate(sync);
+        double spf = samplerate / framerate(sync) * ownswing();
         fraction = 1.0 - framecount / spf;
       }
       if (fraction < 0.0) fraction = 0.0;
@@ -976,7 +996,7 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
       if (framecount < 0.5)
       {
         playframe();
-        framecount += samplerate / framerate(sync);
+        framecount += samplerate / framerate(sync) * ownswing();
         continue;
       }
       if (framecount < n) n = (int)ceil(framecount - 0.5);

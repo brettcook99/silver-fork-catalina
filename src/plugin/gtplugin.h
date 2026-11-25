@@ -78,12 +78,19 @@ extern int gtsync_enabled;        // follow the host's tempo & position
 extern int gtsync_startbar;       // the song starts at this bar (1 = first)
 extern int gtsync_route;          // MIDI channels 1-3 play / record voices 1-3
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
-// SPEED (RESO X2 while following the host): the in-between rows' place, as
-// funktempo with speed table values $00 / SPEED (0-255, 0 = even)
-extern int gtsync_speed;
 // The sustain pedal (CC 64) switched the mode: 1 = edit, 2 = jam (for the
 // message)
 extern volatile int gtsync_modechange;
+// SPEED (RESO X2) is the speed table's row 01, see gtplugin_audio.c. While
+// the song uses that row itself (vibrato, portamento) SPEED is off: set
+// every frame on the GoatTracker thread (gtsync_updatespeedrow())
+extern volatile int gtsync_speedrowused;
+int gtsync_speedrowreferenced(void);
+void gtsync_updatespeedrow(void);
+// Makes row 01 SPEED's: 00 00 becomes 00 32; if the song uses the row, its
+// speed table moves down a row first (the references with it). Returns 0
+// if the table is full, 1 if the row was free, 2 if the song's rows moved
+int gtsync_claimspeedrow(void);
 // MIDI program changes: the instrument of each MIDI channel's notes (0 = the
 // editor's instrument; saved with the project), the channels that got one
 // since the GoatTracker thread looked (bits 0-15, for its message; bit
