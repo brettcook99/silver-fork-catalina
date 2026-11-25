@@ -69,6 +69,9 @@ int gui_filemenushown(void);
 // The command of the dropdown entry under the mouse (-1 none), and closing
 // the dropdown: the menu bar's right-button release (gretro.c)
 int gui_filemenuhovered(void);
+// The file of that entry when the command is GTCMD_OPENFILE (LOAD > Open
+// Recent)
+const char *gui_filemenuhoveredpath(void);
 void gui_closefilemenu(void);
 void gui_designermidi(int noteon, int noteoff);
 // A MIDI control change (knob) while the SID designer is shown: attack

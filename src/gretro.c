@@ -576,7 +576,8 @@ static void tbmenuupdate(void)
     {
       int cmd = (tbmenudrop >= 0) ? gui_filemenuhovered() : -1;
 
-      if (cmd >= 0) cmd_post(cmd);
+      if (cmd == GTCMD_OPENFILE) cmd_postfile(cmd, gui_filemenuhoveredpath());
+      else if (cmd >= 0) cmd_post(cmd);
       gui_closefilemenu();
       tbmenuclose();
       return;

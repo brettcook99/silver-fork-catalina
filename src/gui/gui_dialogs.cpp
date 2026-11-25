@@ -1237,6 +1237,11 @@ static int filemenucolumn = 0;
 static int filemenushown = -1;
 static int filemenuhover = -1;     // the command of the entry under the mouse
 static bool filemenuclose = false; // closing asked for
+// LOAD > Open Recent: the file of the entry under the mouse (filemenuhover
+// is then GTCMD_OPENFILE), whether its list should close (the mouse on
+// another entry of LOAD)
+static char filemenupath[MAX_PATHNAME] = "";
+static bool recentclose = false;
 
 extern "C" void gui_openfilemenu(int which, int column)
 {
@@ -1252,6 +1257,11 @@ extern "C" int gui_filemenushown(void)
 extern "C" int gui_filemenuhovered(void)
 {
   return (filemenushown >= 0) ? filemenuhover : -1;
+}
+
+extern "C" const char *gui_filemenuhoveredpath(void)
+{
+  return filemenupath;
 }
 
 extern "C" void gui_closefilemenu(void)
@@ -1270,6 +1280,7 @@ static void fmitem(const char *label, const char *shortcut, int cmd, bool enable
   if ((enabled) && (ImGui::IsMouseHoveringRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), false)))
   {
     filemenuhover = cmd;
+    recentclose = true;
     // Shown as hovered there too
     if (!ImGui::IsItemHovered())
     {
@@ -1277,6 +1288,71 @@ static void fmitem(const char *label, const char *shortcut, int cmd, bool enable
       c.w *= 0.6f;
       ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImGui::GetColorU32(c));
     }
+  }
+}
+
+// LOAD > Open Recent: the files opened, loaded, imported or saved last (the
+// plugin's own list, newest first). Its list opens to the right when the
+// mouse is on it (also while the right button is held from the title bar,
+// when ImGui counts nothing as hovered, so the list is a popup of its own);
+// an entry opens the file as LOAD > Song does
+static void recentmenu(void)
+{
+  int n = gui_recentfilecount();
+  bool enabled = n > 0;
+  ImVec2 a, b;
+  int c;
+
+  if (ImGui::MenuItem("Open Recent", ">", false, enabled)) recentclose = false;
+  a = ImGui::GetItemRectMin();
+  b = ImGui::GetItemRectMax();
+  if ((enabled) && (ImGui::IsMouseHoveringRect(a, b, false)))
+  {
+    recentclose = false;
+    if (!ImGui::IsItemHovered())
+    {
+      ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+      col.w *= 0.6f;
+      ImGui::GetWindowDrawList()->AddRectFilled(a, b, ImGui::GetColorU32(col));
+    }
+    if (!ImGui::IsPopupOpen("##recent")) ImGui::OpenPopup("##recent");
+  }
+  ImGui::SetNextWindowPos(ImVec2(b.x, a.y - ImGui::GetStyle().WindowPadding.y), ImGuiCond_Appearing);
+  if (ImGui::BeginPopup("##recent"))
+  {
+    if ((recentclose) || (filemenuclose))
+    {
+      recentclose = false;
+      ImGui::CloseCurrentPopup();
+      ImGui::EndPopup();
+      return;
+    }
+    for (c = 0; c < n; c++)
+    {
+      const char *path = gui_recentfile(c);
+
+      ImGui::PushID(c);
+      if (ImGui::MenuItem(gt_basename(path)))
+      {
+        cmd_postfile(GTCMD_OPENFILE, path);
+        // The LOAD dropdown closes too
+        filemenuclose = true;
+      }
+      if (ImGui::IsMouseHoveringRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), false))
+      {
+        filemenuhover = GTCMD_OPENFILE;
+        snprintf(filemenupath, sizeof filemenupath, "%s", path);
+        if (!ImGui::IsItemHovered())
+        {
+          ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered);
+          col.w *= 0.6f;
+          ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), ImGui::GetColorU32(col));
+        }
+        else ImGui::SetTooltip("%s", path);
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndPopup();
   }
 }
 
@@ -1321,6 +1397,7 @@ static void filemenu(void)
     {
       case 0:
       fmitem("Song...", "F10", GTCMD_OPEN);
+      recentmenu();
       fmitem("Instrument...", NULL, GTCMD_LOADINSTR);
       ImGui::Separator();
       fmitem("Merge Song...", NULL, GTCMD_MERGE);
