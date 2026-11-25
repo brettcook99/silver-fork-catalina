@@ -437,8 +437,10 @@ SHIFT+DEL   Insert rest and clear commands (rows marked: their commands too)
 BACKSPACE   Delete row (on the end mark: shorten the pattern). DEL used to
             do this; it shifted the rest of the pattern out of step with
             the other channels too easily
-CTRL+BKSP.  Insert row (also INS, OPTION+BACKSPACE; on the end mark:
-            lengthen the pattern)
+CTRL+BKSP.  Insert row (also INS; on the end mark: lengthen the pattern)
+ALT+DEL     Remove the note-offs (---), the notes stay: from the marked rows,
+            or with nothing marked from every pattern of the cursor's track
+            (OPTION+DELETE on macOS, ALT/OPTION+BACKSPACE too)
 CTRL+CRSR   Nudge the cursor row (note, instrument, command) a row up or
             down, or to the track left or right (same row). It changes
             places with the row it goes to, so nothing is lost, and the
