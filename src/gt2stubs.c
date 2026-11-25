@@ -8,6 +8,7 @@
 
 void retro_printstatus(void) { }
 void retro_fxknob(int value) { (void)value; }
+int retro_speedknob(int value) { (void)value; return 0; }
 int gui_init(void) { return 0; }
 void gui_shutdown(void) { }
 void gui_frame(int textscreen) { (void)textscreen; }

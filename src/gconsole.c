@@ -342,7 +342,12 @@ int input_nextmidi(void)
       }
       if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
       else if (midinote == 60) instrumentknob(midi_eventvalue());
-      else if (midinote == 90) retro_fxknob(midi_eventvalue());
+      else if (midinote == 90)
+      {
+        // On SPEED (plugin, RESO X2) the knob sets it, else the effect's value
+        int v = midi_eventvalue();
+        if (!retro_speedknob(v)) retro_fxknob(v);
+      }
       continue;
     }
     note = FIRSTNOTE + midinote - 12;

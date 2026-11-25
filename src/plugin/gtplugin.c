@@ -595,6 +595,7 @@ static int settingstext(char *out, int outsize)
   ADD("startbar=%d\n", gtsync_startbar);
   ADD("route=%d\n", gtsync_route);
   ADD("recordoff=%d\n", gtsync_recordoff);
+  ADD("speed=%d\n", gtsync_speed);
   // The instruments chosen by MIDI program changes, channels 1-16
   ADD("programs=");
   for (c = 0; c < 16; c++) ADD("%d%s", gtsync_programinstr[c], (c < 15) ? "," : "\n");
@@ -867,6 +868,8 @@ static void applystate(const unsigned char *data, int size)
     SETINT("startbar", gtsync_startbar);
     SETINT("route", gtsync_route);
     SETINT("recordoff", gtsync_recordoff);
+    SETINT("speed", gtsync_speed);
+    gtsync_speed &= 0xff;
     {
       char programs[128];
       if (settingstring(text, "programs", programs, sizeof programs))

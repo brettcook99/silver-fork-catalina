@@ -25,6 +25,7 @@ extern int psnum;
 extern int followsuspended;
 
 int gtsync_enabled = 1;
+int gtsync_speed = 0x32;
 int gtsync_startbar = 1;
 int gtsync_route = 1;
 int gtsync_recordoff = 1;
@@ -261,6 +262,54 @@ static double framerate(int sync)
   return ownframerate();
 }
 
+// SPEED (RESO X2 while following the host): the rows come in pairs, a beat's
+// row from before X2 and the row X2 put in between. As the funktempo command
+// E01 with speed table values $00 / SPEED makes them (256 and SPEED frames;
+// SPEED 00 = 256 frames), the in-between row starts at 256 / (256 + SPEED)
+// of the pair. The song itself runs at its own frames per row, so its
+// instruments' tables keep their speed: the host's beats are mapped to the
+// song's instead, warp() from the host's to the song's, unwarp() back. They
+// are the same at each pair's start, before the song's start and with an
+// even pair (0.5)
+static double swingpoint(void)
+{
+  int s = gtsync_speed & 0xff;
+
+  if (resomode != 2) return 0.5;
+  if (!s) s = 256;
+  return 256.0 / (256.0 + s);
+}
+
+static double rowbeats(void);
+
+static double warp(double b)
+{
+  double a = swingpoint();
+  double p, k, x;
+
+  if ((a <= 0.5) || (b <= 0.0)) return b;
+  p = 2.0 * rowbeats();
+  k = floor(b / p);
+  x = b - k * p;
+  if (x < a * p) x = x * 0.5 / a;
+  else x = 0.5 * p + (x - a * p) * 0.5 / (1.0 - a);
+  return k * p + x;
+}
+
+static double unwarp(double y)
+{
+  double a = swingpoint();
+  double p, k, r;
+
+  if ((a <= 0.5) || (y <= 0.0)) return y;
+  p = 2.0 * rowbeats();
+  k = floor(y / p);
+  r = y - k * p;
+  if (r < 0.5 * p) r = r * 2.0 * a;
+  else r = a * p + (r - 0.5 * p) * 2.0 * (1.0 - a);
+  return k * p + r;
+}
+
 // The beat (quarter notes from the host's start) where the song starts
 static double startoffset(const gtcore_transport *tp)
 {
@@ -286,7 +335,7 @@ static void logframe(void)
     if ((path) && (path[0])) reglog = fopen(path, "wt");
   }
   if (!reglog) return;
-  fprintf(reglog, "%s%.6f", following ? "F " : "  ", songbeat);
+  fprintf(reglog, "%s%.6f", following ? "F " : "  ", following ? unwarp(songbeat) : songbeat);
   for (c = 0; c < NUMSIDREGS; c++) fprintf(reglog, " %02x", sidreg[c]);
   fprintf(reglog, " | t%d s%d r%d", chn[0].tempo, stepsize, chn[0].playrow);
   fputc(10, reglog);
@@ -829,11 +878,11 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
 
       following = 1;
       resync = 0;
-      chase(tp->ppq - offset);
+      chase(warp(tp->ppq - offset));
       // Notes held while it was stopped are its first ones
       if ((started) && (heldcount))
       {
-        eventbeat = tp->ppq - offset;
+        eventbeat = warp(tp->ppq - offset);
         startheld();
       }
     }
@@ -861,7 +910,7 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
       eventclock = sampleclock + pos;
       if (following)
       {
-        double ppq = ppqbase + pos / samplesperbeat - offset;
+        double ppq = warp(ppqbase + pos / samplesperbeat - offset);
         eventbeat = ppq;
         fraction = (ppq - songbeat) / (nextbeat - songbeat);
       }
@@ -891,9 +940,9 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
       {
         ppq = tp->loopstart + (ppq - tp->loopend);
         ppqbase = ppq - pos / samplesperbeat;
-        chase(ppq - offset);
+        chase(warp(ppq - offset));
       }
-      tosamples = (nextbeat - (ppq - offset)) * samplesperbeat;
+      tosamples = (unwarp(nextbeat) - (ppq - offset)) * samplesperbeat;
       if (tosamples < 0.5)
       {
         // The next frame is due
@@ -944,7 +993,7 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
 
   // The rest of the MIDI events (offsets past the block)
   eventclock = sampleclock + samples;
-  if (following) eventbeat = ppqbase + samples / samplesperbeat - offset;
+  if (following) eventbeat = warp(ppqbase + samples / samplesperbeat - offset);
   while (m < nmidi)
   {
     handlemidi(&midi[m], 1.0);

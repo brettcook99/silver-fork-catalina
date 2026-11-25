@@ -491,23 +491,44 @@ are skipped after a note is entered, 0-16: with 1 the cursor moves from row
 00 to 02, with 2 from 00 to 03 and so on. It works for the note keys and the
 MIDI keyboard. Click it (right-click: back) or use the mouse wheel over it.
 
-RESO (resolution, next to STEPS on the retro screen) gives two (X2) or three
-(X3) times as many rows per beat, so that notes played in land more finely,
-for example tuplets. Click it for OFF, X2, X3 and OFF again (right-click goes
-back). The music keeps its speed and the plugin stays in time with the host:
-each pattern gets two or three times the rows, the notes move to every second
-or third row, every tempo is divided by two or three and STEPS counts the
-finer rows. New patterns get 128 rows with X2 and 96 with X3 (two bars of 12
-rows a beat). The song remembers it: instrument $3F is named RESO X2 or RESO
-X3 (songs made with the earlier DOUBLE button open as X2) and holds the tempo
-the song starts with. Each change is one undo step.
+RESO (resolution, next to STEPS on the retro screen) gives twice (X2) as
+many rows per beat, so that notes played in land more finely, for example
+tuplets. Click it for OFF and X2. The music keeps its speed and the plugin
+stays in time with the host: each pattern gets twice the rows, the notes move
+to every second row, every tempo is halved and STEPS counts the finer rows.
+New patterns get 128 rows. The song remembers it: instrument $3F is named
+RESO X2 (songs made with the earlier DOUBLE button open as X2) and holds the
+tempo the song starts with. Each change is one undo step. X3 (three times the
+rows) is gone; a song made with it still shows X3 and a click turns it off.
 
-X2 and X3 don't switch on if a pattern in use would get more than 128 rows
-(more than 64 rows for X2, 42 for X3), if a tempo would give rows shorter than
-3 frames (X2 needs a tempo of 6, 8, 10..., X3 one of 9, 12, 15...: the player
-has no shorter rows), if the song uses funktempo, if instrument $3F is in use
-or if an instrument's gate timer is too long for the faster rows. A message
-tells which pattern, tempo or instrument is the reason. With an empty song
+With X2 a control appears under CHN3. In the standalone program it is BPM:
+the song's tempo, and the mouse wheel over it changes it while the song plays
+(CTRL+wheel: two steps at a time). As with tempo commands the steps are whole
+frames per row, so the BPM goes in the steps the player has (at X2 on PAL
+with the highlight step 4: 125, 93.8, 75, 62.5... BPM; three frames a row is
+the fastest). The song starts with the new tempo too: its tempo command on
+the first row, or else the tempo of instrument $3F.
+
+In the plugin it is SPEED (default 32): while following the DAW (DAW SYNC)
+the two rows of each pair (the beat's row from before X2 and the one put in
+between) are no longer equally long. The in-between row starts where the
+funktempo command E01 with speed table values 00 / SPEED would start it: the
+first row lasts 256 frames' worth and the second SPEED (00 = 256): SPEED 32
+puts it at 84% of the pair, 80 at 67% (triplet swing), 00 and FF in the
+middle (even). Notes recorded from the DAW go to the nearest row of that
+grid, so off-beat and shuffled playing lands on the in-between rows. The
+song's own tempo and its instruments' tables aren't changed (no E command or
+speed table entry is needed), and without DAW SYNC the rows are even. Turn
+the mouse wheel over SPEED (SHIFT: 16 at a time) or a MIDI knob sending
+CC 90 (0-127 over 00-FF) while the mouse is over it; the plugin keeps the
+value with the project.
+
+X2 doesn't switch on if a pattern in use would get more than 128 rows (more
+than 64 rows), if a tempo would give rows shorter than 3 frames (X2 needs a
+tempo of 6, 8, 10...: the player has no shorter rows), if the song uses
+funktempo, if instrument $3F is in use or if an instrument's gate timer is
+too long for the faster rows. A message tells which pattern, tempo or
+instrument is the reason. With an empty song
 the patterns just get the new length. Going to fewer rows always works: notes
 in between move to the nearest row, and if one meets another note there it
 is lost; the message counts both, and CTRL+Z brings them back.

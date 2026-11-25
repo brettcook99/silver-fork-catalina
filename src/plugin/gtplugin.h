@@ -78,6 +78,9 @@ extern int gtsync_enabled;        // follow the host's tempo & position
 extern int gtsync_startbar;       // the song starts at this bar (1 = first)
 extern int gtsync_route;          // MIDI channels 1-3 play / record voices 1-3
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
+// SPEED (RESO X2 while following the host): the in-between rows' place, as
+// funktempo with speed table values $00 / SPEED (0-255, 0 = even)
+extern int gtsync_speed;
 // The sustain pedal (CC 64) switched the mode: 1 = edit, 2 = jam (for the
 // message)
 extern volatile int gtsync_modechange;

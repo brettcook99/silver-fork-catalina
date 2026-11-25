@@ -117,8 +117,16 @@ void onlinehelp(int standalone,int context)
     "  chords to 2-3 chns. on one row",
     "STEPS (bottom): rows skipped",
     "  after each note entered (0-16)",
-    "RESO (bottom): 2 or 3 times the rows",
-    "  per beat (click; right-click: back)",
+    "RESO (bottom): X2 = twice the rows",
+    "  per beat (click: OFF / X2)",
+#ifdef GT_PLUGIN
+    "SPEED (X2, under CHN3): where the",
+    "  in-between rows fall in DAW SYNC",
+    "  (wheel or MIDI CC 90 over it)",
+#else
+    "BPM (X2, under CHN3): the wheel",
+    "  sets the tempo (CTRL: 2 steps)",
+#endif
     "0-9 & A-F to enter commands",
     "SPC Play from cursor pos / stop",
     "  (in all editors but song info);",
