@@ -7,6 +7,7 @@
 
 #include "gsidimport.h"
 #include "gmidifile.h"
+#include "gmod.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,6 +32,8 @@ extern MIDI2SNG_OPTIONS midiimportoptions;
 extern int midiimportmode;
 extern unsigned midiimporttracks;       // Bit n = track n+1, 0 = the cursor's
 extern int midiimportchannel;           // 1-16, 0 = any MIDI channel
+// The .mod import dialog's choice: the module channels of tracks 1-3
+extern MODIMPORT_OPTIONS modimportoptions;
 
 // Kind of file by its extension
 #define GTFILE_UNKNOWN 0
@@ -40,6 +43,7 @@ extern int midiimportchannel;           // 1-16, 0 = any MIDI channel
 #define GTFILE_SID 4
 #define GTFILE_PATCH 5    // chipsynth C64 .fermatax
 #define GTFILE_SWM 6      // SID-Wizard module
+#define GTFILE_MOD 7      // ProTracker module
 int gt_filetype(const char *path);
 
 // All return 1 on success. On failure an explanation is shown to the user.
@@ -60,6 +64,10 @@ int gt_importsid_run(const char *path, const SID2SNG_OPTIONS *opt);
 int gt_importpatch(const char *path);
 // A SID-Wizard module (.swm) becomes the song
 int gt_importswm(const char *path);
+// A ProTracker module (.mod): the import dialog (which tracks get which
+// channels), then gt_importmod_run() makes it the song with its choice
+int gt_importmod(const char *path);
+int gt_importmod_run(const char *path);
 // Opens any supported file by its type (a song replaces the current song)
 int gt_openfile(const char *path);
 // The same, but a SID or MIDI file is converted at once with the import

@@ -572,6 +572,40 @@ come out as they sound, with transposes, repeats and tempo changes. Tracks
 highlighting step), and when the rows get longer or shorter the MIDI tempo
 changes, so the rows stay on the DAW's beat grid.
 
+ProTracker modules (.mod: ProTracker / NoiseTracker M.K. modules, the other
+4-channel kinds, 15-sample Soundtracker modules and xCHN modules up to 8
+channels): File > Import > ProTracker Module (or open the file) shows which
+module channel goes to each of the 3 tracks: one channel, two merged (where
+both have a note on a row the lower channel's note plays; the dialog counts
+the notes of each channel), or nothing. At first the three channels with the
+most notes are chosen; a module opened from the Finder or the command line
+is imported with those at once. The module becomes a new song: the patterns
+as they play (a pattern break ends its pattern, a jump back is the song's
+loop), ProTracker's C-1 as C-3 (a sample with a 32-byte cycle sounds there;
+a sample looping one cycle of 8-256 bytes, as chip music has, is moved by its
+octaves),
+speed and BPM as the tempo (frames per row: speed x 125 / BPM),
+portamento (1xx, 2xx), tone portamento (3xx, 5xy) and vibrato (4xy, 6xy) as
+commands 1-4 with note-relative speed table entries, C00 or EC0 without a
+note as a keyoff. Each sample becomes the instrument of the same number and
+name; the SID can't play samples, so it gets a sound to start from in the SID
+Designer: noise for noisy samples, a saw for looped ones, a decaying pulse
+for the others. Arpeggios, volume changes and the other effects are left out
+and the message counts them. File > Export ProTracker Module writes the
+current subtune: tracks 1-3 as channels 1-3 (channel 4 has the speed
+commands), every track followed through its orderlist with its transposes
+and repeats until the longest one has played once, cut into 64-row patterns
+(equal ones shared). Each instrument used becomes a sample with one looped
+cycle of the waveform its wavetable settles on (pulse with its first pulse
+width), or noise; the
+cycle is longer or shorter by octaves when that brings more of the
+instrument's notes into ProTracker's three octaves (C-3 to B-5 here; notes
+still outside are moved by octaves and counted);
+keyoffs become C00, tempos speed commands (a frame rate other than 50 Hz a
+BPM command at the start), commands 1-4 their ProTracker effects. Other
+commands, envelopes and tables can't be taken over: the message counts what
+was left out. The format follows ProTracker 2.3 (pt2-clone).
+
 SID-Wizard modules (.swm, made by SID-Wizard 1.x for one SID): File > Import
 > SID-Wizard Module (or opening a .swm file) makes the module the song, and
 File > Export SID-Wizard Module saves the song as one (in the plugin: IMPORT
