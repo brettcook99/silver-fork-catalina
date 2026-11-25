@@ -109,6 +109,9 @@ enum
   GTCMD_PREFERENCES,      // Preferences: audio output (standalone)
   GTCMD_IMPORTSWM,        // A SID-Wizard module (.swm) as the song
   GTCMD_EXPORTSWM,        // The song as a SID-Wizard module
+  GTCMD_IMPORTMOD,        // A ProTracker module (.mod): the file, then the import dialog
+  GTCMD_IMPORTMODNOW,     // Import the module given as path (from the import dialog)
+  GTCMD_EXPORTMOD,        // The song as a ProTracker module
 
   GTCMD_COUNT
 };

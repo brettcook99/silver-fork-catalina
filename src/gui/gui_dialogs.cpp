@@ -712,6 +712,126 @@ static void midiimportdialog(void)
 }
 
 /*
+ * ProTracker module import: which module channels go to tracks 1-3
+ */
+
+static bool wantmodimport = false;
+static char modimportpath[MAX_PATHNAME] = "";
+static MODSCAN modscan;
+
+extern "C" void gui_openmodimport(const char *path, const MODSCAN *scan)
+{
+  snprintf(modimportpath, sizeof modimportpath, "%s", path ? path : "");
+  modscan = *scan;
+  wantmodimport = true;
+}
+
+// The name of a choice: none, one channel or two merged
+static void modsourcename(unsigned m, char *text, int size)
+{
+  int c, first = -1, second = -1;
+
+  for (c = 0; c < modscan.channels; c++)
+  {
+    if (!(m & (1u << c))) continue;
+    if (first < 0) first = c;
+    else if (second < 0) second = c;
+  }
+  if (first < 0) snprintf(text, size, "Nothing (empty)");
+  else if (second < 0) snprintf(text, size, "Channel %d (%d notes)", first + 1, modscan.notes[first]);
+  else snprintf(text, size, "Channels %d + %d merged", first + 1, second + 1);
+}
+
+static void modimportdialog(void)
+{
+  float labelw;
+  char text[160];
+  int c, d, t;
+  bool any = false;
+
+  if (wantmodimport)
+  {
+    ImGui::OpenPopup("##modimport");
+    wantmodimport = false;
+  }
+  if (!beginmodal("##modimport", ImGui::GetFontSize() * 30.0f)) return;
+  labelw = ImGui::GetFontSize() * 5.0f;
+
+  title("Import ProTracker module");
+  ImGui::PushFont(fontbold, 0.0f);
+  ImGui::TextWrapped("%s", modscan.name[0] ? modscan.name : gt_basename(modimportpath));
+  ImGui::PopFont();
+  if (modscan.name[0]) body(gt_basename(modimportpath));
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(theme.textfaint));
+  ImGui::TextWrapped("%d channels, %d positions, %d patterns, %d samples", modscan.channels, modscan.positions,
+    modscan.patterns, modscan.samples);
+  ImGui::PopStyleColor();
+
+  sectiontitle("TRACKS");
+  for (t = 0; t < MAX_CHN; t++)
+  {
+    unsigned cur = modimportoptions.source[t];
+
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(theme.textdim), "Track %d", t + 1);
+    ImGui::SameLine(labelw);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f);
+    {
+      char preview[64];
+      modsourcename(cur, preview, sizeof preview);
+      snprintf(text, sizeof text, "##modtrack%d", t);
+      if (ImGui::BeginCombo(text, preview))
+      {
+        if (ImGui::Selectable("Nothing (empty)", cur == 0)) modimportoptions.source[t] = 0;
+        for (c = 0; c < modscan.channels; c++)
+        {
+          modsourcename(1u << c, preview, sizeof preview);
+          ImGui::PushID(c);
+          if (ImGui::Selectable(preview, cur == (1u << c))) modimportoptions.source[t] = 1u << c;
+          ImGui::PopID();
+        }
+        ImGui::Separator();
+        for (c = 0; c < modscan.channels; c++)
+        {
+          for (d = c + 1; d < modscan.channels; d++)
+          {
+            unsigned m = (1u << c) | (1u << d);
+            modsourcename(m, preview, sizeof preview);
+            ImGui::PushID(100 + c * 16 + d);
+            if (ImGui::Selectable(preview, cur == m)) modimportoptions.source[t] = m;
+            ImGui::PopID();
+          }
+        }
+        ImGui::EndCombo();
+      }
+    }
+    if (modimportoptions.source[t]) any = true;
+  }
+
+  body("GoatTracker has 3 tracks: each gets one channel of the module, or two merged (where both have a note on "
+    "a row, the lower channel's note plays). The module becomes a new song. Its samples become instruments of the "
+    "same number and name with a SID sound in their place (noise, saw or pulse: a start for the SID Designer); "
+    "speed and BPM become the tempo, portamento and vibrato their commands, C00 a keyoff. Arpeggios, volume and "
+    "the other effects are left out and counted.");
+
+  {
+    const char *labels[] = { "Import", "Cancel" };
+    int r;
+
+    ImGui::BeginDisabled(!any);
+    r = buttons(labels, 2, 1);
+    ImGui::EndDisabled();
+    if ((r == 0) && (any))
+    {
+      cmd_postfile(GTCMD_IMPORTMODNOW, modimportpath);
+      ImGui::CloseCurrentPopup();
+    }
+    if (r == 1) ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+/*
  * VIEW menu of the retro menu bar, About, level meter colors
  */
 
@@ -1413,6 +1533,7 @@ static void filemenu(void)
       fmitem("SID...", NULL, GTCMD_IMPORTSID);
       fmitem("MIDI...", NULL, GTCMD_IMPORTMIDI);
       fmitem("SID-Wizard (.swm)...", NULL, GTCMD_IMPORTSWM);
+      fmitem("ProTracker (.mod)...", NULL, GTCMD_IMPORTMOD);
       fmitem("Fermatax (chipsynth C64 patch)...", NULL, GTCMD_IMPORTPATCH);
       break;
 
@@ -1420,6 +1541,7 @@ static void filemenu(void)
       fmitem("SID...", NULL, GTCMD_EXPORTSID);
       fmitem("MIDI...", NULL, GTCMD_EXPORTMIDI);
       fmitem("SID-Wizard (.swm)...", NULL, GTCMD_EXPORTSWM);
+      fmitem("ProTracker (.mod)...", NULL, GTCMD_EXPORTMOD);
       fmitem("Fermatax (chipsynth C64 patch)...", NULL, GTCMD_EXPORTPATCH);
       break;
 
@@ -1511,6 +1633,7 @@ void gui::drawdialogs(void)
   exportdialog();
   sidimportdialog();
   midiimportdialog();
+  modimportdialog();
   // One at a time: the first one wanted opens
   savedialog();
   quitdialog();

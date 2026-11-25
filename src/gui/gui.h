@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 #include "../gmidifile.h"
+#include "../gmod.h"
 
 // Opens the window. Returns 0 on failure
 int gui_init(void);
@@ -109,6 +110,9 @@ void gui_openexport(void);
 void gui_opensidimport(const char *path);
 // The MIDI import dialog for the file (scan: what it has in it)
 void gui_openmidiimport(const char *path, const MIDISCAN *scan);
+// The .mod import dialog for the file (sets modimportoptions, then posts
+// GTCMD_IMPORTMODNOW)
+void gui_openmodimport(const char *path, const MODSCAN *scan);
 
 // Information / error box
 void gui_alert(const char *title, const char *text);

@@ -23,6 +23,7 @@ MIDI2SNG_OPTIONS midiimportoptions;
 int midiimportmode = MIDIIMPORT_ALL;
 unsigned midiimporttracks = 0;
 int midiimportchannel = 0;
+MODIMPORT_OPTIONS modimportoptions = { { 1, 2, 4 } };
 static int midiimportoptionsset = 0;
 // Set by gt_openfile_direct(): SID and MIDI files are converted without the
 // import dialogs
@@ -97,6 +98,7 @@ int gt_filetype(const char *path)
   if (hasext(path, "sid")) return GTFILE_SID;
   if (hasext(path, "fermatax")) return GTFILE_PATCH;
   if (hasext(path, "swm")) return GTFILE_SWM;
+  if (hasext(path, "mod")) return GTFILE_MOD;
   return GTFILE_UNKNOWN;
 }
 
@@ -931,6 +933,52 @@ int gt_importswm(const char *path)
   return 1;
 }
 
+int gt_importmod_run(const char *path)
+{
+  char report[256];
+
+  if (!mod_import(path, &modimportoptions, report, sizeof report))
+  {
+    gui_alert("ProTracker import failed", report);
+    return 0;
+  }
+  undoInitAllAreas();
+  // Not a song file: named after the module, to be saved as one
+  loadedsongfilename[0] = 0;
+  currentsongpath[0] = 0;
+  {
+    char name[MAX_PATHNAME];
+    gt_replaceext(gt_basename(path), ".sng", name, MAX_PATHNAME);
+    strcpy(suggestedsongname, name);
+    if (strlen(name) < MAX_FILENAME)
+    {
+      strcpy(loadedsongfilename, name);
+      strcpy(songfilename, name);
+    }
+  }
+  gui_addrecentfile(path);
+  gui_message("Imported %s: %s", gt_basename(path), report);
+  return 1;
+}
+
+int gt_importmod(const char *path)
+{
+  MODSCAN scan;
+  char report[256];
+
+  report[0] = 0;
+  if (!mod_scan(path, &scan, report, sizeof report))
+  {
+    gui_alert("ProTracker import failed", report);
+    return 0;
+  }
+  mod_defaultoptions(&scan, &modimportoptions);
+  // Opened from the Finder or the command line: at once, the busiest channels
+  if (importdirect) return gt_importmod_run(path);
+  gui_openmodimport(path, &scan);
+  return 1;
+}
+
 int gt_openfile(const char *path)
 {
   switch (gt_filetype(path))
@@ -952,6 +1000,9 @@ int gt_openfile(const char *path)
 
     case GTFILE_SWM:
     return gt_importswm(path);
+
+    case GTFILE_MOD:
+    return gt_importmod(path);
   }
 
   {

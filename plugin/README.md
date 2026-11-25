@@ -23,8 +23,10 @@ terms cover the "VST" name; the plugin is free software and isn't sold.
   **LOAD, SAVE, IMPORT, EXPORT, EDIT, CLEAR** there instead (it stays until an
   item is chosen or you click elsewhere); a left click on one, or letting go of
   the right button over it, opens its dropdown: load / save a song or an
-  instrument, import SID, MIDI or chipsynth C64 (.fermatax) files, export SID
-  (the packer / relocator), MIDI or .fermatax, undo / redo (CMD+Z /
+  instrument (LOAD > Open Recent lists the files used last), import SID, MIDI,
+  SID-Wizard, ProTracker (.mod) or chipsynth C64 (.fermatax) files, export SID
+  (the packer / relocator), MIDI, SID-Wizard, ProTracker or .fermatax, undo /
+  redo (CMD+Z /
   CMD+SHIFT+Z, CTRL on Windows, if the DAW lets the plugin have those keys),
   clear the track (the cursor
   channel's pattern), the pattern (all three channels' patterns) or all (the
@@ -39,6 +41,15 @@ terms cover the "VST" name; the plugin is free software and isn't sold.
   stopped. At the song's own tempo (shown in the dialog) the song sounds
   exactly as in the standalone program; at another tempo the whole C64 frame
   clock follows the DAW's.
+- **RESO X2** (bottom of the screen) gives twice the rows per beat, and
+  **SPEED** appears under CHN3 (default 32): while following the DAW the
+  in-between rows come later in each pair of rows, as the funktempo command
+  E01 with speed table values 00 / SPEED would place them (32: at 84% of the
+  pair, 80: 67%, a triplet swing, 00 / FF: in the middle). Notes recorded
+  from the DAW go to the nearest row of that grid, so shuffled or off-beat
+  playing lands on the in-between rows. Turn the mouse wheel over SPEED
+  (SHIFT: 16 at a time), or a knob sending MIDI CC 90 while the mouse is over
+  it; the value is saved with the project. The song itself isn't changed.
 - **MIDI**: channels 1, 2 and 3 play voices 1, 2 and 3. The plugin starts in
   jam mode. The **sustain pedal / footswitch (CC 64)** switches: pressed =
   edit mode, released = jam mode (ESC, the middle mouse button and NUMPAD . switch

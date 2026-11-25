@@ -30,6 +30,7 @@
 #include "gfermatax.h"
 #include "gpatch.h"
 #include "gswm.h"
+#include "gmod.h"
 #ifdef GT_PLUGIN
 #include "plugin/gtplugin.h"
 #endif
@@ -2403,7 +2404,7 @@ void runcommand(int cmd, const char *path)
 		break;
 
 	case GTCMD_OPEN:
-		if (filedialog_open(FOLDER_SONG, "Open a song, or import a SID, MIDI, SID-Wizard or chipsynth file", "sng;sid;mid;midi;swm;ins;fermatax", newpath, MAX_PATHNAME))
+		if (filedialog_open(FOLDER_SONG, "Open a song, or import a SID, MIDI, SID-Wizard, ProTracker or chipsynth file", "sng;sid;mid;midi;swm;mod;ins;fermatax", newpath, MAX_PATHNAME))
 			runcommand(GTCMD_OPENFILE, newpath);
 		break;
 
@@ -2473,6 +2474,34 @@ void runcommand(int cmd, const char *path)
 
 	case GTCMD_IMPORTMIDINOW:
 		if ((path) && (path[0])) gt_importmidi_run(path);
+		break;
+
+	case GTCMD_IMPORTMOD:
+		if (filedialog_open(FOLDER_IMPORT, "Import a ProTracker module", "mod", newpath, MAX_PATHNAME))
+			runcommand(GTCMD_OPENFILE, newpath);
+		break;
+
+	case GTCMD_IMPORTMODNOW:
+		if ((path) && (path[0])) gt_importmod_run(path);
+		break;
+
+	case GTCMD_EXPORTMOD:
+		{
+			char suggest[MAX_PATHNAME];
+			char report[256];
+			const char *base = "Untitled";
+
+			if (loadedsongfilename[0]) base = gt_basename(loadedsongfilename);
+			else if (suggestedsongname[0]) base = suggestedsongname;
+			gt_replaceext(base, ".mod", suggest, MAX_PATHNAME);
+			if (!filedialog_save(FOLDER_EXPORT, "Export the song as a ProTracker module", "mod", suggest, newpath, MAX_PATHNAME))
+				break;
+			stopsong();
+			if (mod_export(newpath, report, sizeof report))
+				gui_message("Exported %s: %s", gt_basename(newpath), report);
+			else
+				gui_alert("ProTracker export failed", report);
+		}
 		break;
 
 	case GTCMD_IMPORTSWM:

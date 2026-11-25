@@ -424,6 +424,7 @@ void gui::drawmenubar(void)
       if (ImGui::MenuItem("SID File...")) cmd_post(GTCMD_IMPORTSID);
       if (ImGui::MenuItem("MIDI File...")) cmd_post(GTCMD_IMPORTMIDI);
       if (ImGui::MenuItem("SID-Wizard Module (.swm)...")) cmd_post(GTCMD_IMPORTSWM);
+      if (ImGui::MenuItem("ProTracker Module (.mod)...")) cmd_post(GTCMD_IMPORTMOD);
       if (ImGui::MenuItem("chipsynth C64 Patch (.fermatax)...")) cmd_post(GTCMD_IMPORTPATCH);
       ImGui::EndMenu();
     }
@@ -434,6 +435,7 @@ void gui::drawmenubar(void)
     if (ImGui::MenuItem("Export SID / PRG / BIN...", "F9")) cmd_post(GTCMD_EXPORT);
     if (ImGui::MenuItem("Export MIDI File...")) cmd_post(GTCMD_EXPORTMIDI);
     if (ImGui::MenuItem("Export SID-Wizard Module (.swm)...")) cmd_post(GTCMD_EXPORTSWM);
+    if (ImGui::MenuItem("Export ProTracker Module (.mod)...")) cmd_post(GTCMD_EXPORTMOD);
     if (ImGui::MenuItem("Export chipsynth C64 Patch (.fermatax)...")) cmd_post(GTCMD_EXPORTPATCH);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "ALT+F4")) cmd_post(GTCMD_QUIT);
