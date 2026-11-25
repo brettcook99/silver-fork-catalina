@@ -414,6 +414,11 @@ void retro_fxknob(int value)
 #define RESOCENTER 42
 #define RESOCOLUMN (RESOCENTER - 2)
 #define RESOWIDTH 5
+// Under CHN3, with RESO X2 only: SPEED in the plugin (where the in-between
+// rows fall while following the DAW, see gtplugin_audio.c), BPM in the
+// standalone program (the tempo; the wheel changes it)
+#define SPDCOLUMN (FXCENTER - 4)
+#define SPDWIDTH 9
 #define MSGCOLUMN RX
 #define MSGWIDTH (MAX_COLUMNS - 2 - MSGCOLUMN)
 #define LOCKCOLUMN (MAX_COLUMNS - 1)
@@ -489,6 +494,112 @@ static double currentbpm(void)
   else frames = starttempo();
   if (frames < 1) frames = 1;
   return fps * 60.0 / (frames * (stepsize > 0 ? stepsize : 4));
+}
+
+// The mouse on SPEED / BPM (RESO X2)
+static int overspeed(void)
+{
+  return (resomode == 2) && (mousey >= 35) && (mousey <= 36) && (mousex >= SPDCOLUMN) && (mousex < SPDCOLUMN + SPDWIDTH);
+}
+
+#ifdef GT_PLUGIN
+// SPEED (RESO X2, while following the DAW): the place of the in-between row
+// in each pair, as the funktempo command E01 with speed table values $00 /
+// SPEED would make the rows (256 and SPEED frames, 00 = 256)
+static void setspeed(int v)
+{
+  int s;
+
+  gtsync_speed = clampvalue(v, 0, 0xff);
+  s = gtsync_speed ? gtsync_speed : 256;
+  gui_message("SPEED %02X: row 2 of each pair at %d%% (DAW SYNC)", gtsync_speed, (int)(25600.0 / (256 + s) + 0.5));
+}
+#else
+// The tempo (frames per row) the song starts with, where starttempo() finds
+// it: a tempo command on the first row (funktempo becomes a tempo), else the
+// tempo instrument ($3F)
+static void setstarttempo(int f)
+{
+  int c;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    unsigned char *order = songorder[editorInfo.esnum][c];
+    int e = 0;
+    unsigned char *row;
+
+    while ((e < songlen[editorInfo.esnum][c]) && (order[e] >= MAX_PATT) && (order[e] < LOOPSONG)) e++;
+    if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) continue;
+    row = &pattern[order[e]][0];
+    if (((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) || ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN)))
+    {
+      undoAreaSetCheckForChange(UNDO_AREA_PATTERN, order[e], UNDO_AREA_DIRTY_CHECK);
+      if (row[2] == CMD_FUNKTEMPO) row[3] = 0;
+      row[2] = CMD_SETTEMPO;
+      row[3] = (row[3] & 0x80) | f;
+      return;
+    }
+  }
+  if ((instr[MAX_INSTR-1].ad >= 2) && (!(instr[MAX_INSTR-1].ptr[WTBL])))
+  {
+    undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, MAX_INSTR-1, UNDO_AREA_DIRTY_CHECK);
+    instr[MAX_INSTR-1].ad = f;
+  }
+}
+
+static void wheelundo(GTUNDO_OBJECT *ed, int top, int control);
+#define CONTROL_BPM (FXNUM + 1)
+
+// BPM (standalone, RESO X2): the wheel changes the tempo a frame per row at
+// a time (up = faster; CTRL: two frames), as tempo commands do, so the BPM
+// goes in the steps the player has (3 frames a row is the fastest). While
+// playing every channel gets it at once; the song starts with it too
+static void bpmwheel(int d)
+{
+  GTUNDO_OBJECT *ed;
+  double now;
+  int top, f, c;
+
+  if ((isplaying()) && (!playstarting()))
+  {
+    CHN *cptr = &chn[editorInfo.epchn];
+    now = (cptr->tempo >= 2) ? cptr->tempo + 1 : (funktable[0] + funktable[1] + 2) / 2.0;
+  }
+  else now = starttempo();
+  f = clampvalue((int)(now + 0.5) - d, 3, 0x7f);
+  top = currentUndoPosition;
+  ed = undoCreateEditorInfo();
+  setstarttempo(f);
+  if (isplaying())
+  {
+    sound_lockplayer();
+    for (c = 0; c < MAX_CHN; c++) chn[c].tempo = f - 1;
+    sound_unlockplayer();
+  }
+  wheelundo(ed, top, CONTROL_BPM);
+  {
+    double fps = editorInfo.ntsc ? 60.0 : 50.0;
+    double bpm;
+    if (editorInfo.multiplier) fps *= editorInfo.multiplier;
+    else fps /= 2;
+    bpm = fps * 60.0 / (f * (stepsize > 0 ? stepsize : 4));
+    gui_message("%.1f BPM (tempo %d frames a row)%s", bpm, f, ((f == 3) && (d > 0)) ? ": the fastest" : "");
+  }
+}
+#endif
+
+// MIDI CC 90 with the mouse on SPEED (plugin, RESO X2): sets it, 0-127 over
+// $00-$FF. Returns 0 if the mouse isn't there (the effects knob then)
+int retro_speedknob(int value)
+{
+#ifdef GT_PLUGIN
+  if (!overspeed()) return 0;
+  setspeed((clampvalue(value, 0, 127) * 0xff + 63) / 127);
+  return 1;
+#else
+  (void)value;
+  return 0;
+#endif
 }
 
 static const char *titlebarlabel(void)
@@ -1038,11 +1149,31 @@ void retro_printstatus(void)
   sprintf(textbuffer, "%d", editstep);
   printtextcentered(STEPSCENTER, 36, CEDIT, textbuffer);
 
-  // RESO: the rows per beat times 2 or 3. Click to change (right-click: back)
+  // RESO: the rows per beat times 2. Click to change (a song made with X3
+  // before shows X3)
   printblankc(RESOCOLUMN, 35, CNORMAL, RESOWIDTH);
   printblankc(RESOCOLUMN, 36, CNORMAL, RESOWIDTH);
   printtextcentered(RESOCENTER, 35, CTITLE, "RESO");
   printtextcentered(RESOCENTER, 36, CEDIT, (resomode == 3) ? "X3" : (resomode == 2) ? "X2" : "OFF");
+
+  // SPEED / BPM under CHN3 with X2
+  printblankc(SPDCOLUMN, 35, CNORMAL, SPDWIDTH);
+  printblankc(SPDCOLUMN, 36, CNORMAL, SPDWIDTH);
+  if (resomode == 2)
+  {
+#ifdef GT_PLUGIN
+    printtextcentered(FXCENTER, 35, CTITLE, "SPEED");
+    sprintf(textbuffer, "%02X", gtsync_speed & 0xff);
+#else
+    double bpm = currentbpm();
+    int whole = (int)(bpm + 0.5);
+
+    printtextcentered(FXCENTER, 35, CTITLE, "BPM");
+    if ((bpm - whole < 0.05) && (whole - bpm < 0.05)) sprintf(textbuffer, "%d", whole);
+    else sprintf(textbuffer, "%.1f", bpm);
+#endif
+    printtextcentered(FXCENTER, 36, CEDIT, textbuffer);
+  }
 
   if (editorInfo.multiplier)
   {
@@ -1210,6 +1341,17 @@ static int retrowheel(void)
 {
   int d = -mousewheel;
   int c;
+
+  // SPEED (plugin) / BPM (standalone) under CHN3, with RESO X2
+  if (overspeed())
+  {
+#ifdef GT_PLUGIN
+    setspeed(gtsync_speed + d * (shiftpressed ? 16 : 1));
+#else
+    bpmwheel(ctrlpressed ? d * 2 : d);
+#endif
+    return 1;
+  }
 
   // The effects panel
   if (fxwheel(d)) return 1;
@@ -1646,11 +1788,11 @@ void retro_mousecommands(void)
     if (mouseb & MOUSEB_LEFT) seteditstep(editstep < MAX_EDITSTEP ? editstep + 1 : 0);
     if (mouseb & MOUSEB_RIGHT) seteditstep(editstep > 0 ? editstep - 1 : MAX_EDITSTEP);
   }
-  // RESO: left button = OFF, X2, X3, OFF...; right = back
+  // RESO: a click (either button) switches OFF / X2. X3 is gone: a song
+  // made with it shows X3, and a click turns it off
   if ((!prevmouseb) && (mouseb & (MOUSEB_LEFT | MOUSEB_RIGHT)) && (mousex >= RESOCOLUMN) && (mousex < RESOCOLUMN + RESOWIDTH) && (mousey >= 23 + 3 + 9))
   {
-    if (mouseb & MOUSEB_LEFT) setresomode((resomode >= 3) ? 1 : resomode + 1);
-    else setresomode((resomode <= 1) ? 3 : resomode - 1);
+    setresomode((resomode == 1) ? 2 : 1);
   }
   // Titlebar actions
   if (!menu)
