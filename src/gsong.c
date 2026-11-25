@@ -117,6 +117,16 @@ int savesong(void)
       fwrite8(handle, length);
       fwrite(pattern[c], length * 4, 1, handle);
     }
+    // GoatTracker Ultimate's extras, after everything GoatTracker 2 reads (it
+    // stops after the patterns): "GTUX", the number of bytes, the bytes.
+    // Byte 0: the speed multiplier (0 = 25 Hz, 1 = 1x, 2 = 2x...)
+    {
+      unsigned char extra[1];
+      extra[0] = editorInfo.multiplier;
+      fwrite("GTUX", 4, 1, handle);
+      fwrite8(handle, sizeof extra);
+      fwrite(extra, sizeof extra, 1, handle);
+    }
     fclose(handle);
     strcpy(loadedsongfilename, songfilename);
     return 1;
@@ -240,6 +250,21 @@ void loadsong(void)
       {
         length = fread8(handle) * 4;
         fread(pattern[c], length, 1, handle);
+      }
+      // GoatTracker Ultimate's extras (see savesong()). A song without them
+      // keeps the speed multiplier that was set
+      {
+        char tag[4];
+        unsigned char extra[255];
+        int n;
+        if ((fread(tag, 4, 1, handle) == 1) && (!memcmp(tag, "GTUX", 4)) &&
+            (fread(extra, 1, 1, handle) == 1))
+        {
+          n = extra[0];
+          memset(extra, 0, sizeof extra);
+          if ((n >= 1) && ((int)fread(extra, 1, n, handle) >= 1) && (extra[0] <= 16))
+            editorInfo.multiplier = extra[0];
+        }
       }
       countpatternlengths();
       songchange();

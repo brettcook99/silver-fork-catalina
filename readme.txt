@@ -1778,6 +1778,14 @@ Offset  Size    Description
                 3rd byte: Command ($00-$0F)
                 4th byte: Command databyte
 
+GoatTracker Ultimate adds this after the patterns (GoatTracker 2 doesn't read
+past them). A song without it keeps the speed multiplier that is set.
+
+Offset  Size    Description
++0      4       Identification string GTUX
++4      byte    Amount n of bytes that follow
++5      n       1st byte: Speed multiplier (0 = 25Hz, 1 = 1x, 2 = 2x etc.)
+
 6.2 GoatTracker v2 instrument (.INS) format
 -------------------------------------------
 
