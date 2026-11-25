@@ -151,6 +151,7 @@ static void tempfilename(const char *name, char *out, int outsize)
 int gt_loadsong(const char *path)
 {
   char ident[4];
+  unsigned oldmultiplier = editorInfo.multiplier;
 
   if (!readident(path, ident))
   {
@@ -172,6 +173,9 @@ int gt_loadsong(const char *path)
   stopsong();
   strcpy(songfilename, path);
   loadsong();
+  // The song may bring its own speed multiplier (saved since GoatTracker
+  // Ultimate keeps it in the song)
+  if (editorInfo.multiplier != oldmultiplier) do_sound_init();
   undoInitAllAreas();
   strcpy(loadedsongfilename, path);
   strcpy(currentsongpath, path);
@@ -179,7 +183,12 @@ int gt_loadsong(const char *path)
   setsongpath(path);
   gui_marksongsaved();
   gui_addrecentfile(path);
-  gui_message("Opened %s", gt_basename(path));
+  if (editorInfo.multiplier != oldmultiplier)
+  {
+    if (editorInfo.multiplier) gui_message("Opened %s (speed %dx)", gt_basename(path), editorInfo.multiplier);
+    else gui_message("Opened %s (speed 25Hz)", gt_basename(path));
+  }
+  else gui_message("Opened %s", gt_basename(path));
   return 1;
 }
 
