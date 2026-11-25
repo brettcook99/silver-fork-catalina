@@ -22,7 +22,8 @@ void onlinehelp(int standalone,int context)
   char *mackeys[] = {
     "OPTION+BACKSPACE    Insert",
     "FN+SHIFT+BACKSPACE  Insert",
-    "  (patterns: CTRL+BACKSP.)",
+    "  (patterns: CTRL+BACKSP.;",
+    "  OPTION+BKSP: no note-offs)",
     "FN+BACKSPACE        DEL",
     "CMD+CRSR   = CTRL+CRSR",
     "CMD+Z, CTRL+Z       Undo",
@@ -127,6 +128,8 @@ void onlinehelp(int standalone,int context)
     "DEL Clear field (SHIFT: +command);",
     "  marked rows: their notes (also BKSP)",
     "BACKSPC Delete row (CTRL: insert)",
+    "ALT+DEL Remove the note-offs (marked",
+    "  rows; none: the whole track)",
     "RET Go to song start (stops)",
     "CTRL+SHIFT+RET, CAPS Keyoff",
     "SHIFT+RET Keyon / go to instr., table",

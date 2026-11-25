@@ -256,8 +256,9 @@ int input_nextkey(void)
 
   // macbook keyboard insert using alt/option+backspace or fn+shift+backspace.
   // In the pattern editor SHIFT+DEL clears the note and command instead (DEL
-  // and BACKSPACE are swapped there; CTRL+BACKSPACE inserts)
-  if ((rawkey == SDLK_BACKSPACE && altpressed) ||
+  // and BACKSPACE are swapped there; CTRL+BACKSPACE inserts), and ALT+DEL /
+  // OPTION+BACKSPACE remove the note-offs
+  if ((rawkey == SDLK_BACKSPACE && altpressed && editorInfo.editmode != EDIT_PATTERN) ||
       (rawkey == SDLK_DELETE && shiftpressed && editorInfo.editmode != EDIT_PATTERN))
   {
     rawkey = SDLK_INSERT;

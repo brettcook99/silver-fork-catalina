@@ -216,6 +216,70 @@ static void patternclearmarked(int commands)
   gui_message(commands ? "Marked rows cleared" : "Marked notes cleared (SHIFT+DEL: commands too)");
 }
 
+// ALT+DEL (OPTION+DELETE on macOS; ALT+BACKSPACE too, the delete key of a
+// Mac laptop): removes the note-offs (---) and leaves the notes. With rows
+// marked only from those, otherwise from every pattern the cursor's track
+// plays in this subtune
+static void patternremovekeyoffs(void)
+{
+  int done[MAX_PATT];
+  int removed = 0, patts = 0;
+  int c, p, d, first, last;
+
+  if (editorInfo.epmarkchn != -1)
+  {
+    c = editorInfo.epmarkchn;
+    p = editorUndoInfo.editorInfo[c].epnum;
+    first = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkstart : editorInfo.epmarkend;
+    last = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkend : editorInfo.epmarkstart;
+    if (last >= pattlen[p]) last = pattlen[p] - 1;
+    if (first < 0) first = 0;
+    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+    for (d = first; d <= last; d++)
+    {
+      if (pattern[p][d*4] == KEYOFF)
+      {
+        pattern[p][d*4] = REST;
+        removed++;
+      }
+    }
+    gui_message("Note-offs removed from the marked rows: %d", removed);
+    return;
+  }
+
+  c = editorInfo.epchn;
+  memset(done, 0, sizeof done);
+  // The pattern shown counts even if the orderlist doesn't play it
+  done[editorUndoInfo.editorInfo[c].epnum] = 1;
+  for (d = 0; d < MAX_SONGLEN; d++)
+  {
+    int e = songorder[editorInfo.esnum][c][d];
+    if (e == LOOPSONG) break;
+    if (e < MAX_PATT) done[e] = 1;
+  }
+  for (p = 0; p < MAX_PATT; p++)
+  {
+    int here = 0;
+
+    if (!done[p]) continue;
+    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+    for (d = 0; d < pattlen[p]; d++)
+    {
+      if (pattern[p][d*4] == KEYOFF)
+      {
+        pattern[p][d*4] = REST;
+        here++;
+      }
+    }
+    if (here) patts++;
+    removed += here;
+  }
+  if (removed)
+    gui_message("Note-offs removed from track %d: %d (in %d pattern%s)", c + 1, removed, patts, (patts == 1) ? "" : "s");
+  else
+    gui_message("Track %d has no note-offs", c + 1);
+}
+
 // INS / CTRL+BACKSPACE: inserts an empty row at the cursor (the pattern's
 // last row drops off). On the end mark the pattern gets one row longer
 static void patterninsertrow(void)
@@ -340,6 +404,13 @@ static void patternalttranspose(int dir)
 void patterncommands(void)
 {
   int c, scrrep;
+
+  // ALT+DEL / ALT+BACKSPACE: no note-offs (see patternremovekeyoffs())
+  if (((rawkey == KEY_DEL) || (rawkey == KEY_BACKSPACE)) && (altpressed) && (!ctrlpressed))
+  {
+    patternremovekeyoffs();
+    return;
+  }
 
   // DEL / BACKSPACE with rows marked clear them (see patternclearmarked())
   if (((rawkey == KEY_DEL) || ((rawkey == KEY_BACKSPACE) && (!ctrlpressed) && (!altpressed))) && (editorInfo.epmarkchn != -1))

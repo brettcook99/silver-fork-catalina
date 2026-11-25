@@ -1200,6 +1200,7 @@ void docommand(void)
 		// so does a note nudged to the next track (CTRL+LEFT/RIGHT); ALT+UP/
 		// DOWN transposes the marked rows, maybe on another track
 		// DEL / BACKSPACE clear the marked rows, maybe on another track
+		// (ALT+DEL marks the patterns it changes itself)
 		if (((rawkey == KEY_DEL) || (rawkey == KEY_BACKSPACE)) && (editorInfo.epmarkchn != -1))
 			undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[editorInfo.epmarkchn].epnum, UNDO_AREA_DIRTY_CHECK);
 		if (((midinoteon) && ((midichord > 1) || (midinoterouted))) || ((ctrlpressed) && ((rawkey == KEY_LEFT) || (rawkey == KEY_RIGHT))) ||
