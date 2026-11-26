@@ -264,14 +264,16 @@ static double framerate(int sync)
 // to the song's instead, warp() from the host's to the song's, unwarp()
 // back. They are the same at each pair's start, before the song's start and
 // with an even pair (0.5). Without the host the frames come at a different
-// rate on the pair's two rows (ownswing()). While the song uses row 01
-// itself (gtsync_speedrowused) the rows are even
+// rate on the pair's two rows (ownswing()). The swing plays while E01 is on
+// the song's first row (SPEED puts it there, the player doesn't take it for
+// a funktempo with X2: speedmarker()); without it, or while the song uses
+// row 01 itself (gtsync_speedrowused), the rows are even
 static double swingpoint(void)
 {
   int l = ltable[STBL][0];
   int r = rtable[STBL][0];
 
-  if ((resomode != 2) || (gtsync_speedrowused)) return 0.5;
+  if ((resomode != 2) || (gtsync_speedrowused) || (!gtsync_speedmarked)) return 0.5;
   if (!l) l = 256;
   if (!r) r = 256;
   return (double)l / (double)(l + r);

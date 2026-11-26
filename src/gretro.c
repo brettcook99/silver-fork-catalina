@@ -471,7 +471,7 @@ static double starttempo(void)
     if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) continue;
     row = &pattern[order[e]][0];
     if ((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) return row[3] & 0x7f;
-    if ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN))
+    if ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN) && (!speedmarker(row[2], row[3])))
       return (ltable[STBL][row[3]-1] + rtable[STBL][row[3]-1]) / 2.0;
   }
   return frames;
@@ -643,11 +643,13 @@ static int overspeed(void)
 #ifdef GT_PLUGIN
 // SPEED (RESO X2): the speed table's row 01, right value. The row makes the
 // two rows of each pair as the funktempo command E01 would (left and right
-// frames, 00 = 256), without E01 in a pattern: see gtplugin_audio.c. The
-// table's cursor goes to the row, so it shows what changes
+// frames, 00 = 256): see gtplugin_audio.c. As the standalone program's BPM
+// puts a tempo command on the song's first row, SPEED puts E01 there (the
+// swing plays while it is there). The table's cursor goes to the row, so it
+// shows what changes
 static void setspeed(int v)
 {
-  int l, r;
+  int l, r, marked;
 
   if (gtsync_speedrowused)
   {
@@ -663,17 +665,31 @@ static void setspeed(int v)
     editorInfo.etnum = STBL;
     editorInfo.etpos = 0;
     editorInfo.etcolumn = 2;
-    gui_message("SPEED is SPEEDTBL 01 (00 32): the song's speed table moved down a row (CTRL+Z undoes)");
+    marked = speedmark(1);
+    gtsync_updatespeedrow();
+    if (marked)
+      gui_message("SPEED is SPEEDTBL 01 (00 32), E01 on row 00: the song's speed table moved down a row (CTRL+Z undoes)");
+    else
+      gui_message("SPEED is SPEEDTBL 01 (00 32), the song's speed table moved down a row; no room for E01 on row 00");
     return;
   }
+  // The first turn with E01 gone (or not there yet) only puts it back
+  if (!speedmarked()) v = rtable[STBL][0];
   rtable[STBL][0] = (unsigned char)clampvalue(v, 0, 0xff);
   undoAreaSetCheckForChange(UNDO_AREA_TABLES + STBL, 1, UNDO_AREA_DIRTY_CHECK);
   editorInfo.etnum = STBL;
   editorInfo.etpos = 0;
   editorInfo.etcolumn = 2;
+  marked = speedmark(1);
+  gtsync_updatespeedrow();
+  if (!marked)
+  {
+    gui_message("SPEED %02X: no room for E01 on row 00 (each channel has a command there), so no swing", rtable[STBL][0]);
+    return;
+  }
   l = ltable[STBL][0] ? ltable[STBL][0] : 256;
   r = rtable[STBL][0] ? rtable[STBL][0] : 256;
-  gui_message("SPEED %02X (SPEEDTBL 01: %02X %02X): row 2 of each pair at %d%%", rtable[STBL][0], ltable[STBL][0],
+  gui_message("SPEED %02X (E01, SPEEDTBL 01: %02X %02X): row 2 of each pair at %d%%", rtable[STBL][0], ltable[STBL][0],
     rtable[STBL][0], (int)(100.0 * l / (l + r) + 0.5));
 }
 #else
@@ -696,7 +712,8 @@ static int setstarttempo(int f)
     while ((e < songlen[editorInfo.esnum][c]) && (order[e] >= MAX_PATT) && (order[e] < LOOPSONG)) e++;
     if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) continue;
     row = &pattern[order[e]][0];
-    if (((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) || ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN)))
+    if (((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) ||
+      ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN) && (!speedmarker(row[2], row[3]))))
     {
       undoAreaSetCheckForChange(UNDO_AREA_PATTERN, order[e], UNDO_AREA_DIRTY_CHECK);
       if (row[2] == CMD_FUNKTEMPO) row[3] = 0;
@@ -1509,8 +1526,9 @@ void retro_printstatus(void)
   {
 #ifdef GT_PLUGIN
     printtextcentered(FXCENTER, 35, CTITLE, "SPEED");
-    // -- while the song uses the speed table's row 01 itself
-    if (gtsync_speedrowused) sprintf(textbuffer, "--");
+    // -- while the song uses the speed table's row 01 itself, or E01 isn't
+    // on its first row (no swing)
+    if ((gtsync_speedrowused) || (!gtsync_speedmarked)) sprintf(textbuffer, "--");
     else sprintf(textbuffer, "%02X", rtable[STBL][0]);
 #else
     double bpm = currentbpm();

@@ -1626,6 +1626,13 @@ static int resodefaulttempo(void)
 // The song's RESO (1 = off)
 static int resomarked(void)
 {
+	return songreso();
+}
+
+// The RESO the song in memory is marked with (1 = off), also before
+// resosync() has seen it
+int songreso(void)
+{
 	INSTR *in = &instr[RESOINSTR];
 	int k;
 
@@ -1901,6 +1908,71 @@ static void resounlock(void)
 #endif
 }
 
+// SPEED's mark (RESO X2, the plugin's swing): the funktempo command E01 on
+// the song's first row, as the standalone program's BPM puts a tempo command
+// there (see speedmarker() in gplay.c). The pattern channel c starts the
+// current subtune with, -1 if none
+static int startpattern(int c)
+{
+	unsigned char *order = songorder[editorInfo.esnum][c];
+	int e = 0;
+
+	while ((e < songlen[editorInfo.esnum][c]) && (order[e] >= MAX_PATT) && (order[e] < LOOPSONG)) e++;
+	if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) return -1;
+	return order[e];
+}
+
+// Is E01 on the song's first row (in one of the channels)?
+int speedmarked(void)
+{
+	int c;
+
+	for (c = 0; c < MAX_CHN; c++)
+	{
+		int p = startpattern(c);
+		if ((p >= 0) && (pattern[p][2] == CMD_FUNKTEMPO) && (pattern[p][3] == 1)) return 1;
+	}
+	return 0;
+}
+
+// Puts E01 on the song's first row, in the first channel whose command
+// column is empty there (with undo: its pattern marked for it). Returns 0 if
+// there is no room
+int speedmark(int undo)
+{
+	int c;
+
+	if (speedmarked()) return 1;
+	for (c = 0; c < MAX_CHN; c++)
+	{
+		int p = startpattern(c);
+		if ((p >= 0) && (!pattern[p][2]) && (!pattern[p][3]))
+		{
+			if (undo) undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+			pattern[p][2] = CMD_FUNKTEMPO;
+			pattern[p][3] = 1;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// Leaving X2: the E01s (SPEED's under X2) come out of the patterns, as
+// without X2 they would be funktempos (the patterns are marked for undo)
+static void speedunmark(void)
+{
+	int c, d;
+
+	for (c = 0; c < MAX_PATT; c++)
+	{
+		for (d = 0; d < pattlen[c]; d++)
+		{
+			unsigned char *row = &pattern[c][d*4];
+			if ((row[2] == CMD_FUNKTEMPO) && (row[3] == 1)) row[2] = row[3] = 0;
+		}
+	}
+}
+
 // Sets RESO (1 = off, 2 = X2, 3 = X3; one undo step). Stays as it is if the
 // song can't be changed
 void setresomode(int k)
@@ -1936,6 +2008,7 @@ void setresomode(int k)
 	// is empty; if the song uses the row itself its speed table moves down
 	if (k == 2) speedclaim = gtsync_claimspeedrow();
 #endif
+	if (from == 2) speedunmark();
 
 	empty = songempty();
 	start = resostarttempo();
@@ -1954,6 +2027,11 @@ void setresomode(int k)
 		if (start != resodefaulttempo()) in->ad = start;
 	}
 	resoapply(k);
+#ifdef GT_PLUGIN
+	// SPEED's E01 on the song's first row
+	if ((k == 2) && (speedclaim) && (!speedmark(1)))
+		speedclaim = -1;
+#endif
 
 	// The cursor stays on the same music
 	editorInfo.eppos = (2 * editorInfo.eppos * k + from - 1) / (2 * from);
@@ -1977,6 +2055,8 @@ void setresomode(int k)
 		gui_message("RESO X2: SPEED is SPEEDTBL 01 (00 32), the song's speed table moved down a row");
 	else if ((k == 2) && (speedclaim == 0))
 		gui_message("RESO X2: SPEED needs SPEEDTBL 01, the song uses it and the table is full");
+	else if ((k == 2) && (speedclaim < 0))
+		gui_message("RESO X2: no room for SPEED's E01 on row 00 (each channel has a command there)");
 #endif
 	else if (k > 1)
 		gui_message("RESO %s: %d times the rows per beat, new patterns %d rows", resoname[k] + 5, k, resopatternlength(k));

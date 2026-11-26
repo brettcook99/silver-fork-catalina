@@ -540,28 +540,34 @@ a tempo command (F) on the first row of the first track whose command column
 is empty there. The multiplier is saved with the song. Each turn of the
 wheel is one undo step (quick turns together).
 
-In the plugin, with X2, the control under CHN3 is SPEED: the right value of the speed table's row 01
-(SPEEDTBL 01), which X2 sets to 00 32 when the row is empty. If the song
-uses row 01 itself (an instrument's vibrato or a portamento / vibrato
-command), X2 first moves the song's speed table down one row, the
-instruments and commands with it, so it sounds the same. With X2 the
-row works as the funktempo command E01 would, without E01 in a pattern: the
-two rows of each pair (the beat's row from before X2 and the one put in
-between) are no longer equally long. The first lasts the left value's frames
-and the second the right value's (00 = 256), so the in-between row starts at
-left / (left + right) of the pair: 00 32 puts it at 84%, 00 80 at 67%
-(triplet swing), 00 00 in the middle (even). While following the DAW (DAW
-SYNC) the pair keeps the DAW's beat; otherwise it keeps the song's own
-tempo. Notes recorded go to the nearest row of that grid, so off-beat and
-shuffled playing lands on the in-between rows. The song's instruments'
-tables run at their own speed. Turn the mouse wheel over SPEED (SHIFT: 16 at
-a time) or a MIDI knob sending CC 90 (0-127 over 00-FF) while the mouse is
-over it, also while the song plays; the table's cursor goes to row 01.
-Typing in the speed table changes SPEED too, and the value is saved with
-the song. A song that comes with X2 and uses row 01 itself shows SPEED --
-and plays its rows evenly; turning the wheel over SPEED then moves its speed
-table down as X2 does (CTRL+Z undoes). E01 in a pattern still works as
-always.
+In the plugin, with X2, the control under CHN3 is SPEED: the right value of
+the speed table's row 01 (SPEEDTBL 01), which X2 sets to 00 32 when the row
+is empty. If the song uses row 01 itself (an instrument's vibrato or a
+portamento / vibrato command), X2 first moves the song's speed table down
+one row, the instruments and commands with it, so it sounds the same. As
+the standalone program's BPM puts a tempo command on the song's first row,
+SPEED puts the funktempo command E01 there (row 00, in the first channel
+whose command column is empty), and the row works as E01 would: the two rows
+of each pair (the beat's row from before X2 and the one put in between) are
+no longer equally long. The first lasts the left value's frames and the
+second the right value's (00 = 256), so the in-between row starts at left /
+(left + right) of the pair: 00 32 puts it at 84%, 00 80 at 67% (triplet
+swing), 00 00 in the middle (even). X2 puts E01 there when it switches on,
+and so does turning SPEED (the first turn of a song without it only puts it
+back); without E01 on row 00 the rows are even and SPEED shows --. While
+following the DAW (DAW SYNC) the pair keeps the DAW's beat; otherwise it
+keeps the song's own tempo. Notes recorded go to the nearest row of that
+grid, so off-beat and shuffled playing lands on the in-between rows. The
+song's instruments' tables run at their own speed: with X2 the player never
+takes E01 for a funktempo (its 256-frame rows), and an exported SID / PRG
+leaves it out. RESO OFF takes E01 out of the patterns again. Turn the mouse
+wheel over SPEED (SHIFT: 16 at a time) or a MIDI knob sending CC 90 (0-127
+over 00-FF) while the mouse is over it, also while the song plays; the
+table's cursor goes to row 01. Typing in the speed table changes SPEED too,
+and the value is saved with the song. A song that comes with X2 and uses row
+01 itself shows SPEED -- and plays its rows evenly; turning the wheel over
+SPEED then moves its speed table down as X2 does (CTRL+Z undoes). Projects
+saved before E01 was put there get it when they are opened.
 
 X2 doesn't switch on if a pattern in use would get more than 128 rows (more
 than 64 rows), if a tempo would give rows shorter than 3 frames (X2 needs a

@@ -174,6 +174,14 @@ int main(int argc, char **argv)
   // Load song
   if (strlen(songfilename)) {
       loadsong();
+      // A RESO X2 song (instrument 3F named so, holding the start tempo):
+      // its E01s are SPEED's, left out of the packed song (see speedmarker())
+      {
+          INSTR *in = &instr[MAX_INSTR-1];
+          if ((in->ad >= 2) && (!in->ptr[WTBL]) && ((!strncmp(in->name, "RESO X2", MAX_INSTRNAMELEN)) ||
+              (!strncmp(in->name, "DOUBLE", MAX_INSTRNAMELEN))))
+              resomode = 2;
+      }
   } else {
       fprintf(STDERR, "error: no song filename given.\n");
       exit (-1);

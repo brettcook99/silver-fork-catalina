@@ -521,6 +521,7 @@ SDL_mutex *gtplugin_enginemutex = NULL;
  */
 
 volatile int gtsync_speedrowused = 0;
+volatile int gtsync_speedmarked = 0;
 
 // Does the song use the speed table's row 01 itself: an instrument's
 // vibrato, or a portamento / vibrato command (1-4) in a pattern or the wave
@@ -556,6 +557,7 @@ int gtsync_speedrowreferenced(void)
 void gtsync_updatespeedrow(void)
 {
   gtsync_speedrowused = (resomode == 2) && (gtsync_speedrowreferenced());
+  gtsync_speedmarked = (resomode == 2) && (speedmarked());
 }
 
 int gtsync_claimspeedrow(void)
@@ -582,6 +584,19 @@ int gtsync_claimspeedrow(void)
   inserttable(STBL, 0, 0);
   ltable[STBL][0] = 0;
   rtable[STBL][0] = 0x32;
+  // With X2 every E01 was SPEED's, and the move made them E02: back
+  if (resomode == 2)
+  {
+    for (c = 0; c < MAX_PATT; c++)
+    {
+      int d;
+      for (d = 0; d < pattlen[c]; d++)
+      {
+        unsigned char *row = &pattern[c][d*4];
+        if ((row[2] == CMD_FUNKTEMPO) && (row[3] == 2)) row[3] = 1;
+      }
+    }
+  }
   gtsync_speedrowused = 0;
   return 2;
 }
@@ -959,8 +974,11 @@ static void applystate(const unsigned char *data, int size)
     {
       int speed = -1;
       SETINT("speed", speed);
-      if ((speed >= 0) && (resomode == 2) && (!ltable[STBL][0]) && (!rtable[STBL][0]))
+      if ((speed >= 0) && (songreso() == 2) && (!ltable[STBL][0]) && (!rtable[STBL][0]))
         rtable[STBL][0] = speed & 0xff;
+      // SPEED's E01 on the song's first row (projects from before it had
+      // the swing without it)
+      if ((songreso() == 2) && (!gtsync_speedrowreferenced())) speedmark(0);
     }
     {
       char programs[128];

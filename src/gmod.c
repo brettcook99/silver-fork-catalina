@@ -1264,8 +1264,9 @@ int mod_export(const char *path, char *report, int reportsize)
         break;
 
         case CMD_FUNKTEMPO:
-        // Its two row lengths (the speed table's values) on average
-        if ((data >= 1) && (data <= MAX_TABLELEN))
+        // Its two row lengths (the speed table's values) on average (not
+        // SPEED's E01 with RESO X2: no tempo)
+        if ((data >= 1) && (data <= MAX_TABLELEN) && (!speedmarker(CMD_FUNKTEMPO, data)))
         {
           int l = ltable[STBL][data - 1] ? ltable[STBL][data - 1] : 256;
           int r = rtable[STBL][data - 1] ? rtable[STBL][data - 1] : 256;

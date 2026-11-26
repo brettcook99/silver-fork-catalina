@@ -81,6 +81,9 @@ extern int gtsync_recordoff;      // record note-offs as KEYOFF
 // the song uses that row itself (vibrato, portamento) SPEED is off: set
 // every frame on the GoatTracker thread (gtsync_updatespeedrow())
 extern volatile int gtsync_speedrowused;
+// SPEED's E01 is on the song's first row (RESO X2): the swing plays only
+// then (set with gtsync_speedrowused)
+extern volatile int gtsync_speedmarked;
 int gtsync_speedrowreferenced(void);
 void gtsync_updatespeedrow(void);
 // Makes row 01 SPEED's: 00 00 becomes 00 32; if the song uses the row, its
