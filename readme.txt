@@ -569,7 +569,11 @@ the filter type and CC7 the SID voice that goes through the filter: the
 knob's range in three parts, LP / BP / HP and voice 1 / 2 / 3. CC60 is a
 relative (endless) knob that chooses the patch in the SID Designer and the
 instrument in the tracker: value 1 = the next one, 65 = the one before
-(2-63 and 66-127 move that many steps at once).
+(2-63 and 66-127 move that many steps at once). In the tracker CC1 (the mod
+wheel) goes through the rows of the cursor's pattern: 0 = the first row,
+127 = the last. While the song plays and the pattern editor follows it, the
+playback goes there too (as with HOME and END; not while the plugin follows
+the DAW's transport).
 
 MIDI files: File > Import MIDI File asks what goes where:
 - All: MIDI channel 1 to track 1, 2 to track 2 and 3 to track 3

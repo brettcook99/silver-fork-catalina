@@ -189,6 +189,26 @@ static int playbackjump(int row)
   return 1;
 }
 
+// MIDI CC 1 (the mod wheel) in the tracker: the pattern editor goes to a
+// row of the cursor's pattern, 0-127 over its rows (0 = the first row, 127
+// = the last). While the song plays and the editor follows it the playback
+// goes there too, as with HOME / END. In the SID designer CC 1 is the PW
+// slider instead (gui_designermidicc())
+void patternmodwheel(int value)
+{
+  int len = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+  int row;
+
+  if (len < 1) return;
+  if (value < 0) value = 0;
+  if (value > 127) value = 127;
+  row = (value * (len - 1) + 63) / 127;
+  if (row == editorInfo.eppos) return;
+  if (playbackjump(row)) return;
+  editorInfo.eppos = row;
+  editorInfo.epview = editorInfo.eppos-VISIBLEPATTROWS/2;
+}
+
 // DEL (or BACKSPACE, the delete key of a Mac laptop) with rows marked:
 // clears the marked rows' notes and instruments, with SHIFT their commands
 // too. The rows stay marked
