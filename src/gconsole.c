@@ -39,9 +39,6 @@ int metapressed = 0;
 int cursorflashdelay = 0;
 int midinoteon = 0;
 int midinoteoff = 0;
-// Whether the sustain pedal (MIDI CC 64) is down: down = edit mode, up = jam
-// mode
-static int midipedal = 0;
 unsigned midinotetime = 0;
 // Where the note hook (goattrk2.c midinotehook()) sent the note, and whether
 // it has played it already (MIDIASSIGN_...)
@@ -412,23 +409,6 @@ int input_nextmidi(void)
     // the effects panel, the others are dropped
     if (event == MIDI_CONTROL)
     {
-      // CC 64 (sustain pedal / footswitch): pressed (127) = edit mode,
-      // released (0) = jam mode. Only a change counts: a pedal may send
-      // many values while it is down, and a DAW sends 0 when it stops, so
-      // a mode chosen with the middle mouse button stays until the pedal is
-      // pressed or released (or the button clicked) again
-      if (midinote == 64)
-      {
-        int down = midi_eventvalue() >= 64;
-
-        if (down != midipedal)
-        {
-          midipedal = down;
-          recordmode = down;
-          gui_message(down ? "Edit mode (sustain pedal down): notes are entered" : "Jam mode (sustain pedal up): notes are only played");
-        }
-        continue;
-      }
       if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
       else if (midinote == 1) patternmodwheel(midi_eventvalue());
       else if (midinote == 60) instrumentknob(midi_eventvalue());

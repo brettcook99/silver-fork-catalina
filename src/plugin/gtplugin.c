@@ -1044,15 +1044,6 @@ void gtplugin_service(void)
 {
   GTRECORDNOTE rn;
 
-  // The sustain pedal (CC 64) switched the mode (gtplugin_audio.c)
-  if (gtsync_modechange)
-  {
-    int change = gtsync_modechange;
-    gtsync_modechange = 0;
-    if (change == 1) gui_message("Edit mode (sustain pedal down): the notes are recorded into the patterns");
-    else gui_message("Jam mode (sustain pedal up): notes are only played");
-  }
-
   // MIDI program changes (the DAW tracks' patches) chose instruments
   {
     int changed = SDL_AtomicSet(&gtsync_programchanged, 0);

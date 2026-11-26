@@ -1662,8 +1662,9 @@ static void dawsyncdialog(void)
       "voices too, so one DAW track can play chords); other MIDI channels go to the cursor's voice. MIDI CURSOR "
       "sends every MIDI channel to the cursor's voice (or 2-3 from it). In edit mode the notes are recorded into the "
       "patterns while the DAW plays; stopped they are entered at the cursor's row. In jam mode they are only played. "
-      "The sustain pedal / footswitch (CC 64) switches: down = edit mode, up = jam mode (the middle mouse button "
-      "and NUMPAD . switch too).");
+      "The middle mouse button and NUMPAD . switch between edit and jam mode. The sustain pedal (CC 64) works as on "
+      "a synth: while it is down the notes of the keys let go keep sounding, until it comes up (with Record "
+      "note-offs the --- goes where the pedal came up).");
     if (ImGui::Checkbox("Record note-offs (as ---)", &recordoff)) gtsync_recordoff = recordoff ? 1 : 0;
     ImGui::Spacing();
     if (hostbpm > 0.0)

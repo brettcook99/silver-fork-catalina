@@ -77,9 +77,6 @@ void gtplugin_sounduninit(void);
 extern int gtsync_enabled;        // follow the host's tempo & position
 extern int gtsync_startbar;       // the song starts at this bar (1 = first)
 extern int gtsync_recordoff;      // record note-offs as KEYOFF
-// The sustain pedal (CC 64) switched the mode: 1 = edit, 2 = jam (for the
-// message)
-extern volatile int gtsync_modechange;
 // SPEED (RESO X2) is the speed table's row 01, see gtplugin_audio.c. While
 // the song uses that row itself (vibrato, portamento) SPEED is off: set
 // every frame on the GoatTracker thread (gtsync_updatespeedrow())

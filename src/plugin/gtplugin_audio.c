@@ -94,13 +94,6 @@ static double eventbeat = 0.0;
 static int spreadturn[MAX_CHN + 1];
 static unsigned spreadage[MAX_CHN];
 static unsigned spreadclock = 0;
-// The sustain pedal / footswitch (CC 64) is down: down = edit mode (the
-// notes from the DAW are recorded into the patterns while it plays), up =
-// jam mode. The host's own recording doesn't switch the mode (a host may
-// not tell it, or tell it late). The switch for the GoatTracker thread's
-// message: 1 = edit mode, 2 = jam mode
-static int pedaldown = 0;
-volatile int gtsync_modechange = 0;
 
 // Program changes: the instrument each MIDI channel's notes play and are
 // recorded with (0 = the instrument chosen in the editor). Saved with the
@@ -726,24 +719,31 @@ static void handlemidi(const gtcore_midi *m, double framefraction)
   int ev;
   int spread;
 
-  // The sustain pedal / footswitch (CC 64, any MIDI channel): pressed =
-  // edit mode, released = jam mode, at once (so that the notes after it in
-  // this block are recorded or not). Only a change counts: a pedal may send
-  // many values while it is down, and a DAW sends 0 when it stops, so the
-  // mode chosen with the middle mouse button (or NUMPAD .) stays until the
-  // pedal is pressed or released again
+  // The sustain pedal (CC 64, each MIDI channel's own), as on a synth:
+  // while it is down the note offs of keys let go are kept back, and when it
+  // comes up they go through here, at its time (recorded there as --- with
+  // "Record note-offs"). It no longer switches edit / jam mode
   if ((type == 0xb0) && (m->data1 == 64))
   {
-    int down = m->data2 >= 64;
+    unsigned char notes[128];
+    int n = midi_sustainpedal(ch, m->data2, notes);
+    int k;
 
-    if (down != pedaldown)
+    for (k = 0; k < n; k++)
     {
-      pedaldown = down;
-      recordmode = down;
-      gtsync_modechange = down ? 1 : 2;
+      gtcore_midi off = *m;
+      off.status = (unsigned char)(0x80 | ch);
+      off.data1 = notes[k];
+      off.data2 = 0;
+      handlemidi(&off, framefraction);
     }
     return;
   }
+  if ((type == 0x80) || ((type == 0x90) && (!m->data2)))
+  {
+    if (midi_sustainnoteoff(ch, m->data1)) return;
+  }
+  else if (type == 0x90) midi_sustainnoteon(ch, m->data1);
 
   // A program change (the DAW track's patch): the channel's notes play and
   // are recorded with that instrument from now on. Program 0 (the DAW's

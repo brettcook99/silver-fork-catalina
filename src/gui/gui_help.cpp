@@ -77,7 +77,7 @@ static const HelpLine generallines[] = {
   { "SHIFT+F9", "Toggle reSID interpolation" },
   { "NUMPAD 0", "Play from the cursor / stop, like SPACE" },
   { "ESC, NUMPAD .", "Edit mode / jam mode (the middle mouse button too)" },
-  { "SUSTAIN PEDAL", "MIDI CC 64: down = edit mode, up = jam mode" },
+  { "SUSTAIN PEDAL", "MIDI CC 64, as on a synth: while it is down (127) the notes of the keys let go keep sounding; they go off when it comes up (0)" },
   { "ALT+NUMPAD 1-3", "MIDI input on 1-3 tracks (OPTION on macOS)" },
   { "CTRL+NUMPAD 1-3", "Go to track 1 / 2 / 3 in the pattern editor" },
   { "SHIFT+, .", "Move the song start position & restart" },
