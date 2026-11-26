@@ -171,6 +171,7 @@ void do_sound_init(void);
 void toggle_interpolation_mode(void);
 void prevmultiplier(void);
 void nextmultiplier(void);
+void multipliersync(void);
 // The classic online help screen (ghelp.c), used by the retro interface
 void onlinehelp(int standalone, int context);
 void calculatefreqtable(void);

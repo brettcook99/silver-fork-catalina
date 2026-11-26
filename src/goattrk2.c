@@ -841,6 +841,7 @@ static void mainloopframe(void)
 	}
 	cursorflashdelay += win_getspeed(50);
 	resosync();
+	multipliersync();
 	displayupdate();
 	followplayback();
 	gui_frame(0);
@@ -953,6 +954,7 @@ static void retromainloop(void)
 		for (;;)
 		{
 			resosync();
+			multipliersync();
 			followplayback();
 			recordpasscheck();
 			displayupdate();
@@ -1087,6 +1089,16 @@ void converthex()
 
 void do_sound_init() {
 	sound_init(b, mr, writer, hardsid, editorInfo.sidmodel, editorInfo.ntsc, editorInfo.multiplier, catweasel, interpolate, customclockrate);
+}
+
+// The speed multiplier changed where the sound wasn't told (the BPM wheel,
+// undo, redo): the player's frames follow it
+void multipliersync(void)
+{
+#ifndef GT_PLUGIN
+	if (editorInfo.multiplier == sound_multiplier()) return;
+	if (!sound_setmultiplier(editorInfo.multiplier, editorInfo.ntsc)) do_sound_init();
+#endif
 }
 
 int reopenaudio(void)
