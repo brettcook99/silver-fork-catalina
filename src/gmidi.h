@@ -8,15 +8,30 @@
 #define MIDI_NOTEON 1
 #define MIDI_NOTEOFF 2
 #define MIDI_CONTROL 3
+// A button of the MIDI controller device (a note: value = velocity, 0 = let
+// go), see midi_controllerdevice
+#define MIDI_TRANSPORT 4
 
-// Opens every MIDI input device. Returns the number of devices opened.
-// On macOS devices plugged in later are picked up automatically.
+// Device names (as the system gives them) are at most this long
+#define MIDI_DEVICENAMELEN 256
+
+// Opens the MIDI input devices: the input device (or every one) and the
+// controller device (see midi_inputdevice). Returns the number of devices
+// opened. On macOS devices plugged in later are picked up automatically.
 int midi_init(void);
 void midi_uninit(void);
 
+// The names of the MIDI input devices in the system (at most max). Returns
+// how many
+int midi_listdevices(char (*names)[MIDI_DEVICENAMELEN], int max);
+// Opens the devices again after midi_inputdevice / midi_controllerdevice
+// changed (if MIDI input is on)
+void midi_setdevices(void);
+
 // Gets the next received event. Returns 0 if there is none, otherwise
-// MIDI_NOTEON or MIDI_NOTEOFF with the MIDI note number (0-127) in *note, or
-// MIDI_CONTROL with the controller number (0-127) in *note
+// MIDI_NOTEON or MIDI_NOTEOFF with the MIDI note number (0-127) in *note,
+// MIDI_CONTROL with the controller number (0-127) in *note, or
+// MIDI_TRANSPORT (the controller device's note on / off) with the note
 int midi_getevent(int *note);
 
 // The velocity (note on) or value (control change, 0-127) of the event
@@ -57,6 +72,12 @@ int midi_relativesteps(int value);
 
 #ifndef GMIDI_C
 extern unsigned midiinput;
+// Preferences: the device whose notes and knobs are used ("" = every
+// device), and the controller device whose buttons are the transport ("" =
+// none). The controller device never plays notes; a device chosen as both
+// is the controller
+extern char midi_inputdevice[MIDI_DEVICENAMELEN];
+extern char midi_controllerdevice[MIDI_DEVICENAMELEN];
 #endif
 
 #endif

@@ -303,6 +303,82 @@ int midinoteinstr(void)
   return midichannelinstr(midinotechannel);
 }
 
+// The MIDI controller device's buttons (Preferences: MIDI controller
+// device), the notes a Mackie Control sends for them (velocity 127 pressed,
+// 0 let go; the names with middle C = C3): PLAY (A#5, 94) plays the song from
+// its start, CYCLE (D5, 86) the patterns shown from their start, STOP (A5,
+// 93) stops, RECORD (B5, 95) switches between edit and jam mode, in the
+// tracker and in the SID designer. The cursor buttons UP (C6, 96), DOWN (C#6,
+// 97), LEFT (D6, 98) and RIGHT (D#6, 99) are the arrow keys in the tracker;
+// in the SID designer LEFT and RIGHT go to the tab before / after, and on
+// the BROWSER tab UP and DOWN try the instrument before / after. A cursor
+// button held down repeats, as a key does
+#define CTRLB_PATTERN 86
+#define CTRLB_STOP 93
+#define CTRLB_PLAY 94
+#define CTRLB_RECORD 95
+#define CTRLB_UP 96
+#define CTRLB_DOWN 97
+#define CTRLB_LEFT 98
+#define CTRLB_RIGHT 99
+#define CTRLB_REPEATDELAY 400
+#define CTRLB_REPEATTIME 50
+
+static int ctrlbheld = -1;
+static unsigned ctrlbnext = 0;
+
+static void controllerkey(int note, int repeat)
+{
+  if (gui_designeractive())
+  {
+    if ((note == CTRLB_LEFT) || (note == CTRLB_RIGHT))
+    {
+      if (!repeat) gui_pushkey(SDLK_TAB, (note == CTRLB_LEFT) ? KMOD_LSHIFT : 0, 0);
+    }
+    else if (gui_designerbrowserpage())
+      gui_pushkey((note == CTRLB_UP) ? SDLK_UP : SDLK_DOWN, 0, repeat);
+    return;
+  }
+  gui_pushkey((note == CTRLB_UP) ? SDLK_UP : (note == CTRLB_DOWN) ? SDLK_DOWN : (note == CTRLB_LEFT) ? SDLK_LEFT : SDLK_RIGHT, 0, repeat);
+}
+
+static void controllerbutton(int note, int down)
+{
+  if (!down)
+  {
+    if (note == ctrlbheld) ctrlbheld = -1;
+    return;
+  }
+  switch (note)
+  {
+    case CTRLB_PLAY:
+    cmd_post(GTCMD_PLAYSONG);
+    break;
+
+    case CTRLB_PATTERN:
+    cmd_post(GTCMD_PLAYPATTSTART);
+    break;
+
+    case CTRLB_STOP:
+    cmd_post(GTCMD_STOP);
+    break;
+
+    case CTRLB_RECORD:
+    recordmode ^= 1;
+    gui_message(recordmode ? "Edit mode (MIDI controller): notes are entered" : "Jam mode (MIDI controller): notes are only played");
+    break;
+
+    case CTRLB_UP:
+    case CTRLB_DOWN:
+    case CTRLB_LEFT:
+    case CTRLB_RIGHT:
+    controllerkey(note, 0);
+    ctrlbheld = note;
+    ctrlbnext = SDL_GetTicks() + CTRLB_REPEATDELAY;
+    break;
+  }
+}
+
 int input_nextmidi(void)
 {
   int midinote;
@@ -312,11 +388,24 @@ int input_nextmidi(void)
   midinoteon = 0;
   midinoteoff = 0;
 
+  // A cursor button of the MIDI controller held down repeats
+  if ((ctrlbheld >= 0) && ((int)(SDL_GetTicks() - ctrlbnext) >= 0))
+  {
+    controllerkey(ctrlbheld, 1);
+    ctrlbnext = SDL_GetTicks() + CTRLB_REPEATTIME;
+  }
+
   // MIDI note 60 (middle C) is C-4
   for (;;)
   {
     event = midi_getevent(&midinote);
     if (!event) return 0;
+    // The MIDI controller device's buttons
+    if (event == MIDI_TRANSPORT)
+    {
+      controllerbutton(midinote, midi_eventvalue() > 0);
+      continue;
+    }
     // Control changes (knobs) go to the SID designer at once, if it is
     // shown. In the tracker CC 1 (the mod wheel) scrolls the pattern, CC 60
     // chooses the instrument, CC 90 sets the value of the effect picked in

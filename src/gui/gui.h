@@ -55,6 +55,11 @@ int gui_command(int cmd);
 // Nonzero while the SID designer is shown. MIDI notes go to it then
 // (noteon / noteoff as midinoteon / midinoteoff)
 int gui_designeractive(void);
+// Nonzero while the SID designer shows its BROWSER tab
+int gui_designerbrowserpage(void);
+// A key press (and release) made by the program, as if the key were pressed
+// (the MIDI controller's cursor buttons). repeat = held down
+void gui_pushkey(int sym, int mod, int repeat);
 // Nonzero while the SID designer is open (also under a classic dialog)
 int gui_designershown(void);
 // Opens the retro menu bar's VIEW menu (SID designer, background, meter

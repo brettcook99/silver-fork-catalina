@@ -1340,6 +1340,26 @@ extern "C" void gui_frame(int textscreen)
 #endif
 }
 
+extern "C" void gui_pushkey(int sym, int mod, int repeat)
+{
+  SDL_Event e;
+
+  memset(&e, 0, sizeof e);
+  e.type = SDL_KEYDOWN;
+  e.key.state = SDL_PRESSED;
+  e.key.repeat = repeat ? 1 : 0;
+  e.key.windowID = window ? SDL_GetWindowID(window) : 0;
+  e.key.keysym.sym = (SDL_Keycode)sym;
+  e.key.keysym.scancode = SDL_GetScancodeFromKey(e.key.keysym.sym);
+  e.key.keysym.mod = (Uint16)mod;
+  SDL_PushEvent(&e);
+  // Let go at once, so that nothing sees the key held
+  e.type = SDL_KEYUP;
+  e.key.state = SDL_RELEASED;
+  e.key.repeat = 0;
+  SDL_PushEvent(&e);
+}
+
 extern "C" int gui_chooseinterface(int current)
 {
   int selected = (current == UI_MODERN) ? UI_MODERN : UI_RETRO;
