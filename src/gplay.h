@@ -93,6 +93,8 @@ extern int lastsonginit;
 #endif
 // SPACE / numpad 0 started the playback (see playstopreturn())
 extern int playreturnpoint;
+// Starts of playback so far
+extern unsigned playstarts;
 
 void initchannels(void);
 void initsong(int num, int playmode);

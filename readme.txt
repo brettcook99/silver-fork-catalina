@@ -666,7 +666,11 @@ comes in that row's first half, else the next row, which then doesn't play
 it again this time round. The notes of a chord (MIDI INPUT 2-3 PATTERNS) go
 on the row of the first one. The note is stored as it sounded, so a pattern
 transposed in the orderlist gets it with the transpose taken off; a keyoff
-doesn't replace a recorded note.
+doesn't replace a recorded note. The notes recorded from MIDI in one pass,
+from the first until the playback stops (or starts again) or edit mode is
+left, are one undo step: CTRL+Z takes the whole recording back, CTRL+Y (or
+CTRL+SHIFT+Z) brings it back. Doing something else in between (a key, an
+edit) starts a new undo step for the notes after it.
 
 For pattern joining to work properly, select the pattern you want to join with
 the next from the orderlist first (by pressing RETURN on it). Both joining and

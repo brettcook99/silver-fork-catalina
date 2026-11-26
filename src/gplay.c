@@ -94,6 +94,8 @@ int lastsonginit = 0;
 // SPACE / numpad 0 started the playback: the editor goes back there when it
 // is stopped (gpattern.c). Every other start of playback clears it
 int playreturnpoint = 0;
+// Starts of playback so far (initsong(), initsongpos())
+unsigned playstarts = 0;
 int startpattpos = 0;
 int playloop = 0;
 // Positions channels jump to (playjump()), -1 = none
@@ -189,6 +191,7 @@ void initsong(int num, int mode)
   songinit = mode;
   startpattpos = 0;
   playreturnpoint = 0;
+  playstarts++;
   sound_unlockplayer();
   sound_flush();
 }
@@ -205,6 +208,7 @@ void initsongpos(int num, int mode, int pattpos)
   songinit = mode;
   startpattpos = pattpos;
   playreturnpoint = 0;
+  playstarts++;
   sound_unlockplayer();
   sound_flush();
 }

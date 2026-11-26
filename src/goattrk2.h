@@ -73,6 +73,7 @@ extern int midichordmask;
 extern int midinoterouted;
 extern int midinoteplayed;
 extern int midirecord;
+void recordpassundo(int top, int newpass);
 extern int midirecpatt;
 extern int midirecrow;
 extern int midirectrans;

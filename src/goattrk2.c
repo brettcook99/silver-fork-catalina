@@ -906,6 +906,32 @@ static int chooseinterface(void)
 
 // The retro interface's main loop: the classic main screen, with its keys
 // and mouse, plus the menu commands and drag & drop of the new version
+// A MIDI recording pass is one undo step: the notes recorded from MIDI
+// while the song plays in edit mode, from the first one until the playback
+// stops (or starts again) or edit mode is left. Each recorded note's undo
+// step is joined to the pass's step before it, unless something else was
+// done or undone in between. top = the undo position before the note's step
+// was added; newpass = it starts a pass anyway (the plugin's notes recorded
+// from the host: the host's transport started)
+static int recpasstop = -1;
+static int recpasscount = -1;
+static unsigned recpassplay = 0;
+
+void recordpassundo(int top, int newpass)
+{
+	if (playstarts != recpassplay) newpass = 1;
+	recpassplay = playstarts;
+	if ((!newpass) && (recpasstop == top) && (recpasscount == undoCounter - 1)) undoJoinStep(top);
+	recpasstop = currentUndoPosition;
+	recpasscount = undoCounter;
+}
+
+// Once a frame: the pass ends when the recording does
+static void recordpasscheck(void)
+{
+	if ((!recordmode) || (!isplaying())) recpasstop = -1;
+}
+
 static void retromainloop(void)
 {
 	int cmd;
@@ -922,6 +948,7 @@ static void retromainloop(void)
 		{
 			resosync();
 			followplayback();
+			recordpasscheck();
 			displayupdate();
 			getkey();
 			macmenu_setstate(recordmode, followmode);
@@ -1130,6 +1157,7 @@ void docommand(void)
 	if (retromode) retro_mousecommands();
 
 	GTUNDO_OBJECT *ed = undoCreateEditorInfo();
+	int undotop;
 
 	// Mode-specific commands
 	switch (editorInfo.editmode)
@@ -1201,10 +1229,14 @@ void docommand(void)
 		break;
 	}
 
+	// A note recorded from MIDI joins the recording pass's undo step
+	undotop = currentUndoPosition;
 	if (undoValidateUndoAreas(ed) == 0)
 	{
 		undoFreeUndoObject((GTUNDO_OBJECT*)ed);
 	}
+	else if ((editorInfo.editmode == EDIT_PATTERN) && (midinoteon) && (midirecord))
+		recordpassundo(undotop, 0);
 	// MIDI keyboard note on/off
 	midicommands();
 
