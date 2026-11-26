@@ -425,6 +425,16 @@ static void startnewnote(int c, CHN *cptr, INSTR *iptr, int toneporta)
   sidreg[0x6+7*c] = iptr->sr;
 }
 
+// With RESO X2 the funktempo command E01 is SPEED's (the plugin's swing:
+// the speed table's row 01 says where the in-between rows fall, see
+// gtplugin_audio.c), put on the song's first row as the standalone program's
+// BPM puts a tempo command there. The player keeps its tempo for it, and the
+// packer leaves it out
+int speedmarker(int cmd, int data)
+{
+  return (resomode == 2) && (cmd == CMD_FUNKTEMPO) && (data == 1);
+}
+
 void playroutine(void)
 {
   if (offlinerun) return;
@@ -847,6 +857,8 @@ static void runchannels(int mask)
         break;
 
         case CMD_FUNKTEMPO:
+        // With RESO X2, E01 is SPEED's: no funktempo
+        if (speedmarker(CMD_FUNKTEMPO, cptr->newcmddata)) break;
         if (cptr->newcmddata)
         {
           funktable[0] = ltable[STBL][cptr->newcmddata-1]-1;

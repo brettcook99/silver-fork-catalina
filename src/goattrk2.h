@@ -172,6 +172,9 @@ void toggle_interpolation_mode(void);
 void prevmultiplier(void);
 void nextmultiplier(void);
 void multipliersync(void);
+int speedmarked(void);
+int speedmark(int undo);
+int songreso(void);
 // The classic online help screen (ghelp.c), used by the retro interface
 void onlinehelp(int standalone, int context);
 void calculatefreqtable(void);

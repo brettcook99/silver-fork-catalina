@@ -1577,6 +1577,13 @@ static int resodefaulttempo(void)
 // The song's RESO (1 = off)
 static int resomarked(void)
 {
+	return songreso();
+}
+
+// The RESO the song in memory is marked with (1 = off), also before
+// resosync() has seen it
+int songreso(void)
+{
 	INSTR *in = &instr[RESOINSTR];
 	int k;
 
@@ -1852,6 +1859,71 @@ static void resounlock(void)
 #endif
 }
 
+// SPEED's mark (RESO X2, the plugin's swing): the funktempo command E01 on
+// the song's first row, as the standalone program's BPM puts a tempo command
+// there (see speedmarker() in gplay.c). The pattern channel c starts the
+// current subtune with, -1 if none
+static int startpattern(int c)
+{
+	unsigned char *order = songorder[editorInfo.esnum][c];
+	int e = 0;
+
+	while ((e < songlen[editorInfo.esnum][c]) && (order[e] >= MAX_PATT) && (order[e] < LOOPSONG)) e++;
+	if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) return -1;
+	return order[e];
+}
+
+// Is E01 on the song's first row (in one of the channels)?
+int speedmarked(void)
+{
+	int c;
+
+	for (c = 0; c < MAX_CHN; c++)
+	{
+		int p = startpattern(c);
+		if ((p >= 0) && (pattern[p][2] == CMD_FUNKTEMPO) && (pattern[p][3] == 1)) return 1;
+	}
+	return 0;
+}
+
+// Puts E01 on the song's first row, in the first channel whose command
+// column is empty there (with undo: its pattern marked for it). Returns 0 if
+// there is no room
+int speedmark(int undo)
+{
+	int c;
+
+	if (speedmarked()) return 1;
+	for (c = 0; c < MAX_CHN; c++)
+	{
+		int p = startpattern(c);
+		if ((p >= 0) && (!pattern[p][2]) && (!pattern[p][3]))
+		{
+			if (undo) undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+			pattern[p][2] = CMD_FUNKTEMPO;
+			pattern[p][3] = 1;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// Leaving X2: the E01s (SPEED's under X2) come out of the patterns, as
+// without X2 they would be funktempos (the patterns are marked for undo)
+static void speedunmark(void)
+{
+	int c, d;
+
+	for (c = 0; c < MAX_PATT; c++)
+	{
+		for (d = 0; d < pattlen[c]; d++)
+		{
+			unsigned char *row = &pattern[c][d*4];
+			if ((row[2] == CMD_FUNKTEMPO) && (row[3] == 1)) row[2] = row[3] = 0;
+		}
+	}
+}
+
 // Sets RESO (1 = off, 2 = X2, 3 = X3; one undo step). Stays as it is if the
 // song can't be changed
 void setresomode(int k)
@@ -1879,6 +1951,7 @@ void setresomode(int k)
 		undoAreaSetCheckForChange(UNDO_AREA_PATTERN, c, UNDO_AREA_DIRTY_CHECK);
 	undoAreaSetCheckForChange(UNDO_AREA_PATTERN_LEN, 0, UNDO_AREA_DIRTY_CHECK);
 	undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, RESOINSTR, UNDO_AREA_DIRTY_CHECK);
+	if (from == 2) speedunmark();
 
 	empty = songempty();
 	start = resostarttempo();

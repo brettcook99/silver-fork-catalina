@@ -299,7 +299,7 @@ void relocator(void)
           nogate = 0;
         if (pattern[c][d*4+1])
           instrused[pattern[c][d*4+1]] = 1;
-        if (pattern[c][d*4+2])
+        if ((pattern[c][d*4+2]) && (!speedmarker(pattern[c][d*4+2], pattern[c][d*4+3])))
           noeffects = 0;
         if ((pattern[c][d*4+2] >= CMD_SETWAVEPTR) && (pattern[c][d*4+2] <= CMD_SETFILTERPTR))
           exectable(pattern[c][d*4+2] - CMD_SETWAVEPTR, pattern[c][d*4+3]);
@@ -308,9 +308,10 @@ void relocator(void)
           exectable(STBL, pattern[c][d*4+3]);
           calcspeedtest(pattern[c][d*4+3]);
         }
-        if (pattern[c][d*4+2] == CMD_FUNKTEMPO)
+        // (SPEED's E01 with RESO X2 is left out, see packpattern())
+        if ((pattern[c][d*4+2] == CMD_FUNKTEMPO) && (!speedmarker(pattern[c][d*4+2], pattern[c][d*4+3])))
           exectable(STBL, pattern[c][d*4+3]);
-        if (pattern[c][d*4+2] == CMD_FUNKTEMPO)
+        if ((pattern[c][d*4+2] == CMD_FUNKTEMPO) && (!speedmarker(pattern[c][d*4+2], pattern[c][d*4+3])))
         {
           nofunktempo = 0;
           noglobaltempo = 0;
@@ -1756,6 +1757,12 @@ int packpattern(unsigned char *dest, unsigned char *src, int rows)
       temp1[c*4+3] = src[c*4+3];
       if (src[c*4+1])
         instr = src[c*4+1];
+    }
+    // SPEED's E01 (RESO X2) is no funktempo: left out
+    if (speedmarker(temp1[c*4+2], temp1[c*4+3]))
+    {
+      temp1[c*4+2] = 0;
+      temp1[c*4+3] = 0;
     }
 
     switch(temp1[c*4+2])

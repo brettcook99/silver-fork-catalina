@@ -471,7 +471,7 @@ static double starttempo(void)
     if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) continue;
     row = &pattern[order[e]][0];
     if ((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) return row[3] & 0x7f;
-    if ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN))
+    if ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN) && (!speedmarker(row[2], row[3])))
       return (ltable[STBL][row[3]-1] + rtable[STBL][row[3]-1]) / 2.0;
   }
   return frames;
@@ -538,7 +538,8 @@ static int setstarttempo(int f)
     while ((e < songlen[editorInfo.esnum][c]) && (order[e] >= MAX_PATT) && (order[e] < LOOPSONG)) e++;
     if ((e >= songlen[editorInfo.esnum][c]) || (order[e] >= MAX_PATT) || (!pattlen[order[e]])) continue;
     row = &pattern[order[e]][0];
-    if (((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) || ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN)))
+    if (((row[2] == CMD_SETTEMPO) && ((row[3] & 0x7f) >= 3)) ||
+      ((row[2] == CMD_FUNKTEMPO) && (row[3]) && (row[3] <= MAX_TABLELEN) && (!speedmarker(row[2], row[3]))))
     {
       undoAreaSetCheckForChange(UNDO_AREA_PATTERN, order[e], UNDO_AREA_DIRTY_CHECK);
       if (row[2] == CMD_FUNKTEMPO) row[3] = 0;

@@ -158,6 +158,7 @@ void playjump(int c, int pos);
 // Player frames per row of channel 1 (the average of the two values with
 // funktempo)
 double playframesperrow(void);
+int speedmarker(int cmd, int data);
 // Frames from the start of playback to the first row's tick 0
 int playstartframes(void);
 // Stops and clears the player and the SID registers (the channels' mutes
