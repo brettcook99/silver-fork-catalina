@@ -364,6 +364,10 @@ int main(int argc, char **argv)
 		getparam(configfile, &audiobuffer);
 		getpathparam(configfile, audiodevice);
 		if (!strcmp(audiodevice, "0")) audiodevice[0] = 0;
+		getpathparam(configfile, midi_inputdevice);
+		if (!strcmp(midi_inputdevice, "0")) midi_inputdevice[0] = 0;
+		getpathparam(configfile, midi_controllerdevice);
+		if (!strcmp(midi_controllerdevice, "0")) midi_controllerdevice[0] = 0;
 		fclose(configfile);
 
 		// A config file saved with an old default sound buffer gets the
@@ -813,6 +817,8 @@ int main(int argc, char **argv)
 			pluginfolders[2][0] ? pluginfolders[2] : "0", pluginfolders[3][0] ? pluginfolders[3] : "0");
 		fprintf(configfile, ";Audio output buffer in samples (0 = the reSID buffer length above, in milliseconds)\n%d\n\n", audiobuffer);
 		fprintf(configfile, ";Audio output device (0 = the system's default)\n%s\n\n", audiodevice[0] ? audiodevice : "0");
+		fprintf(configfile, ";MIDI input device: notes and knobs (0 = every device)\n%s\n\n", midi_inputdevice[0] ? midi_inputdevice : "0");
+		fprintf(configfile, ";MIDI controller device: its buttons are the transport (0 = none)\n%s\n\n", midi_controllerdevice[0] ? midi_controllerdevice : "0");
 		fclose(configfile);
 	}
 

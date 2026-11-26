@@ -935,8 +935,8 @@ static void patternmenu(void)
 
 #ifndef GT_PLUGIN
 /*
- * Preferences (standalone): the audio output. A change opens the output
- * again at once
+ * Preferences (standalone): the audio output and the MIDI devices. A change
+ * opens the output / the devices again at once
  */
 
 static bool wantpreferences = false;
@@ -953,8 +953,11 @@ static void preferencesdialog(void)
 {
   static char devices[32][128];
   static int ndevices = 0;
+  static char mididevices[32][MIDI_DEVICENAMELEN];
+  static int nmididevices = 0;
   static bool failed = false;
   bool changed = false;
+  bool midichanged = false;
   char text[256];
   int c;
 
@@ -971,6 +974,7 @@ static void preferencesdialog(void)
       const char *name = SDL_GetAudioDeviceName(c, 0);
       snprintf(devices[c], sizeof devices[c], "%s", name ? name : "?");
     }
+    nmididevices = midi_listdevices(mididevices, 32);
   }
   if (beginmodal("##preferences", ImGui::GetFontSize() * 30.0f))
   {
@@ -1057,6 +1061,63 @@ static void preferencesdialog(void)
     else
       snprintf(text, sizeof text, "No audio output could be opened.");
     body(text);
+
+    // The MIDI devices: the input device's notes and knobs are used (every
+    // device's if none is chosen), the controller device's buttons are the
+    // transport and it plays no notes (a device chosen as both is the
+    // controller)
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::TextUnformatted("MIDI");
+    ImGui::Spacing();
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("MIDI input device", midi_inputdevice[0] ? midi_inputdevice : "All devices"))
+    {
+      if (ImGui::Selectable("All devices", !midi_inputdevice[0]))
+      {
+        midi_inputdevice[0] = 0;
+        midichanged = true;
+      }
+      for (c = 0; c < nmididevices; c++)
+      {
+        ImGui::PushID(c);
+        if (ImGui::Selectable(mididevices[c], !strcmp(midi_inputdevice, mididevices[c])))
+        {
+          snprintf(midi_inputdevice, MIDI_DEVICENAMELEN, "%s", mididevices[c]);
+          midichanged = true;
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SetNextItemWidth(w);
+    if (ImGui::BeginCombo("MIDI controller device", midi_controllerdevice[0] ? midi_controllerdevice : "None"))
+    {
+      if (ImGui::Selectable("None", !midi_controllerdevice[0]))
+      {
+        midi_controllerdevice[0] = 0;
+        midichanged = true;
+      }
+      for (c = 0; c < nmididevices; c++)
+      {
+        ImGui::PushID(c);
+        if (ImGui::Selectable(mididevices[c], !strcmp(midi_controllerdevice, mididevices[c])))
+        {
+          snprintf(midi_controllerdevice, MIDI_DEVICENAMELEN, "%s", mididevices[c]);
+          midichanged = true;
+        }
+        ImGui::PopID();
+      }
+      ImGui::EndCombo();
+    }
+    if (midichanged) midi_setdevices();
+    ImGui::Spacing();
+    body("The input device (a keyboard) plays and enters notes, and its knobs work. The controller device's buttons "
+      "are the transport and play no notes: PLAY (A#5) plays the song, CYCLE (D5) the pattern, STOP (A5) stops, "
+      "RECORD (B5) switches edit / jam mode, the cursor buttons (C6, C#6, D6, D#6: up, down, left, right) move the "
+      "cursor; in the SID Designer they choose the tab and try the BROWSER's instruments. These are the notes a "
+      "Mackie Control sends (C3 = middle C).");
     if (buttons(labels, 1, 0) >= 0) ImGui::CloseCurrentPopup();
     ImGui::EndPopup();
   }

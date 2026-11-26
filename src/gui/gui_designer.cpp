@@ -3023,6 +3023,11 @@ extern "C" int gui_designeractive(void)
   return (showdesigner) && (drawnlastframe);
 }
 
+extern "C" int gui_designerbrowserpage(void)
+{
+  return page == PAGE_BROWSER;
+}
+
 extern "C" void gui_designermidi(int noteon_, int noteoff_)
 {
   if (noteon_) noteon(noteon_, SRC_MIDI, 0);

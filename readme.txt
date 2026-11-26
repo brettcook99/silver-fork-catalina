@@ -566,6 +566,24 @@ wheel) goes through the rows of the cursor's pattern: 0 = the first row,
 playback goes there too (as with HOME and END; not while the plugin follows
 the DAW's transport).
 
+MIDI devices (Preferences, standalone program): "MIDI input device" is the
+keyboard whose notes are played and entered and whose knobs work (All
+devices: every one, as before). "MIDI controller device" is a controller
+whose buttons are the transport; it plays no notes, and a device chosen as
+both is the controller. Its buttons send notes, as a Mackie Control does
+(note names with middle C = C3; velocity 127 = pressed, 0 = let go):
+- PLAY (A#5, note 94): play the song from its start
+- CYCLE (D5, note 86): play the patterns shown from their start (F1)
+- STOP (A5, note 93): stop
+- RECORD (B5, note 95): switch between edit mode and jam mode
+These work in the tracker and the SID Designer. In the tracker the cursor
+buttons UP (C6, 96), DOWN (C#6, 97), LEFT (D6, 98) and RIGHT (D#6, 99) are
+the arrow keys; in the SID Designer LEFT and RIGHT go to the tab before /
+after (BROWSER, EMU, FILTER...), and on the BROWSER tab UP and DOWN try the
+instrument before / after. A cursor button held down repeats like a key. The
+choices are saved in goattrk2.cfg (by the devices' names) and take effect at
+once; only the devices chosen are opened.
+
 MIDI files: File > Import MIDI File asks what goes where:
 - All: MIDI channel 1 to track 1, 2 to track 2 and 3 to track 3
 - To track 1, 2 and/or 3 (ticked), from any MIDI channel or one chosen: the

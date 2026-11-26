@@ -103,7 +103,7 @@ enum
   GTCMD_CLEARTRACK,       // CLEAR menu (plugin): the cursor channel's pattern,
   GTCMD_CLEARPATTERNS,    //   the patterns of all channels shown,
   GTCMD_CLEARALL,         //   the whole song (asks first)
-  GTCMD_PREFERENCES,      // Preferences: audio output (standalone)
+  GTCMD_PREFERENCES,      // Preferences: audio output, MIDI devices (standalone)
   GTCMD_IMPORTSWM,        // A SID-Wizard module (.swm) as the song
   GTCMD_EXPORTSWM,        // The song as a SID-Wizard module
   GTCMD_IMPORTMOD,        // A ProTracker module (.mod): the file, then the import dialog

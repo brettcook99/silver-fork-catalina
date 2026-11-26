@@ -18,4 +18,6 @@ void gui_changetextsize(int dir) { (void)dir; }
 void gui_togglefullscreen(void) { }
 void gui_message(const char *fmt, ...) { (void)fmt; }
 int gui_designeractive(void) { return 0; }
+int gui_designerbrowserpage(void) { return 0; }
+void gui_pushkey(int sym, int mod, int repeat) { (void)sym; (void)mod; (void)repeat; }
 void gui_designermidicc(int cc, int value) { (void)cc; (void)value; }
