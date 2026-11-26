@@ -477,7 +477,7 @@ Mouse wheel Scroll the pattern
 
 A MIDI keyboard enters notes like the note keys. MIDI INPUT (at the bottom
 of the retro screen) sets which channels (tracks) the MIDI notes go to. Its
-title chooses MIDI INPUT 1, MIDI INPUT 2, MIDI INPUT 3 or MIDI CURSOR (click
+title chooses MIDI CURSOR, MIDI INPUT 1, MIDI INPUT 2 or MIDI INPUT 3 (click
 it, right-click: back, or the mouse wheel over it), its value how many
 patterns (channels) that one plays, 1-3 (click, wheel or ALT/OPTION + numpad
 1, 2 or 3):
@@ -502,7 +502,8 @@ together:
   too, all on one row; keys beyond the last channel are left out
 The turn starts again at the first channel when you move the cursor. This
 works in jam mode too: the notes then only play, on their channels. The
-standalone program starts with MIDI CURSOR, the plugin with MIDI INPUT 1.
+standalone program and the plugin start with MIDI CURSOR (a plugin project
+keeps the setting it was saved with).
 
 STEPS (next to MIDI INPUT; STEP in the modern control bar) sets how many rows
 are skipped after a note is entered, 0-16: with 1 the cursor moves from row

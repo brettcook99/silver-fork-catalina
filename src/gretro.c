@@ -1488,11 +1488,11 @@ static int retrotablewheel(int d)
 // input, steps), the instrument parameters, the table values, the song
 // position ("POS xx"; while playing, the playback goes there too) and the
 // pattern numbers in the orderlist, and the effects panel's value. Returns
-// The MIDI INPUT setting d steps on, in the order MIDI INPUT 1, 2, 3, MIDI
-// CURSOR (round)
+// The MIDI INPUT setting d steps on, in the order MIDI CURSOR (the first
+// choice), MIDI INPUT 1, 2, 3 (round)
 static int nextmidiinput(int d)
 {
-  static const int order[MAX_CHN + 1] = {1, 2, 3, 0};
+  static const int order[MAX_CHN + 1] = {0, 1, 2, 3};
   int k;
 
   for (k = 0; k <= MAX_CHN; k++)
