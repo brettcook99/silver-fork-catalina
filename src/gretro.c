@@ -415,9 +415,9 @@ void retro_fxknob(int value)
 #define RESOCENTER 42
 #define RESOCOLUMN (RESOCENTER - 2)
 #define RESOWIDTH 5
-// Under CHN3, with RESO X2 only: SPEED in the plugin (where the in-between
+// Under CHN3: SPEED in the plugin with RESO X2 only (where the in-between
 // rows fall while following the DAW, see gtplugin_audio.c), BPM in the
-// standalone program (the tempo; the wheel changes it)
+// standalone program at every RESO (the tempo; the wheel changes it)
 #define SPDCOLUMN (FXCENTER - 4)
 #define SPDWIDTH 9
 #define MSGCOLUMN RX
@@ -497,10 +497,13 @@ static double currentbpm(void)
   return fps * 60.0 / (frames * (stepsize > 0 ? stepsize : 4));
 }
 
-// The mouse on SPEED / BPM (RESO X2)
+// The mouse on SPEED (plugin, RESO X2) / BPM (standalone, every RESO)
 static int overspeed(void)
 {
-  return (resomode == 2) && (mousey >= 35) && (mousey <= 36) && (mousex >= SPDCOLUMN) && (mousex < SPDCOLUMN + SPDWIDTH);
+#ifdef GT_PLUGIN
+  if (resomode != 2) return 0;
+#endif
+  return (mousey >= 35) && (mousey <= 36) && (mousex >= SPDCOLUMN) && (mousex < SPDCOLUMN + SPDWIDTH);
 }
 
 #ifdef GT_PLUGIN
@@ -518,9 +521,12 @@ static void setspeed(int v)
 #else
 // The tempo (frames per row) the song starts with, where starttempo() finds
 // it: a tempo command on the first row (funktempo becomes a tempo), else the
-// tempo instrument ($3F)
-static void setstarttempo(int f)
+// tempo instrument ($3F). A song with neither (RESO OFF, no tempo command)
+// gets a tempo command on the first row of the first track whose command
+// column is empty there. Returns 0 if there was no room for one
+static int setstarttempo(int f)
 {
+  int freep = -1;
   int c;
 
   for (c = 0; c < MAX_CHN; c++)
@@ -538,28 +544,35 @@ static void setstarttempo(int f)
       if (row[2] == CMD_FUNKTEMPO) row[3] = 0;
       row[2] = CMD_SETTEMPO;
       row[3] = (row[3] & 0x80) | f;
-      return;
+      return 1;
     }
+    if ((freep < 0) && (!row[2]) && (!row[3])) freep = order[e];
   }
   if ((instr[MAX_INSTR-1].ad >= 2) && (!(instr[MAX_INSTR-1].ptr[WTBL])))
   {
     undoAreaSetCheckForChange(UNDO_AREA_INSTRUMENTS, MAX_INSTR-1, UNDO_AREA_DIRTY_CHECK);
     instr[MAX_INSTR-1].ad = f;
+    return 1;
   }
+  if (freep < 0) return 0;
+  undoAreaSetCheckForChange(UNDO_AREA_PATTERN, freep, UNDO_AREA_DIRTY_CHECK);
+  pattern[freep][2] = CMD_SETTEMPO;
+  pattern[freep][3] = f;
+  return 1;
 }
 
 static void wheelundo(GTUNDO_OBJECT *ed, int top, int control);
 #define CONTROL_BPM (FXNUM + 1)
 
-// BPM (standalone, RESO X2): the wheel changes the tempo a frame per row at
-// a time (up = faster; CTRL: two frames), as tempo commands do, so the BPM
+// BPM (standalone, every RESO): the wheel changes the tempo a frame per row
+// at a time (up = faster; CTRL: two frames), as tempo commands do, so the BPM
 // goes in the steps the player has (3 frames a row is the fastest). While
 // playing every channel gets it at once; the song starts with it too
 static void bpmwheel(int d)
 {
   GTUNDO_OBJECT *ed;
   double now;
-  int top, f, c;
+  int top, f, c, stored;
 
   if ((isplaying()) && (!playstarting()))
   {
@@ -570,7 +583,7 @@ static void bpmwheel(int d)
   f = clampvalue((int)(now + 0.5) - d, 3, 0x7f);
   top = currentUndoPosition;
   ed = undoCreateEditorInfo();
-  setstarttempo(f);
+  stored = setstarttempo(f);
   if (isplaying())
   {
     sound_lockplayer();
@@ -584,7 +597,10 @@ static void bpmwheel(int d)
     if (editorInfo.multiplier) fps *= editorInfo.multiplier;
     else fps /= 2;
     bpm = fps * 60.0 / (f * (stepsize > 0 ? stepsize : 4));
-    gui_message("%.1f BPM (tempo %d frames a row)%s", bpm, f, ((f == 3) && (d > 0)) ? ": the fastest" : "");
+    if (!stored)
+      gui_message("%.1f BPM (tempo %d) until stopped: no room for a tempo command on row 00", bpm, f);
+    else
+      gui_message("%.1f BPM (tempo %d frames a row)%s", bpm, f, ((f == 3) && (d > 0)) ? ": the fastest" : "");
   }
 }
 #endif
@@ -1163,10 +1179,12 @@ void retro_printstatus(void)
   printtextcentered(RESOCENTER, 35, CTITLE, "RESO");
   printtextcentered(RESOCENTER, 36, CEDIT, (resomode == 3) ? "X3" : (resomode == 2) ? "X2" : "OFF");
 
-  // SPEED / BPM under CHN3 with X2
+  // SPEED under CHN3 with X2 (plugin), BPM there at every RESO (standalone)
   printblankc(SPDCOLUMN, 35, CNORMAL, SPDWIDTH);
   printblankc(SPDCOLUMN, 36, CNORMAL, SPDWIDTH);
+#ifdef GT_PLUGIN
   if (resomode == 2)
+#endif
   {
 #ifdef GT_PLUGIN
     printtextcentered(FXCENTER, 35, CTITLE, "SPEED");
@@ -1365,7 +1383,7 @@ static int retrowheel(void)
   int d = -mousewheel;
   int c;
 
-  // SPEED (plugin) / BPM (standalone) under CHN3, with RESO X2
+  // SPEED (plugin, RESO X2) / BPM (standalone) under CHN3
   if (overspeed())
   {
 #ifdef GT_PLUGIN

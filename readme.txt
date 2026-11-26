@@ -517,15 +517,17 @@ RESO X2 (songs made with the earlier DOUBLE button open as X2) and holds the
 tempo the song starts with. Each change is one undo step. X3 (three times the
 rows) is gone; a song made with it still shows X3 and a click turns it off.
 
-With X2 a control appears under CHN3. In the standalone program it is BPM:
-the song's tempo, and the mouse wheel over it changes it while the song plays
+Under CHN3 the standalone program shows BPM, at every RESO: the song's
+tempo, and the mouse wheel over it changes it, also while the song plays
 (CTRL+wheel: two steps at a time). As with tempo commands the steps are whole
 frames per row, so the BPM goes in the steps the player has (at X2 on PAL
 with the highlight step 4: 125, 93.8, 75, 62.5... BPM; three frames a row is
 the fastest). The song starts with the new tempo too: its tempo command on
-the first row, or else the tempo of instrument $3F.
+the first row, or else the tempo of instrument $3F. A song with neither gets
+a tempo command (F) on the first row of the first track whose command column
+is empty there.
 
-In the plugin it is SPEED (default 32): while following the DAW (DAW SYNC)
+In the plugin, with X2, the control under CHN3 is SPEED (default 32): while following the DAW (DAW SYNC)
 the two rows of each pair (the beat's row from before X2 and the one put in
 between) are no longer equally long. The in-between row starts where the
 funktempo command E01 with speed table values 00 / SPEED would start it: the
