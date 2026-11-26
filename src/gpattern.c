@@ -187,8 +187,8 @@ static int playbackjump(int row)
 }
 
 // MIDI CC 1 (the mod wheel) in the tracker: the pattern editor goes to a
-// row of the cursor's pattern, 0-127 over its rows (0 = the first row, 127
-// = the last). While the song plays and the editor follows it the playback
+// row of the cursor's pattern over the wheel's travel: up (127) = the first
+// row, down (0) = the last. While the song plays and the editor follows it the playback
 // goes there too, as with HOME / END. In the SID designer CC 1 is the PW
 // slider instead (gui_designermidicc())
 void patternmodwheel(int value)
@@ -199,7 +199,7 @@ void patternmodwheel(int value)
   if (len < 1) return;
   if (value < 0) value = 0;
   if (value > 127) value = 127;
-  row = (value * (len - 1) + 63) / 127;
+  row = ((127 - value) * (len - 1) + 63) / 127;
   if (row == editorInfo.eppos) return;
   if (playbackjump(row)) return;
   editorInfo.eppos = row;
