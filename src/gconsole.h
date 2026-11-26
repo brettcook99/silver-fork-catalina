@@ -23,6 +23,7 @@
 #define MENUCMD_PLAYSTOP 4
 #define MENUCMD_SELECTALL 5
 #define MENUCMD_IMPORTMIDI 6
+#define MENUCMD_SELECTALLCHN 7
 
 // Modifier bits of a queued key event
 #define KMOD_GT_SHIFT 1

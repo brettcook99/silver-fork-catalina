@@ -217,7 +217,8 @@ int input_nextkey(void)
       break;
 
       case SDLK_a:
-      menucommand = MENUCMD_SELECTALL;
+      // CMD+SHIFT+A: all three channels
+      menucommand = shiftonlypressed ? MENUCMD_SELECTALLCHN : MENUCMD_SELECTALL;
       rawkey = 0;
       break;
 

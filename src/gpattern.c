@@ -44,6 +44,185 @@ int cmdcopyrows = 0;
 //int editorInfo.epmarkstart;
 //int editorInfo.epmarkend;
 
+// CMD+SHIFT+A (CTRL+SHIFT+A): the rows of all three channels marked, from
+// row 00 to the end of the longest pattern shown (patternmarkall()). It is
+// the usual mark (epmarkchn, epmarkstart, epmarkend: the cursor channel's)
+// plus this flag, and ends when that mark ends or changes
+// (patternmarkedall()). Copy, cut, paste, DEL / BACKSPACE, ALT+DEL and the
+// transposes (SHIFT+Q/A/W/S, ALT+UP/DOWN, OCTAVE) work on all three
+static int markall = 0;
+static int markallchn, markallstart, markallend;
+// A copy of the three channels' marked rows: SHIFT+V pastes each into its
+// own channel from the cursor's row. A one-channel copy ends it
+static unsigned char markallcopy[MAX_CHN][MAX_PATTROWS*4];
+static int markallcopyrows[MAX_CHN];
+static int markallcopied = 0;
+
+// Is the three-channel mark there?
+int patternmarkedall(void)
+{
+  if ((markall) && (editorInfo.epmarkchn == markallchn) && (editorInfo.epmarkchn >= 0) &&
+      (editorInfo.epmarkstart == markallstart) && (editorInfo.epmarkend == markallend))
+    return 1;
+  markall = 0;
+  return 0;
+}
+
+// CMD+SHIFT+A: marks every row of the three patterns shown (again: unmarks)
+void patternmarkall(void)
+{
+  int c, longest = 0;
+
+  if (patternmarkedall())
+  {
+    editorInfo.epmarkchn = -1;
+    markall = 0;
+    gui_message("Unmarked");
+    return;
+  }
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    int len = pattlen[editorUndoInfo.editorInfo[c].epnum];
+    if (len > longest) longest = len;
+  }
+  if (longest < 1) return;
+  editorInfo.epmarkchn = editorInfo.epchn;
+  editorInfo.epmarkstart = 0;
+  editorInfo.epmarkend = longest - 1;
+  markall = 1;
+  markallchn = editorInfo.epmarkchn;
+  markallstart = editorInfo.epmarkstart;
+  markallend = editorInfo.epmarkend;
+  gui_message("All three channels marked, rows 00-%02X (CMD+SHIFT+A again: unmark)", longest - 1);
+}
+
+// The three-channel mark's rows in channel c's pattern: first and last
+// (returns 0 if it has none of them)
+static int markallrows(int c, int *first, int *last)
+{
+  int p = editorUndoInfo.editorInfo[c].epnum;
+
+  *first = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkstart : editorInfo.epmarkend;
+  *last = (editorInfo.epmarkstart <= editorInfo.epmarkend) ? editorInfo.epmarkend : editorInfo.epmarkstart;
+  if (*first < 0) *first = 0;
+  if (*last >= pattlen[p]) *last = pattlen[p] - 1;
+  return *first <= *last;
+}
+
+static void patternclearmarked(int commands);
+
+// A key with all three channels marked: copy, cut, clear, note-offs out and
+// transposes go to every channel. Returns 1 if the key was one of them
+static int markallcommand(void)
+{
+  int c, d, first, last;
+
+  // ALT+DEL / ALT+BACKSPACE: the note-offs of the marked rows
+  if (((rawkey == KEY_DEL) || (rawkey == KEY_BACKSPACE)) && (altpressed) && (!ctrlpressed))
+  {
+    int removed = 0;
+    for (c = 0; c < MAX_CHN; c++)
+    {
+      int p = editorUndoInfo.editorInfo[c].epnum;
+      if (!markallrows(c, &first, &last)) continue;
+      undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+      for (d = first; d <= last; d++)
+      {
+        if (pattern[p][d*4] == KEYOFF)
+        {
+          pattern[p][d*4] = REST;
+          removed++;
+        }
+      }
+    }
+    gui_message("Note-offs removed from the marked rows of all three channels: %d", removed);
+    return 1;
+  }
+  // DEL / BACKSPACE: clears the marked rows (SHIFT: their commands too)
+  if ((rawkey == KEY_DEL) || ((rawkey == KEY_BACKSPACE) && (!ctrlpressed) && (!altpressed)))
+  {
+    for (c = 0; c < MAX_CHN; c++)
+    {
+      undoAreaSetCheckForChange(UNDO_AREA_PATTERN, editorUndoInfo.editorInfo[c].epnum, UNDO_AREA_DIRTY_CHECK);
+      editorInfo.epmarkchn = c;
+      patternclearmarked(shiftpressed);
+    }
+    editorInfo.epmarkchn = markallchn;
+    return 1;
+  }
+  if (!shiftpressed) return 0;
+  switch (rawkey)
+  {
+    // Copy / cut: each channel's marked rows; the mark ends, as a copy's does
+    case KEY_C:
+    case KEY_X:
+    for (c = 0; c < MAX_CHN; c++)
+    {
+      int p = editorUndoInfo.editorInfo[c].epnum;
+      markallcopyrows[c] = 0;
+      if (!markallrows(c, &first, &last)) continue;
+      if (rawkey == KEY_X) undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+      for (d = first; d <= last; d++)
+      {
+        memcpy(&markallcopy[c][(d - first) * 4], &pattern[p][d*4], 4);
+        if (rawkey == KEY_X)
+        {
+          pattern[p][d*4] = REST;
+          pattern[p][d*4+1] = 0;
+          pattern[p][d*4+2] = 0;
+          pattern[p][d*4+3] = 0;
+        }
+      }
+      markallcopyrows[c] = last - first + 1;
+    }
+    markallcopied = 1;
+    editorInfo.epmarkchn = -1;
+    markall = 0;
+    gui_message("%s the marked rows of all three channels (SHIFT+V pastes them)", (rawkey == KEY_X) ? "Cut" : "Copied");
+    return 1;
+
+    // Transposes: halfstep (Q / A) or octave (W / S) up / down
+    case KEY_Q:
+    case KEY_A:
+    case KEY_W:
+    case KEY_S:
+    if (ctrlpressed) return 0;
+    {
+      int steps = ((rawkey == KEY_W) || (rawkey == KEY_S)) ? 12 : 1;
+      if ((rawkey == KEY_A) || (rawkey == KEY_S)) steps = -steps;
+      patterntranspose(steps);
+      gui_message("Marked rows of all three channels: %s %s", ((steps == 12) || (steps == -12)) ? "octave" : "halfstep",
+        (steps > 0) ? "up" : "down");
+    }
+    return 1;
+  }
+  return 0;
+}
+
+// SHIFT+V after a three-channel copy: each channel's rows into its own
+// pattern from the cursor's row (as far as each pattern goes)
+static void markallpaste(void)
+{
+  int c, d, most = 0;
+
+  for (c = 0; c < MAX_CHN; c++)
+  {
+    int p = editorUndoInfo.editorInfo[c].epnum;
+    undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+    for (d = 0; d < markallcopyrows[c]; d++)
+    {
+      int row = editorInfo.eppos + d;
+      if (row >= pattlen[p]) break;
+      memcpy(&pattern[p][row*4], &markallcopy[c][d*4], 4);
+    }
+    if (markallcopyrows[c] > most) most = markallcopyrows[c];
+  }
+  editorInfo.eppos += most;
+  if (editorInfo.eppos > pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum])
+    editorInfo.eppos = pattlen[editorUndoInfo.editorInfo[editorInfo.epchn].epnum];
+  gui_message("Pasted on all three channels");
+}
+
 // The note a note key plays with the current key layout and octave
 // (FIRSTNOTE...LASTNOTE), -1 if the key is not a note key
 int notekeytonote(int key)
@@ -417,13 +596,26 @@ static void patternalttranspose(int dir)
   int octave = shiftonlypressed;
   int patt = patterntranspose(octave ? dir * 12 : dir);
 
-  gui_message("%s %02X: %s %s", marked ? "Marked rows of pattern" : "Pattern", patt,
-    octave ? "octave" : "halfstep", (dir > 0) ? "up" : "down");
+  if (patternmarkedall())
+    gui_message("Marked rows of all three channels: %s %s", octave ? "octave" : "halfstep", (dir > 0) ? "up" : "down");
+  else
+    gui_message("%s %02X: %s %s", marked ? "Marked rows of pattern" : "Pattern", patt,
+      octave ? "octave" : "halfstep", (dir > 0) ? "up" : "down");
 }
 
 void patterncommands(void)
 {
   int c, scrrep;
+
+  // CTRL+SHIFT+A (CMD+SHIFT+A on macOS comes as a menu command): all three
+  // channels marked
+  if ((rawkey == KEY_A) && (ctrlpressed) && (shiftonlypressed) && (!altpressed))
+  {
+    patternmarkall();
+    return;
+  }
+  // All three channels marked: copy, cut, clear, transposes on all three
+  if ((patternmarkedall()) && (markallcommand())) return;
 
   // ALT+DEL / ALT+BACKSPACE: no note-offs (see patternremovekeyoffs())
   if (((rawkey == KEY_DEL) || (rawkey == KEY_BACKSPACE)) && (altpressed) && (!ctrlpressed))
@@ -1171,6 +1363,7 @@ void patterncommands(void)
     case KEY_X:
     if (shiftpressed)
     {
+      markallcopied = 0;
       if (editorInfo.epmarkchn != -1)
       {
         if (editorInfo.epmarkstart <= editorInfo.epmarkend)
@@ -1244,6 +1437,11 @@ void patterncommands(void)
     break;
 
     case KEY_V:
+    if ((shiftpressed) && (markallcopied))
+    {
+      markallpaste();
+      break;
+    }
     if ((shiftpressed) && (patterncopyrows))
     {
       for (c = 0; c < patterncopyrows; c++)
@@ -1975,6 +2173,29 @@ int patterntranspose(int steps)
   int first = 0;
   int last = pattlen[patt] - 1;
   int c;
+
+  // All three channels marked: each one's marked rows (their patterns
+  // marked for undo here)
+  if (patternmarkedall())
+  {
+    int k;
+    for (k = 0; k < MAX_CHN; k++)
+    {
+      int p = editorUndoInfo.editorInfo[k].epnum;
+      if (!markallrows(k, &first, &last)) continue;
+      undoAreaSetCheckForChange(UNDO_AREA_PATTERN, p, UNDO_AREA_DIRTY_CHECK);
+      for (c = first; c <= last; c++)
+      {
+        int note = pattern[p][c * 4];
+        if ((note < FIRSTNOTE) || (note > LASTNOTE)) continue;
+        note += steps;
+        if (note > LASTNOTE) note = LASTNOTE;
+        if (note < FIRSTNOTE) note = FIRSTNOTE;
+        pattern[p][c * 4] = (unsigned char)note;
+      }
+    }
+    return patt;
+  }
 
   if (editorInfo.epmarkchn != -1)
   {

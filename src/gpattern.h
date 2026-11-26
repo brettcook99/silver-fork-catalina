@@ -96,6 +96,9 @@ void patternmodwheel(int value);
 // Transposes the marked rows' notes (nothing marked: the cursor channel's
 // pattern) by steps halfsteps. Returns the pattern number
 int patterntranspose(int steps);
+// CMD+SHIFT+A: all three channels marked (again: unmarked); is it so?
+void patternmarkall(void);
+int patternmarkedall(void);
 // Edit mode, following the playback in the pattern editor: a note played is
 // recorded on the row it sounds in, not at the cursor (which is on the next
 // row the player reads: a note entered there sounded twice, at once and

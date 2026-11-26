@@ -1214,7 +1214,7 @@ void retro_printstatus(void)
       printtext(10+c*15, PATTROWY+d, color, &textbuffer[8]);
       printtext(12+c*15, PATTROWY+d, color2, &textbuffer[10]);
       printtext(13+c*15, PATTROWY+d, color, &textbuffer[11]);
-      if (c == editorInfo.epmarkchn)
+      if ((c == editorInfo.epmarkchn) || ((patternmarkedall()) && (p < pattlen[editorUndoInfo.editorInfo[c].epnum])))
       {
         if (editorInfo.epmarkstart <= editorInfo.epmarkend)
         {
