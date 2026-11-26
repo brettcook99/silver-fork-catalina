@@ -67,13 +67,9 @@ int recordmode = 0;
 //   row of the first one; keys beyond the last channel are left out
 // The turn starts again at the first channel when the cursor has been
 // moved. MIDI CURSOR on 1 pattern is the usual input: every note goes to the
-// cursor's channel. The plugin starts with MIDI INPUT 1 (channels 1-3 play
-// voices 1-3), the standalone program with MIDI CURSOR
-#ifdef GT_PLUGIN
-int midiinputsel = 1;
-#else
+// cursor's channel. Both the plugin and the standalone program start with
+// MIDI CURSOR (Scott's list: the first choice; the plugin had MIDI INPUT 1)
 int midiinputsel = 0;
-#endif
 int midichord = 1;
 int midichncount[MAX_CHN] = {1, 1, 1};
 // STEPS (0-16): rows skipped after a note is entered, so that the cursor
