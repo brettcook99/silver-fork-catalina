@@ -46,5 +46,8 @@ void sound_closeoutput(void);
 #endif
 void sound_unlockplayer(void);
 void sound_flush(void);
+// The standalone program (reSID): the speed multiplier changed while playing
+unsigned sound_multiplier(void);
+int sound_setmultiplier(unsigned multiplier, unsigned ntsc);
 
 #endif

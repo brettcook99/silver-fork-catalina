@@ -721,16 +721,115 @@ static int setstarttempo(int f)
 
 static void wheelundo(GTUNDO_OBJECT *ed, int top, int control);
 #define CONTROL_BPM (FXNUM + 1)
+#define BPMMULTIPLIERS 16                  // The speed multiplier goes up to 16x
 
-// BPM (standalone, every RESO): the wheel changes the tempo a frame per row
-// at a time (up = faster; CTRL: two frames), as tempo commands do, so the BPM
-// goes in the steps the player has (3 frames a row is the fastest). While
-// playing every channel gets it at once; the song starts with it too
+// The highest HR/gate timer of the instruments the patterns use, instrument
+// 1 (each channel starts with it) and the cursor's (notes played get it):
+// the player reads a channel's next row when the channel's frame counter,
+// going down from the tempo, reaches the gate timer of its instrument, so a
+// tempo (frames a row) must be more than that, or the channel stops at that
+// row (the C64 player too). The number of the instrument goes to *ins
+static int highestgatetimer(int *ins)
+{
+  unsigned char used[MAX_INSTR];
+  int p, r, i, g = -1;
+
+  memset(used, 0, sizeof used);
+  used[1] = 1;
+  if ((editorInfo.einum > 0) && (editorInfo.einum < MAX_INSTR - 1)) used[editorInfo.einum] = 1;
+  for (p = 0; p < MAX_PATT; p++)
+  {
+    for (r = 0; r < pattlen[p]; r++)
+    {
+      int n = pattern[p][r*4+1];
+      if ((n > 0) && (n < MAX_INSTR)) used[n] = 1;
+    }
+  }
+  *ins = 1;
+  for (i = 1; i < MAX_INSTR; i++)
+  {
+    if ((used[i]) && ((instr[i].gatetimer & 0x3f) > g))
+    {
+      g = instr[i].gatetimer & 0x3f;
+      *ins = i;
+    }
+  }
+  return (g < 0) ? 0 : g;
+}
+
+// The fewest frames a row the BPM goes to: 3 (the player's least), more
+// than the highest gate timer, and 6 with 4 rows a beat (24 frames a beat
+// at any STEPS): so each speed multiplier reaches 125 BPM times itself (PAL,
+// NTSC 150), and faster needs the next multiplier
+#define BPMFRAMESABEAT 24
+static int fastesttempo(int *gatelimited, int *ins)
+{
+  int s = (stepsize > 0) ? stepsize : 4;
+  int f = (BPMFRAMESABEAT + s - 1) / s;
+  int g = highestgatetimer(ins) + 1;
+
+  *gatelimited = (g > f) && (g > 3);
+  if (f < g) f = g;
+  if (f < 3) f = 3;
+  return f;
+}
+
+// BPM at speed multiplier m (0 = 25 Hz) and a tempo of f frames a row
+static double tempobpm(int m, double f)
+{
+  double fps = editorInfo.ntsc ? 60.0 : 50.0;
+
+  if (m) fps *= m;
+  else fps /= 2;
+  return fps * 60.0 / (f * (stepsize > 0 ? stepsize : 4));
+}
+
+// The BPM values the wheel goes through: each speed multiplier m from 1x to
+// 16x with its tempos from the fastest down to 127 frames a row (1x), or (2x
+// on) down to where the multiplier before it reaches. The step after bpm,
+// faster (d > 0) or slower: its multiplier and tempo. Returns 0 if there is
+// none (the fastest, the slowest)
+static int nextbpm(double bpm, int d, int fastest, int *mult, int *tempo)
+{
+  int m, f, found = 0;
+  double best = 0.0;
+
+  for (m = 1; m <= BPMMULTIPLIERS; m++)
+  {
+    double below = (m > 1) ? tempobpm(m - 1, fastest) : 0.0;
+
+    for (f = fastest; f <= 0x7f; f++)
+    {
+      double b = tempobpm(m, f);
+
+      if (b <= below + 0.0001) break;
+      if ((d > 0) ? (b > bpm + 0.0001) && ((!found) || (b < best)) : (b < bpm - 0.0001) && ((!found) || (b > best)))
+      {
+        best = b;
+        *mult = m;
+        *tempo = f;
+        found = 1;
+      }
+    }
+  }
+  return found;
+}
+
+// BPM (standalone, every RESO): the wheel goes a step faster or slower
+// (CTRL: two steps) through the BPM values the player has: the tempo (frames
+// a row) as tempo commands set it, and past 125 BPM (1x, PAL; NTSC 150) the
+// speed multiplier, as Scott asked: 2x up to 250 BPM, 3x to 375 and so on up
+// to 16x; slower the multiplier comes down again. The multiplier makes
+// everything faster (tables, vibrato...), as the title bar's does. A 25 Hz
+// song keeps 25 Hz and only its tempo changes. While playing every channel
+// gets the tempo at once; the song starts with it too
 static void bpmwheel(int d)
 {
   GTUNDO_OBJECT *ed;
-  double now;
-  int top, f, c, stored;
+  double now, bpm;
+  int top, f, c, stored, m, gatelimited, ins, step, fastest;
+  int n = (d > 0) ? d : -d;
+  char mult[8];
 
   if ((isplaying()) && (!playstarting()))
   {
@@ -738,9 +837,40 @@ static void bpmwheel(int d)
     now = (cptr->tempo >= 2) ? cptr->tempo + 1 : (funktable[0] + funktable[1] + 2) / 2.0;
   }
   else now = starttempo();
-  f = clampvalue((int)(now + 0.5) - d, 3, 0x7f);
+  fastest = fastesttempo(&gatelimited, &ins);
+  m = editorInfo.multiplier;
+  f = (int)(now + 0.5);
+  if (!m)
+  {
+    f = clampvalue(f - d, fastest, 0x7f);
+    step = (f != (int)(now + 0.5)) || (now != (int)now);
+  }
+  else
+  {
+    bpm = tempobpm(m, now);
+    for (step = 0; step < n; step++)
+    {
+      if (!nextbpm(bpm, d, fastest, &m, &f)) break;
+      bpm = tempobpm(m, f);
+    }
+  }
+  // Nowhere to go
+  if (!step)
+  {
+    bpm = tempobpm(m, now);
+    if (d < 0) gui_message("%.1f BPM is the slowest", bpm);
+    else if (gatelimited)
+      gui_message("%.1f BPM is the fastest: instrument %02X has HR/gate timer %02X", bpm, ins, instr[ins].gatetimer & 0x3f);
+    else gui_message("%.1f BPM is the fastest", bpm);
+    return;
+  }
   top = currentUndoPosition;
   ed = undoCreateEditorInfo();
+  if (m != (int)editorInfo.multiplier)
+  {
+    editorInfo.multiplier = m;
+    multipliersync();
+  }
   stored = setstarttempo(f);
   if (isplaying())
   {
@@ -749,17 +879,13 @@ static void bpmwheel(int d)
     sound_unlockplayer();
   }
   wheelundo(ed, top, CONTROL_BPM);
-  {
-    double fps = editorInfo.ntsc ? 60.0 : 50.0;
-    double bpm;
-    if (editorInfo.multiplier) fps *= editorInfo.multiplier;
-    else fps /= 2;
-    bpm = fps * 60.0 / (f * (stepsize > 0 ? stepsize : 4));
-    if (!stored)
-      gui_message("%.1f BPM (tempo %d) until stopped: no room for a tempo command on row 00", bpm, f);
-    else
-      gui_message("%.1f BPM (tempo %d frames a row)%s", bpm, f, ((f == 3) && (d > 0)) ? ": the fastest" : "");
-  }
+  bpm = tempobpm(m, f);
+  if (m) sprintf(mult, "%dx", m);
+  else strcpy(mult, "25 Hz");
+  if (!stored)
+    gui_message("%.1f BPM (tempo %d, %s) until stopped: no room for a tempo command on row 00", bpm, f, mult);
+  else
+    gui_message("%.1f BPM (tempo %d frames a row, %s)", bpm, f, mult);
 }
 #endif
 

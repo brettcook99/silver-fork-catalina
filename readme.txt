@@ -520,12 +520,23 @@ rows) is gone; a song made with it still shows X3 and a click turns it off.
 Under CHN3 the standalone program shows BPM, at every RESO: the song's
 tempo, and the mouse wheel over it changes it, also while the song plays
 (CTRL+wheel: two steps at a time). As with tempo commands the steps are whole
-frames per row, so the BPM goes in the steps the player has (at X2 on PAL
-with the highlight step 4: 125, 93.8, 75, 62.5... BPM; three frames a row is
-the fastest). The song starts with the new tempo too: its tempo command on
+frames per row, so the BPM goes in the steps the player has. At 1x the
+fastest is 125 BPM on PAL (150 on NTSC; six frames a row with the highlight
+step 4); faster, the speed multiplier in the title bar goes up with it: 2x
+goes up to 250 BPM (136.4, 150, 166.7, 187.5, 214.3, 250), 3x to 375 and so
+on up to 2000 BPM at 16x. Slower, the multiplier comes down again, and below
+125 BPM it is 1x (107.1, 93.8, 83.3... BPM). The multiplier runs the whole
+player that many times a frame, so the instruments' tables, vibrato and
+slides go faster too, as with the title bar's multiplier. A song at 25 Hz
+stays at 25 Hz. A row is read when a channel's frame count reaches the gate
+timer of its instrument, so the tempo always stays more frames than the
+highest HR/gate timer of the instruments the song uses (new instruments get
+2 per 1x of multiplier): the message names the instrument when that is what
+stops the BPM. The song starts with the new tempo too: its tempo command on
 the first row, or else the tempo of instrument $3F. A song with neither gets
 a tempo command (F) on the first row of the first track whose command column
-is empty there.
+is empty there. The multiplier is saved with the song. Each turn of the
+wheel is one undo step (quick turns together).
 
 In the plugin, with X2, the control under CHN3 is SPEED: the right value of the speed table's row 01
 (SPEEDTBL 01), which X2 sets to 00 32 when the row is empty. If the song

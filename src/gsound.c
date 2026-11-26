@@ -130,18 +130,12 @@ void sound_flush(void)
 }
 
 #else
+// The speed multiplier the player's frames run at (0 = 25 Hz)
+static unsigned soundmultiplier = 1;
 
-int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsigned model, unsigned ntsc, unsigned multiplier, unsigned catweasel, unsigned interpolate, unsigned customclockrate)
+// The player's frame rate for the speed multiplier
+static void setframerate(unsigned multiplier, unsigned ntsc)
 {
-  int c;
-
-  #ifdef __WIN32__
-  if (!flushmutex)
-      flushmutex = SDL_CreateMutex();
-  #endif
-
-  sound_uninit();
-
   if (multiplier)
   {
     if (ntsc)
@@ -168,6 +162,21 @@ int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsig
       snd_bpmtempo = 125 / 2;
     }
   }
+  soundmultiplier = multiplier;
+}
+
+int sound_init(unsigned b, unsigned mr, unsigned writer, unsigned hardsid, unsigned model, unsigned ntsc, unsigned multiplier, unsigned catweasel, unsigned interpolate, unsigned customclockrate)
+{
+  int c;
+
+  #ifdef __WIN32__
+  if (!flushmutex)
+      flushmutex = SDL_CreateMutex();
+  #endif
+
+  sound_uninit();
+
+  setframerate(multiplier, ntsc);
 
   if (hardsid)
   {
@@ -411,6 +420,25 @@ void sound_lockplayer(void)
 void sound_unlockplayer(void)
 {
   snd_unlock();
+}
+
+// The speed multiplier the player's frames run at now
+unsigned sound_multiplier(void)
+{
+  return soundmultiplier;
+}
+
+// A new speed multiplier while the sound plays on (the BPM wheel, undo):
+// reSID only needs the player's frames at the new rate, so the SID isn't
+// made again (no click, the notes go on). Returns 0 where the whole sound
+// must start again (HardSID, CatWeasel: their timer)
+int sound_setmultiplier(unsigned multiplier, unsigned ntsc)
+{
+  if ((!initted) || (usehardsid) || (usecatweasel)) return 0;
+  sound_lockplayer();
+  setframerate(multiplier, ntsc);
+  sound_unlockplayer();
+  return 1;
 }
 
 // Closes the audio output, so that the next sound_init() opens it again
