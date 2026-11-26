@@ -1072,8 +1072,8 @@ static void preferencesdialog(void)
 
     // The MIDI devices: the input device's notes and knobs are used (every
     // device's if none is chosen), the controller device's buttons are the
-    // transport and it plays no notes (a device chosen as both is the
-    // controller)
+    // transport, its knobs work too and it plays no notes (a device chosen
+    // as both is the controller)
     ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
@@ -1121,8 +1121,8 @@ static void preferencesdialog(void)
     }
     if (midichanged) midi_setdevices();
     ImGui::Spacing();
-    body("The input device (a keyboard) plays and enters notes, and its knobs work. The controller device's buttons "
-      "are the transport and play no notes: PLAY (A#5) plays the song, CYCLE (D5) the pattern, STOP (A5) stops, "
+    body("The input device (a keyboard) plays and enters notes, and its knobs work. The controller device's knobs "
+      "work too (CC 60 chooses the instrument...); its buttons are the transport and play no notes: PLAY (A#5) plays the song, CYCLE (D5) the pattern, STOP (A5) stops, "
       "RECORD (B5) switches edit / jam mode, the cursor buttons (C6, C#6, D6, D#6: up, down, left, right) move the "
       "cursor; in the SID Designer they choose the tab and try the BROWSER's instruments. These are the notes a "
       "Mackie Control sends (C3 = middle C).");

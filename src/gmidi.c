@@ -5,8 +5,8 @@
 // its note on/off and control change messages from all channels are put into
 // a queue, which the editor reads once per frame. So are the note on / off
 // messages of the MIDI controller device chosen there (the transport
-// buttons), as MIDI_TRANSPORT: they play nothing. The sustain pedal (CC 64)
-// holds note offs. Notes are played at once as they are queued, by the
+// buttons), as MIDI_TRANSPORT: they play nothing (its knobs work as the
+// input device's). The sustain pedal (CC 64) holds note offs. Notes are played at once as they are queued, by the
 // editor's note hook (midi_setnotehook()): waiting for the editor's next
 // frame made them up to a frame late, unevenly.
 // The MIDI system calls us from its own thread, so the queue (and the
@@ -155,11 +155,17 @@ static void midi_handlemessage(int role, int status, int data1, int data2)
 {
   int channel = status & 0x0f;
 
-  // The controller device: only its buttons (notes, velocity 0 = let go)
+  // The controller device: its buttons (notes, velocity 0 = let go) and its
+  // knobs (control changes, as the input device's), not notes to play
   if (role == MIDIROLE_CONTROLLER)
   {
     if ((status & 0xf0) == 0x90) midi_pushevent_ch(MIDI_TRANSPORT, channel, data1, data2);
     else if ((status & 0xf0) == 0x80) midi_pushevent_ch(MIDI_TRANSPORT, channel, data1, 0);
+    else if ((status & 0xf0) == 0xb0)
+    {
+      if (data1 == 64) midi_sustainrelease(channel, data2);
+      else midi_pushevent_ch(MIDI_CONTROL, channel, data1, data2);
+    }
     return;
   }
   midi_inputmessage(status, data1, data2);

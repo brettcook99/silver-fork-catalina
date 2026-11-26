@@ -591,8 +591,9 @@ the DAW's transport).
 MIDI devices (Preferences, standalone program): "MIDI input device" is the
 keyboard whose notes are played and entered and whose knobs work (All
 devices: every one, as before). "MIDI controller device" is a controller
-whose buttons are the transport; it plays no notes, and a device chosen as
-both is the controller. Its buttons send notes, as a Mackie Control does
+whose buttons are the transport and whose knobs work as the input device's
+(CC 60 chooses the instrument and so on); it plays no notes, and a device
+chosen as both is the controller. Its buttons send notes, as a Mackie Control does
 (note names with middle C = C3; velocity 127 = pressed, 0 = let go):
 - PLAY (A#5, note 94): play the song from its start
 - CYCLE (D5, note 86): play the patterns shown from their start (F1)
