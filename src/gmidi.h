@@ -61,6 +61,19 @@ int midi_devicecount(void);
 // many steps up, 65-127 = (value - 64) steps down, 0 and 64 = none
 int midi_relativesteps(int value);
 
+// The sustain pedal (CC 64), per MIDI channel. midi_sustainnoteoff():
+// returns 1 if the pedal holds the note (its note off is kept back);
+// midi_sustainnoteon(): the key struck again. midi_sustainpedal(): a CC 64
+// value; returns how many notes the pedal let go (now to be turned off),
+// those into notes[] (128 at most). Not locked: the caller's thread only
+// (the standalone program holds midi_lock())
+int midi_sustainnoteoff(int channel, int note);
+void midi_sustainnoteon(int channel, int note);
+int midi_sustainpedal(int channel, int value, unsigned char *notes);
+// A message of the MIDI input device (status byte, two data bytes): notes,
+// the sustain pedal, knobs (standalone program)
+void midi_inputmessage(int status, int data1, int data2);
+
 #ifndef GMIDI_C
 extern unsigned midiinput;
 // Preferences: the device whose notes and knobs are used ("" = every

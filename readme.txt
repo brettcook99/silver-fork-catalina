@@ -421,8 +421,10 @@ BACKQUOTE   Select channel
 SPACE       Play from cursor position / stop
 RETURN      Go to the start of the song (stops the playback), as in a DAW
 CTRL+SHIFT+RET. or CAPSLOCK Insert keyoff, in any column (CMD+SHIFT+RETURN
-            too on macOS). The sustain pedal (MIDI CC 64) switches between
-            edit mode (down) and jam mode (up)
+            too on macOS). The sustain pedal (MIDI CC 64) works as on a
+            synth: while it is down (127) the notes of the keys let go keep
+            sounding, and they go off when it comes up (0). Each MIDI
+            channel has its own; it no longer switches edit / jam mode
 SHIFT+RET.  Insert keyon (on the note)
             Enter table (when cursor is over a table-utilizing command)
             Enter instrument (when cursor is over a nonzero instrument number)

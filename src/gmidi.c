@@ -5,7 +5,8 @@
 // its note on/off and control change messages from all channels are put into
 // a queue, which the editor reads once per frame. So are the note on / off
 // messages of the MIDI controller device chosen there (the transport
-// buttons), as MIDI_TRANSPORT: they play nothing. Notes are played at once as they are queued, by the
+// buttons), as MIDI_TRANSPORT: they play nothing. The sustain pedal (CC 64)
+// holds note offs. Notes are played at once as they are queued, by the
 // editor's note hook (midi_setnotehook()): waiting for the editor's next
 // frame made them up to a frame late, unevenly.
 // The MIDI system calls us from its own thread, so the queue (and the
@@ -98,6 +99,51 @@ int midi_eventassign(void)
 #define MIDIROLE_INPUT 1
 #define MIDIROLE_CONTROLLER 2
 
+// The pedal let go of notes: their note offs now
+static void midi_sustainrelease(int channel, int value)
+{
+  unsigned char notes[128];
+  int n, k;
+
+  midi_lock();
+  n = midi_sustainpedal(channel, value, notes);
+  midi_unlock();
+  for (k = 0; k < n; k++) midi_pushevent(MIDI_NOTEOFF, channel, notes[k], 0);
+}
+
+// A message of the input device (or the test hooks): notes, with the
+// sustain pedal (CC 64) holding note offs, and knobs
+void midi_inputmessage(int status, int data1, int data2)
+{
+  int channel = status & 0x0f;
+  int held;
+
+  switch (status & 0xf0)
+  {
+    case 0x90:
+    if (data2)
+    {
+      midi_lock();
+      midi_sustainnoteon(channel, data1);
+      midi_unlock();
+      midi_pushevent(MIDI_NOTEON, channel, data1, data2);
+      break;
+    }
+    // Note on with velocity 0 is a note off
+    case 0x80:
+    midi_lock();
+    held = midi_sustainnoteoff(channel, data1);
+    midi_unlock();
+    if (!held) midi_pushevent(MIDI_NOTEOFF, channel, data1, 0);
+    break;
+
+    case 0xb0:
+    if (data1 == 64) midi_sustainrelease(channel, data2);
+    else midi_pushevent(MIDI_CONTROL, channel, data1, data2);
+    break;
+  }
+}
+
 static void midi_handlemessage(int role, int status, int data1, int data2)
 {
   // The controller device: only its buttons (notes, velocity 0 = let go)
@@ -107,22 +153,7 @@ static void midi_handlemessage(int role, int status, int data1, int data2)
     else if ((status & 0xf0) == 0x80) midi_pushevent(MIDI_TRANSPORT, status & 0x0f, data1, 0);
     return;
   }
-
-  switch (status & 0xf0)
-  {
-    case 0x90:
-    // Note on with velocity 0 is a note off
-    midi_pushevent(data2 ? MIDI_NOTEON : MIDI_NOTEOFF, status & 0x0f, data1, data2);
-    break;
-
-    case 0x80:
-    midi_pushevent(MIDI_NOTEOFF, status & 0x0f, data1, 0);
-    break;
-
-    case 0xb0:
-    midi_pushevent(MIDI_CONTROL, status & 0x0f, data1, data2);
-    break;
-  }
+  midi_inputmessage(status, data1, data2);
 }
 
 int midi_getevent(int *note)
@@ -444,6 +475,13 @@ void midi_setdevices(void)
 // Other platforms: no MIDI input
 //
 
+void midi_inputmessage(int status, int data1, int data2)
+{
+  (void)status;
+  (void)data1;
+  (void)data2;
+}
+
 int midi_init(void)
 {
   return 0;
@@ -504,6 +542,47 @@ void midi_unlock(void)
 }
 
 #endif
+
+// The sustain pedal (MIDI CC 64), each MIDI channel's own, as on a synth:
+// while it is down a key let go keeps its note sounding, and the notes go
+// off when it comes up (a key struck again meanwhile gets its own note off).
+// A pedal may send many values while it is down: only crossing 64 counts.
+// A DAW that stops sends 0, which lets go of what the pedal still held
+static unsigned char sustaindown[16];
+static unsigned char sustainheld[16][128];
+
+int midi_sustainnoteoff(int channel, int note)
+{
+  channel &= 0xf;
+  if (!sustaindown[channel]) return 0;
+  sustainheld[channel][note & 0x7f] = 1;
+  return 1;
+}
+
+void midi_sustainnoteon(int channel, int note)
+{
+  sustainheld[channel & 0xf][note & 0x7f] = 0;
+}
+
+int midi_sustainpedal(int channel, int value, unsigned char *notes)
+{
+  int down = value >= 64;
+  int n = 0, k;
+
+  channel &= 0xf;
+  if (down == sustaindown[channel]) return 0;
+  sustaindown[channel] = down;
+  if (down) return 0;
+  for (k = 0; k < 128; k++)
+  {
+    if (sustainheld[channel][k])
+    {
+      sustainheld[channel][k] = 0;
+      notes[n++] = k;
+    }
+  }
+  return n;
+}
 
 int midi_relativesteps(int value)
 {
