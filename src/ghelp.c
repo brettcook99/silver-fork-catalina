@@ -31,6 +31,7 @@ void onlinehelp(int standalone,int context)
     "CMD+1-9    Same as F1-F9",
     "CMD+X,C,V  Cut,copy,paste",
     "CMD+A      Mark all",
+    "CMD+SHIFT+A Mark all 3 channels",
     "CMD+RET    Same as CTRL+RET",
     "CMD+F      Follow playback",
     "CMD+O,S    Load, save",

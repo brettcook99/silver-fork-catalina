@@ -1294,6 +1294,10 @@ int menucommands(void)
 			shiftpressed = 1;
 		}
 		break;
+
+	case MENUCMD_SELECTALLCHN:
+		runcommand(GTCMD_SELECTALLCHN, NULL);
+		return 1;
 	}
 	return 0;
 }
@@ -2876,6 +2880,12 @@ void runcommand(int cmd, const char *path)
 	case GTCMD_SELECTALL:
 		if ((editorInfo.editmode == EDIT_PATTERN) || (editorInfo.editmode == EDIT_ORDERLIST))
 			presskey(KEY_L, 'l', 1);
+		break;
+
+	// CMD+SHIFT+A: all three channels marked, from any editor
+	case GTCMD_SELECTALLCHN:
+		editorInfo.editmode = EDIT_PATTERN;
+		patternmarkall();
 		break;
 
 	case GTCMD_CLEARSONG:

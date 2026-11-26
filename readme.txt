@@ -468,6 +468,11 @@ SHIFT+I     Invert selection / whole pattern if no selection
 SHIFT+CRSR UP,DOWN Mark pattern
 SHIFT+CRSR LEFT,RIGHT Select pattern (as ALT+CRSR LEFT,RIGHT)
 SHIFT+L     Mark/unmark entire pattern
+CTRL+SHIFT+A Mark/unmark all three channels (CMD+SHIFT+A on macOS): every
+            row of the three patterns shown. Copy, cut, paste (each channel
+            into its own, from the cursor's row), DEL / BACKSPACE, ALT+DEL
+            and the transposes (SHIFT+Q/A/W/S, ALT+UP/DOWN, OCTAVE) then
+            work on all three
 SHIFT+M,N   Choose highlighting step size
 SHIFT+X,C,V Cut,copy,paste pattern
 SHIFT+E,R   Copy,paste commands

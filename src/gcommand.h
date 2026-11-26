@@ -110,6 +110,7 @@ enum
   GTCMD_IMPORTMODNOW,     // Import the module given as path (from the import dialog)
   GTCMD_EXPORTMOD,        // The song as a ProTracker module
   GTCMD_EXPORTMIDI,       // Save the song as a MIDI file
+  GTCMD_SELECTALLCHN,     // Mark all three channels (CMD+SHIFT+A)
 
   GTCMD_COUNT
 };

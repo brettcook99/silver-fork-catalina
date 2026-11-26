@@ -269,6 +269,7 @@ void macmenu_init(void)
     additem(edit, @"Paste", @"v", MOD_CMD, GTCMD_PASTE);
     additem(edit, @"Delete", @"", 0, GTCMD_DELETE);
     additem(edit, @"Select All", @"a", MOD_CMD, GTCMD_SELECTALL);
+    additem(edit, @"Select All Channels", @"a", MOD_CMD | MOD_SHIFT, GTCMD_SELECTALLCHN);
     [edit addItem:[NSMenuItem separatorItem]];
     additem(edit, @"Transpose Up", @"", 0, GTCMD_TRANSPOSEUP);
     additem(edit, @"Transpose Down", @"", 0, GTCMD_TRANSPOSEDOWN);
