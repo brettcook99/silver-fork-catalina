@@ -1043,8 +1043,6 @@ static void programmessage(int changed)
 void gtplugin_service(void)
 {
   GTRECORDNOTE rn;
-  static int passtop = -1;
-  static int passcount = -1;
 
   // The sustain pedal (CC 64) switched the mode (gtplugin_audio.c)
   if (gtsync_modechange)
@@ -1083,14 +1081,9 @@ void gtplugin_service(void)
       if (rn.instr) row[1] = (unsigned char)rn.instr;
     }
     undoAreaSetCheckForChange(UNDO_AREA_PATTERN, rn.patt, UNDO_AREA_DIRTY_CHECK);
-    if (undoValidateUndoAreas(ed))
-    {
-      // A recording pass is one undo step
-      if ((!rn.newpass) && (passtop == top) && (passcount == undoCounter - 1))
-        undoJoinStep(top);
-      passtop = currentUndoPosition;
-      passcount = undoCounter;
-    }
+    // A recording pass is one undo step (with the notes recorded through
+    // the editor, see recordpassundo())
+    if (undoValidateUndoAreas(ed)) recordpassundo(top, rn.newpass);
     else undoFreeUndoObject(ed);
   }
 

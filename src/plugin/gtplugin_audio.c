@@ -385,7 +385,6 @@ static void chase(double target)
     routedrecorded[c] = 0;
     startnote[c] = 0;
   }
-  recordpass = 1;
 
   // The song's first frame comes this many frames before its first row's
   // tick 0. The tempo it starts with is known after that frame
@@ -894,6 +893,9 @@ GTCORE_EXPORT void gtcore_process(float *left, float *right, int samples, const 
       following = 1;
       resync = 0;
       chase(warp(tp->ppq - offset));
+      // A recording pass lasts while the host plays: its loops and jumps
+      // (a chase too) don't start another
+      if (started) recordpass = 1;
       // Notes held while it was stopped are its first ones
       if ((started) && (heldcount))
       {
