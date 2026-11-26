@@ -298,9 +298,9 @@ int input_nextmidi(void)
     event = midi_getevent(&midinote);
     if (!event) return 0;
     // Control changes (knobs) go to the SID designer at once, if it is
-    // shown. In the tracker CC 60 chooses the instrument, CC 90 sets the
-    // value of the effect picked in the effects panel, the others are
-    // dropped
+    // shown. In the tracker CC 1 (the mod wheel) scrolls the pattern, CC 60
+    // chooses the instrument, CC 90 sets the value of the effect picked in
+    // the effects panel, the others are dropped
     if (event == MIDI_CONTROL)
     {
       // CC 64 (sustain pedal / footswitch): pressed (127) = edit mode,
@@ -321,6 +321,7 @@ int input_nextmidi(void)
         continue;
       }
       if (gui_designeractive()) gui_designermidicc(midinote, midi_eventvalue());
+      else if (midinote == 1) patternmodwheel(midi_eventvalue());
       else if (midinote == 60) instrumentknob(midi_eventvalue());
       else if (midinote == 90)
       {

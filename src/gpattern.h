@@ -92,6 +92,7 @@ void playpatternstart(int follow);
 void gotosongstart(void);
 void patternjump(int row);
 void patternscroll(int steps);
+void patternmodwheel(int value);
 // Transposes the marked rows' notes (nothing marked: the cursor channel's
 // pattern) by steps halfsteps. Returns the pattern number
 int patterntranspose(int steps);

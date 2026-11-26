@@ -156,6 +156,7 @@ void onlinehelp(int standalone,int context)
     "NUMPAD 1-8 Go to row 0,8,16...56",
     "CTRL+NUMPAD 1-3 Go to track 1-3",
     "Mouse wheel Scroll pattern",
+    "MIDI CC 1 (mod wheel) Go to a row",
     "SHIFT+CRSR Mark pattern",
     "Left mouse drag Mark rows (a click",
     "  puts the cursor on the row)",
