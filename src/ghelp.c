@@ -131,8 +131,8 @@ void onlinehelp(int standalone,int context)
     "  rows fall, as E01 would place them",
     "  (wheel or MIDI CC 90 over it)",
 #else
-    "BPM (X2, under CHN3): the wheel",
-    "  sets the tempo (CTRL: 2 steps)",
+    "BPM (under CHN3): the wheel sets",
+    "  the tempo (CTRL: 2 steps)",
 #endif
     "0-9 & A-F to enter commands",
     "SPC Play from cursor pos / stop",
